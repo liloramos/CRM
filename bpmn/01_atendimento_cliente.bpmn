@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_AtendimentoCliente" targetNamespace="https://chatbotcrm.local/bpmn" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="Process_AtendimentoCliente" name="Atendimento do Cliente" isExecutable="false">
+    <bpmn:documentation>Fluxo principal de atendimento via WhatsApp. Controla identificação do cliente, abertura de conversa diária, classificação de intenção, resposta automática, transferência para modo manual e encaminhamento para montagem de pedido.</bpmn:documentation>
+    <bpmn:startEvent id="Start_MensagemWhatsApp" name="Mensagem recebida no WhatsApp">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_CapturarMensagem" name="Capturar mensagem e identificar cliente">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_ClienteCadastrado" name="Cliente cadastrado?">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_CriarAtualizarCliente" name="Criar/atualizar customer">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_AbrirConversa" name="Abrir/recuperar conversation do dia">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ClassificarIntencao" name="Classificar intenção com IA">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_IAResolve" name="IA consegue resolver?">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+      <bpmn:outgoing>Flow_13</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_RespostaAutomatica" name="Responder automaticamente de forma humanizada">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_Pedido" name="Cliente quer fazer pedido?">
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+      <bpmn:outgoing>Flow_12</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_StatusPedidoAndamento" name="Atualizar status: pedido em andamento">
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_EncaminharMontagem" name="Encaminhar para montagem de pedido">
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="End_AtendimentoResolvido" name="Atendimento resolvido sem pedido">
+      <bpmn:incoming>Flow_12</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="Task_TransferirManual" name="Transferir para modo manual e alertar atendente">
+      <bpmn:incoming>Flow_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_14</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_OperadorResponde" name="Atendente assume conversa">
+      <bpmn:incoming>Flow_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_15</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="End_Manual" name="Conversa em atendimento manual">
+      <bpmn:incoming>Flow_15</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_MensagemWhatsApp" targetRef="Task_CapturarMensagem" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_CapturarMensagem" targetRef="Gateway_ClienteCadastrado" />
+    <bpmn:sequenceFlow id="Flow_3" name="Sim" sourceRef="Gateway_ClienteCadastrado" targetRef="Task_AbrirConversa" />
+    <bpmn:sequenceFlow id="Flow_4" name="Não" sourceRef="Gateway_ClienteCadastrado" targetRef="Task_CriarAtualizarCliente" />
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_CriarAtualizarCliente" targetRef="Task_AbrirConversa" />
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_AbrirConversa" targetRef="Task_ClassificarIntencao" />
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_ClassificarIntencao" targetRef="Gateway_IAResolve" />
+    <bpmn:sequenceFlow id="Flow_8" name="Sim" sourceRef="Gateway_IAResolve" targetRef="Task_RespostaAutomatica" />
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Task_RespostaAutomatica" targetRef="Gateway_Pedido" />
+    <bpmn:sequenceFlow id="Flow_10" name="Sim" sourceRef="Gateway_Pedido" targetRef="Task_StatusPedidoAndamento" />
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_StatusPedidoAndamento" targetRef="End_EncaminharMontagem" />
+    <bpmn:sequenceFlow id="Flow_12" name="Não" sourceRef="Gateway_Pedido" targetRef="End_AtendimentoResolvido" />
+    <bpmn:sequenceFlow id="Flow_13" name="Não / baixa confiança" sourceRef="Gateway_IAResolve" targetRef="Task_TransferirManual" />
+    <bpmn:sequenceFlow id="Flow_14" sourceRef="Task_TransferirManual" targetRef="Task_OperadorResponde" />
+    <bpmn:sequenceFlow id="Flow_15" sourceRef="Task_OperadorResponde" targetRef="End_Manual" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Process_AtendimentoCliente">
+    <bpmndi:BPMNPlane id="BPMNPlane_Process_AtendimentoCliente" bpmnElement="Process_AtendimentoCliente">
+      <bpmndi:BPMNShape id="Start_MensagemWhatsApp_di" bpmnElement="Start_MensagemWhatsApp">
+        <dc:Bounds x="80" y="220" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CapturarMensagem_di" bpmnElement="Task_CapturarMensagem">
+        <dc:Bounds x="160" y="195" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ClienteCadastrado_di" bpmnElement="Gateway_ClienteCadastrado">
+        <dc:Bounds x="410" y="213" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CriarAtualizarCliente_di" bpmnElement="Task_CriarAtualizarCliente">
+        <dc:Bounds x="500" y="90" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AbrirConversa_di" bpmnElement="Task_AbrirConversa">
+        <dc:Bounds x="705" y="195" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ClassificarIntencao_di" bpmnElement="Task_ClassificarIntencao">
+        <dc:Bounds x="945" y="195" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_IAResolve_di" bpmnElement="Gateway_IAResolve">
+        <dc:Bounds x="1190" y="213" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RespostaAutomatica_di" bpmnElement="Task_RespostaAutomatica">
+        <dc:Bounds x="1295" y="110" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Pedido_di" bpmnElement="Gateway_Pedido">
+        <dc:Bounds x="1545" y="128" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_StatusPedidoAndamento_di" bpmnElement="Task_StatusPedidoAndamento">
+        <dc:Bounds x="1645" y="65" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_EncaminharMontagem_di" bpmnElement="End_EncaminharMontagem">
+        <dc:Bounds x="1885" y="90" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_AtendimentoResolvido_di" bpmnElement="End_AtendimentoResolvido">
+        <dc:Bounds x="1665" y="235" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_TransferirManual_di" bpmnElement="Task_TransferirManual">
+        <dc:Bounds x="1295" y="310" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_OperadorResponde_di" bpmnElement="Task_OperadorResponde">
+        <dc:Bounds x="1535" y="310" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Manual_di" bpmnElement="End_Manual">
+        <dc:Bounds x="1780" y="335" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="116" y="238" />
+        <di:waypoint x="160" y="238" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="350" y="238" />
+        <di:waypoint x="410" y="238" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="460" y="238" />
+        <di:waypoint x="705" y="238" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="460" y="238" />
+        <di:waypoint x="480" y="238" />
+        <di:waypoint x="480" y="133" />
+        <di:waypoint x="500" y="133" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="690" y="133" />
+        <di:waypoint x="698" y="133" />
+        <di:waypoint x="698" y="238" />
+        <di:waypoint x="705" y="238" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="895" y="238" />
+        <di:waypoint x="945" y="238" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1135" y="238" />
+        <di:waypoint x="1190" y="238" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1240" y="238" />
+        <di:waypoint x="1268" y="238" />
+        <di:waypoint x="1268" y="153" />
+        <di:waypoint x="1295" y="153" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1485" y="153" />
+        <di:waypoint x="1545" y="153" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1595" y="153" />
+        <di:waypoint x="1620" y="153" />
+        <di:waypoint x="1620" y="108" />
+        <di:waypoint x="1645" y="108" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="1835" y="108" />
+        <di:waypoint x="1885" y="108" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_12_di" bpmnElement="Flow_12">
+        <di:waypoint x="1595" y="153" />
+        <di:waypoint x="1630" y="153" />
+        <di:waypoint x="1630" y="253" />
+        <di:waypoint x="1665" y="253" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_13_di" bpmnElement="Flow_13">
+        <di:waypoint x="1240" y="238" />
+        <di:waypoint x="1268" y="238" />
+        <di:waypoint x="1268" y="353" />
+        <di:waypoint x="1295" y="353" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_14_di" bpmnElement="Flow_14">
+        <di:waypoint x="1485" y="353" />
+        <di:waypoint x="1535" y="353" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_15_di" bpmnElement="Flow_15">
+        <di:waypoint x="1725" y="353" />
+        <di:waypoint x="1780" y="353" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

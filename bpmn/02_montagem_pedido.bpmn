@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_MontagemPedido" targetNamespace="https://chatbotcrm.local/bpmn" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="Process_MontagemPedido" name="Montagem de Pedido" isExecutable="false">
+    <bpmn:documentation>Fluxo de montagem de pedido para marmitas, bebidas e extras. Considera cardápio diário, itens esgotados, substituição, cálculo de preço, confirmação de dados, pagamento por Pix via chave/QR Code enviado pelo WhatsApp, recebimento de comprovante e aprovação humana antes da impressão.</bpmn:documentation>
+    <bpmn:startEvent id="Start_PedidoIniciado" name="Pedido iniciado">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_CarregarCardapio" name="Carregar cardápio do dia e disponibilidade">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ColetarItens" name="Coletar marmita, carne, extras e bebidas">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_ItemDisponivel" name="Itens disponíveis?">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="Task_SugerirSubstituicao" name="Sugerir substituição ou atualizar cardápio em tempo real">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_CalcularPreco" name="Calcular preço total e taxas">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_ConfirmarDados" name="Confirmar endereço, observações e horário">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_FormaPagamento" name="Confirmar forma de pagamento e orientar cliente">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_PagamentoPix" name="Cliente pagará por Pix?">
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+      <bpmn:outgoing>Flow_15</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_GerarPix" name="Enviar chave Pix / QR Code do restaurante">
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_AguardarConfirmacao" name="Aguardar comprovante no WhatsApp">
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_PixConfirmado" name="Comprovante recebido e conferido?">
+      <bpmn:incoming>Flow_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_13</bpmn:outgoing>
+      <bpmn:outgoing>Flow_14</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_Pendente" name="Marcar pagamento pendente / aguardar comprovante">
+      <bpmn:incoming>Flow_14</bpmn:incoming>
+      <bpmn:incoming>Flow_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_16</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_RevisaoAtendente" name="Atendente revisa e aprova pedido">
+      <bpmn:incoming>Flow_13</bpmn:incoming>
+      <bpmn:incoming>Flow_16</bpmn:incoming>
+      <bpmn:outgoing>Flow_17</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_CriarPedido" name="Criar pedido e atualizar status: pedido feito">
+      <bpmn:incoming>Flow_17</bpmn:incoming>
+      <bpmn:outgoing>Flow_18</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_PedidoFeito" name="Pedido pronto para impressão">
+      <bpmn:incoming>Flow_18</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_PedidoIniciado" targetRef="Task_CarregarCardapio" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_CarregarCardapio" targetRef="Task_ColetarItens" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_ColetarItens" targetRef="Gateway_ItemDisponivel" />
+    <bpmn:sequenceFlow id="Flow_4" name="Sim" sourceRef="Gateway_ItemDisponivel" targetRef="Task_CalcularPreco" />
+    <bpmn:sequenceFlow id="Flow_5" name="Não" sourceRef="Gateway_ItemDisponivel" targetRef="Task_SugerirSubstituicao" />
+    <bpmn:sequenceFlow id="Flow_6" sourceRef="Task_SugerirSubstituicao" targetRef="Task_ColetarItens" />
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_CalcularPreco" targetRef="Task_ConfirmarDados" />
+    <bpmn:sequenceFlow id="Flow_8" sourceRef="Task_ConfirmarDados" targetRef="Task_FormaPagamento" />
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Task_FormaPagamento" targetRef="Gateway_PagamentoPix" />
+    <bpmn:sequenceFlow id="Flow_10" name="Sim" sourceRef="Gateway_PagamentoPix" targetRef="Task_GerarPix" />
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_GerarPix" targetRef="Task_AguardarConfirmacao" />
+    <bpmn:sequenceFlow id="Flow_12" sourceRef="Task_AguardarConfirmacao" targetRef="Gateway_PixConfirmado" />
+    <bpmn:sequenceFlow id="Flow_13" name="Sim" sourceRef="Gateway_PixConfirmado" targetRef="Task_RevisaoAtendente" />
+    <bpmn:sequenceFlow id="Flow_14" name="Não / sem comprovante" sourceRef="Gateway_PixConfirmado" targetRef="Task_Pendente" />
+    <bpmn:sequenceFlow id="Flow_15" name="Não" sourceRef="Gateway_PagamentoPix" targetRef="Task_Pendente" />
+    <bpmn:sequenceFlow id="Flow_16" sourceRef="Task_Pendente" targetRef="Task_RevisaoAtendente" />
+    <bpmn:sequenceFlow id="Flow_17" sourceRef="Task_RevisaoAtendente" targetRef="Task_CriarPedido" />
+    <bpmn:sequenceFlow id="Flow_18" sourceRef="Task_CriarPedido" targetRef="End_PedidoFeito" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Process_MontagemPedido">
+    <bpmndi:BPMNPlane id="BPMNPlane_Process_MontagemPedido" bpmnElement="Process_MontagemPedido">
+      <bpmndi:BPMNShape id="Start_PedidoIniciado_di" bpmnElement="Start_PedidoIniciado">
+        <dc:Bounds x="80" y="230" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CarregarCardapio_di" bpmnElement="Task_CarregarCardapio">
+        <dc:Bounds x="160" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ColetarItens_di" bpmnElement="Task_ColetarItens">
+        <dc:Bounds x="410" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ItemDisponivel_di" bpmnElement="Gateway_ItemDisponivel">
+        <dc:Bounds x="665" y="223" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_SugerirSubstituicao_di" bpmnElement="Task_SugerirSubstituicao">
+        <dc:Bounds x="760" y="340" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CalcularPreco_di" bpmnElement="Task_CalcularPreco">
+        <dc:Bounds x="760" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ConfirmarDados_di" bpmnElement="Task_ConfirmarDados">
+        <dc:Bounds x="1000" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_FormaPagamento_di" bpmnElement="Task_FormaPagamento">
+        <dc:Bounds x="1240" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_PagamentoPix_di" bpmnElement="Gateway_PagamentoPix">
+        <dc:Bounds x="1490" y="223" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GerarPix_di" bpmnElement="Task_GerarPix">
+        <dc:Bounds x="1585" y="95" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AguardarConfirmacao_di" bpmnElement="Task_AguardarConfirmacao">
+        <dc:Bounds x="1825" y="95" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_PixConfirmado_di" bpmnElement="Gateway_PixConfirmado">
+        <dc:Bounds x="2075" y="113" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Pendente_di" bpmnElement="Task_Pendente">
+        <dc:Bounds x="1595" y="295" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RevisaoAtendente_di" bpmnElement="Task_RevisaoAtendente">
+        <dc:Bounds x="2210" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_CriarPedido_di" bpmnElement="Task_CriarPedido">
+        <dc:Bounds x="2450" y="205" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_PedidoFeito_di" bpmnElement="End_PedidoFeito">
+        <dc:Bounds x="2700" y="230" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="116" y="248" />
+        <di:waypoint x="160" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="350" y="248" />
+        <di:waypoint x="410" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="600" y="248" />
+        <di:waypoint x="665" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="715" y="248" />
+        <di:waypoint x="760" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="715" y="248" />
+        <di:waypoint x="738" y="248" />
+        <di:waypoint x="738" y="383" />
+        <di:waypoint x="760" y="383" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="950" y="383" />
+        <di:waypoint x="680" y="383" />
+        <di:waypoint x="680" y="248" />
+        <di:waypoint x="410" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="950" y="248" />
+        <di:waypoint x="1000" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="1190" y="248" />
+        <di:waypoint x="1240" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="1430" y="248" />
+        <di:waypoint x="1490" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1540" y="248" />
+        <di:waypoint x="1562" y="248" />
+        <di:waypoint x="1562" y="138" />
+        <di:waypoint x="1585" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="1775" y="138" />
+        <di:waypoint x="1825" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_12_di" bpmnElement="Flow_12">
+        <di:waypoint x="2015" y="138" />
+        <di:waypoint x="2075" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_13_di" bpmnElement="Flow_13">
+        <di:waypoint x="2125" y="138" />
+        <di:waypoint x="2168" y="138" />
+        <di:waypoint x="2168" y="248" />
+        <di:waypoint x="2210" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_14_di" bpmnElement="Flow_14">
+        <di:waypoint x="2125" y="138" />
+        <di:waypoint x="1860" y="138" />
+        <di:waypoint x="1860" y="338" />
+        <di:waypoint x="1595" y="338" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_15_di" bpmnElement="Flow_15">
+        <di:waypoint x="1540" y="248" />
+        <di:waypoint x="1568" y="248" />
+        <di:waypoint x="1568" y="338" />
+        <di:waypoint x="1595" y="338" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_16_di" bpmnElement="Flow_16">
+        <di:waypoint x="1785" y="338" />
+        <di:waypoint x="1998" y="338" />
+        <di:waypoint x="1998" y="248" />
+        <di:waypoint x="2210" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_17_di" bpmnElement="Flow_17">
+        <di:waypoint x="2400" y="248" />
+        <di:waypoint x="2450" y="248" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_18_di" bpmnElement="Flow_18">
+        <di:waypoint x="2640" y="248" />
+        <di:waypoint x="2700" y="248" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
