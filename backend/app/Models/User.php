@@ -7,13 +7,15 @@ use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\Contracts\PasskeyUser;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['company_id', 'name', 'email', 'password'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable implements PasskeyUser
 {
@@ -34,5 +36,79 @@ class User extends Authenticatable implements PasskeyUser
             'two_factor_confirmed_at' => 'datetime',
             /* @end-chisel-2fa */
         ];
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
+    }
+
+    public function roles(): BelongsToMany
+    {
+        return $this->belongsToMany(Role::class)->withTimestamps();
+    }
+
+    public function assignRole(Role|string $role): void
+    {
+        $roleModel = $role instanceof Role
+            ? $role
+            : Role::query()->where('name', $role)->firstOrFail();
+
+        $this->roles()->syncWithoutDetaching([$roleModel->id]);
+    }
+
+    /**
+     * @param  string|list<string>  $roles
+     */
+    public function hasRole(string|array $roles): bool
+    {
+        $roleNames = is_array($roles) ? $roles : [$roles];
+
+        return $this->roles()->whereIn('name', $roleNames)->exists();
+    }
+
+    /**
+     * @param  list<string>  $roles
+     */
+    public function hasAnyRole(array $roles): bool
+    {
+        return $this->hasRole($roles);
+    }
+
+    public function hasPermissionTo(string $permission): bool
+    {
+        if ($this->hasRole(Role::SUPER_ADMIN)) {
+            return true;
+        }
+
+        return $this->roles()
+            ->whereHas('permissions', fn ($query) => $query->where('name', $permission))
+            ->exists();
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function roleNames(): array
+    {
+        return $this->roles()->pluck('name')->all();
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function permissionNames(): array
+    {
+        if ($this->hasRole(Role::SUPER_ADMIN)) {
+            return array_keys(Permission::defaults());
+        }
+
+        return $this->roles()
+            ->with('permissions:id,name')
+            ->get()
+            ->flatMap(fn (Role $role) => $role->permissions->pluck('name'))
+            ->unique()
+            ->values()
+            ->all();
     }
 }
