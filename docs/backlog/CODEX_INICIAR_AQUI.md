@@ -29,7 +29,11 @@ Documentos do Codex:
 - docs/backlog/codex/CHECKLIST_PRE_EXECUCAO_CODEX.md
 - docs/backlog/codex/PROMPT_INICIAL_CODEX_M00.md
 - docs/backlog/codex/PROMPTS_CODEX_EXECUCAO_MODULAR.md
+- docs/backlog/codex/PROMPT_M10_FRONT_REFORCADO.md
 - docs/backlog/codex/ROTINA_VALIDACAO_POR_MODULO.md
+
+Nota para M10:
+- Quando chegar ao módulo M10, usar `docs/backlog/codex/PROMPT_M10_FRONT_REFORCADO.md` no lugar do prompt M10 comum.
 
 Módulos:
 - docs/backlog/modules/M00_PREPARACAO_REPOSITORIO_PADROES.md
