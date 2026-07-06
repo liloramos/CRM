@@ -18,6 +18,8 @@ class Permission extends Model
         'roles.manage' => 'Gerenciar papeis e permissoes',
         'settings.view' => 'Visualizar configuracoes',
         'settings.manage' => 'Gerenciar configuracoes',
+        'menu.view' => 'Visualizar cardapio',
+        'menu.manage' => 'Gerenciar cardapio e disponibilidade',
     ];
 
     protected $fillable = [

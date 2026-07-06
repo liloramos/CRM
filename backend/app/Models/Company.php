@@ -37,4 +37,24 @@ class Company extends Model
     {
         return $this->hasMany(OperatingHour::class);
     }
+
+    public function productCategories(): HasMany
+    {
+        return $this->hasMany(ProductCategory::class);
+    }
+
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
+    public function weeklyMenus(): HasMany
+    {
+        return $this->hasMany(WeeklyMenu::class);
+    }
+
+    public function dailyMenuOverrides(): HasMany
+    {
+        return $this->hasMany(DailyMenuOverride::class);
+    }
 }

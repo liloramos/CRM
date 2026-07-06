@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Menu\AvailableMenuController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/teste', function () {
@@ -8,3 +9,6 @@ Route::get('/teste', function () {
         'message' => 'API funcionando',
     ]);
 });
+
+Route::get('/restaurants/{company:slug}/menu/available', AvailableMenuController::class)
+    ->name('api.restaurants.menu.available');
