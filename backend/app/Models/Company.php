@@ -57,4 +57,9 @@ class Company extends Model
     {
         return $this->hasMany(DailyMenuOverride::class);
     }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
+    }
 }

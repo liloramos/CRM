@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\Contracts\PasskeyUser;
@@ -46,6 +47,21 @@ class User extends Authenticatable implements PasskeyUser
     public function roles(): BelongsToMany
     {
         return $this->belongsToMany(Role::class)->withTimestamps();
+    }
+
+    public function createdOrders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'created_by_user_id');
+    }
+
+    public function orderStatusHistories(): HasMany
+    {
+        return $this->hasMany(OrderStatusHistory::class);
+    }
+
+    public function orderFragments(): HasMany
+    {
+        return $this->hasMany(OrderFragment::class, 'created_by_user_id');
     }
 
     public function assignRole(Role|string $role): void

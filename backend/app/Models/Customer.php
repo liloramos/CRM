@@ -25,4 +25,9 @@ class Customer extends Model
     {
         return $this->hasMany(Conversation::class);
     }
+
+    public function payerOrders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'payer_customer_id');
+    }
 }

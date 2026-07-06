@@ -78,6 +78,11 @@ class Product extends Model
         return $this->hasMany(DailyMenuOverride::class);
     }
 
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
+    }
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);

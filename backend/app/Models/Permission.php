@@ -20,6 +20,8 @@ class Permission extends Model
         'settings.manage' => 'Gerenciar configuracoes',
         'menu.view' => 'Visualizar cardapio',
         'menu.manage' => 'Gerenciar cardapio e disponibilidade',
+        'orders.view' => 'Visualizar pedidos',
+        'orders.manage' => 'Gerenciar pedidos e status',
     ];
 
     protected $fillable = [

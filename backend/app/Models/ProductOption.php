@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ProductOption extends Model
 {
@@ -49,6 +50,11 @@ class ProductOption extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function orderItemOptions(): HasMany
+    {
+        return $this->hasMany(OrderItemOption::class);
     }
 
     public function scopeActive(Builder $query): Builder
