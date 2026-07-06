@@ -14,7 +14,16 @@ class Customer extends Model
         'phone',
         'email',
         'notes',
+        'credit_balance_cents',
+        'credit_currency',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'credit_balance_cents' => 'integer',
+        ];
+    }
 
     public function company(): BelongsTo
     {
@@ -29,5 +38,15 @@ class Customer extends Model
     public function payerOrders(): HasMany
     {
         return $this->hasMany(Order::class, 'payer_customer_id');
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    public function creditMovements(): HasMany
+    {
+        return $this->hasMany(CustomerCreditMovement::class);
     }
 }

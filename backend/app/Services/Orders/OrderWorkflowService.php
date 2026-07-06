@@ -211,10 +211,13 @@ class OrderWorkflowService
     {
         $subtotal = (int) $order->items()->sum('total_price_cents');
         $adjustments = (int) $order->adjustments_cents;
+        $total = $subtotal + $adjustments;
+        $amountPaid = (int) ($order->amount_paid_cents ?? 0);
 
         $order->forceFill([
             'subtotal_cents' => $subtotal,
-            'total_cents' => $subtotal + $adjustments,
+            'total_cents' => $total,
+            'amount_due_cents' => max($total - $amountPaid, 0),
         ])->save();
 
         return $order->refresh();

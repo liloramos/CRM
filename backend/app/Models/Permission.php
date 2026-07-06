@@ -22,6 +22,8 @@ class Permission extends Model
         'menu.manage' => 'Gerenciar cardapio e disponibilidade',
         'orders.view' => 'Visualizar pedidos',
         'orders.manage' => 'Gerenciar pedidos e status',
+        'payments.view' => 'Visualizar pagamentos e comprovantes',
+        'payments.manage' => 'Gerenciar pagamentos, comprovantes e creditos',
     ];
 
     protected $fillable = [

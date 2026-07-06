@@ -38,6 +38,8 @@ class Role extends Model
             'menu.manage',
             'orders.view',
             'orders.manage',
+            'payments.view',
+            'payments.manage',
         ],
         self::ADMIN_GERENTE => [
             'dashboard.view',
@@ -50,12 +52,16 @@ class Role extends Model
             'menu.manage',
             'orders.view',
             'orders.manage',
+            'payments.view',
+            'payments.manage',
         ],
         self::ATENDENTE => [
             'dashboard.view',
             'menu.view',
             'orders.view',
             'orders.manage',
+            'payments.view',
+            'payments.manage',
         ],
     ];
 

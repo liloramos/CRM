@@ -62,4 +62,14 @@ class Company extends Model
     {
         return $this->hasMany(Order::class);
     }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    public function creditMovements(): HasMany
+    {
+        return $this->hasMany(CustomerCreditMovement::class);
+    }
 }

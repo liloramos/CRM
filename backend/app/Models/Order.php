@@ -119,10 +119,18 @@ class Order extends Model
         'pickup_person_phone',
         'pickup_authorized_by',
         'pickup_notes',
+        'payment_method',
+        'payment_status',
         'subtotal_cents',
         'adjustments_cents',
         'total_cents',
+        'amount_paid_cents',
+        'amount_due_cents',
+        'credit_used_cents',
+        'credit_generated_cents',
         'currency',
+        'last_payment_at',
+        'payment_confirmed_at',
         'confirmed_at',
         'cancelled_at',
         'finished_at',
@@ -143,6 +151,12 @@ class Order extends Model
             'subtotal_cents' => 'integer',
             'adjustments_cents' => 'integer',
             'total_cents' => 'integer',
+            'amount_paid_cents' => 'integer',
+            'amount_due_cents' => 'integer',
+            'credit_used_cents' => 'integer',
+            'credit_generated_cents' => 'integer',
+            'last_payment_at' => 'datetime',
+            'payment_confirmed_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'finished_at' => 'datetime',
@@ -188,6 +202,21 @@ class Order extends Model
     public function fragments(): HasMany
     {
         return $this->hasMany(OrderFragment::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    public function paymentProofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class);
+    }
+
+    public function creditMovements(): HasMany
+    {
+        return $this->hasMany(CustomerCreditMovement::class);
     }
 
     public function canBeEdited(): bool

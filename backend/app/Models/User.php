@@ -64,6 +64,31 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(OrderFragment::class, 'created_by_user_id');
     }
 
+    public function createdPayments(): HasMany
+    {
+        return $this->hasMany(Payment::class, 'created_by_user_id');
+    }
+
+    public function confirmedPayments(): HasMany
+    {
+        return $this->hasMany(Payment::class, 'confirmed_by_user_id');
+    }
+
+    public function rejectedPayments(): HasMany
+    {
+        return $this->hasMany(Payment::class, 'rejected_by_user_id');
+    }
+
+    public function uploadedPaymentProofs(): HasMany
+    {
+        return $this->hasMany(PaymentProof::class, 'uploaded_by_user_id');
+    }
+
+    public function customerCreditMovements(): HasMany
+    {
+        return $this->hasMany(CustomerCreditMovement::class, 'created_by_user_id');
+    }
+
     public function assignRole(Role|string $role): void
     {
         $roleModel = $role instanceof Role
