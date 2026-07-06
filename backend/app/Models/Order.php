@@ -60,6 +60,34 @@ class Order extends Model
 
     public const PRIORITY_URGENT = 'urgent';
 
+    public const FULFILLMENT_STATUS_PENDING = 'pending';
+
+    public const FULFILLMENT_STATUS_DELIVERY_QUOTED = 'delivery_quoted';
+
+    public const FULFILLMENT_STATUS_DELIVERY_OUT = 'delivery_out';
+
+    public const FULFILLMENT_STATUS_DELIVERED = 'delivered';
+
+    public const FULFILLMENT_STATUS_PICKUP_PENDING = 'pickup_pending';
+
+    public const FULFILLMENT_STATUS_READY_FOR_PICKUP = 'ready_for_pickup';
+
+    public const FULFILLMENT_STATUS_PICKED_UP = 'picked_up';
+
+    public const DELIVERY_STATUS_ADDRESS_PENDING = 'address_pending';
+
+    public const DELIVERY_STATUS_QUOTED = 'quoted';
+
+    public const DELIVERY_STATUS_OUT_FOR_DELIVERY = 'out_for_delivery';
+
+    public const DELIVERY_STATUS_DELIVERED = 'delivered';
+
+    public const PICKUP_STATUS_PENDING = 'pending';
+
+    public const PICKUP_STATUS_READY = 'ready';
+
+    public const PICKUP_STATUS_PICKED_UP = 'picked_up';
+
     /**
      * @var list<string>
      */
@@ -99,6 +127,7 @@ class Order extends Model
         'conversation_id',
         'created_by_user_id',
         'recurring_order_reference_id',
+        'delivery_address_id',
         'order_date',
         'daily_sequence',
         'code',
@@ -106,6 +135,9 @@ class Order extends Model
         'origin_channel',
         'entry_mode',
         'fulfillment_type',
+        'fulfillment_status',
+        'delivery_status',
+        'pickup_status',
         'priority',
         'is_manual',
         'is_fragmented',
@@ -119,6 +151,17 @@ class Order extends Model
         'pickup_person_phone',
         'pickup_authorized_by',
         'pickup_notes',
+        'delivery_distance_km',
+        'delivery_fee_base_cents',
+        'delivery_fee_surcharge_percent',
+        'delivery_fee_surcharge_cents',
+        'delivery_fee_cents',
+        'delivery_recipient_name',
+        'delivery_recipient_phone',
+        'delivery_reference',
+        'delivery_notes',
+        'delivery_address_snapshot',
+        'delivery_calculated_at',
         'payment_method',
         'payment_status',
         'subtotal_cents',
@@ -143,6 +186,13 @@ class Order extends Model
         return [
             'order_date' => 'date',
             'daily_sequence' => 'integer',
+            'delivery_distance_km' => 'decimal:3',
+            'delivery_fee_base_cents' => 'integer',
+            'delivery_fee_surcharge_percent' => 'decimal:2',
+            'delivery_fee_surcharge_cents' => 'integer',
+            'delivery_fee_cents' => 'integer',
+            'delivery_address_snapshot' => 'array',
+            'delivery_calculated_at' => 'datetime',
             'is_manual' => 'boolean',
             'is_fragmented' => 'boolean',
             'customer_confirmation_required' => 'boolean',
@@ -189,6 +239,11 @@ class Order extends Model
         return $this->belongsTo(self::class, 'recurring_order_reference_id');
     }
 
+    public function deliveryAddress(): BelongsTo
+    {
+        return $this->belongsTo(CustomerAddress::class, 'delivery_address_id');
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
@@ -217,6 +272,11 @@ class Order extends Model
     public function creditMovements(): HasMany
     {
         return $this->hasMany(CustomerCreditMovement::class);
+    }
+
+    public function deliveryQuotes(): HasMany
+    {
+        return $this->hasMany(DeliveryQuote::class);
     }
 
     public function canBeEdited(): bool

@@ -24,6 +24,8 @@ class Permission extends Model
         'orders.manage' => 'Gerenciar pedidos e status',
         'payments.view' => 'Visualizar pagamentos e comprovantes',
         'payments.manage' => 'Gerenciar pagamentos, comprovantes e creditos',
+        'delivery.view' => 'Visualizar entregas, retiradas e taxas',
+        'delivery.manage' => 'Gerenciar entregas, retiradas e calculo de taxas',
     ];
 
     protected $fillable = [

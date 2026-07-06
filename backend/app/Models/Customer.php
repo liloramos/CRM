@@ -40,6 +40,11 @@ class Customer extends Model
         return $this->hasMany(Order::class, 'payer_customer_id');
     }
 
+    public function addresses(): HasMany
+    {
+        return $this->hasMany(CustomerAddress::class);
+    }
+
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);

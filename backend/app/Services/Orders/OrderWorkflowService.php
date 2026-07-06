@@ -43,6 +43,8 @@ class OrderWorkflowService
                 'origin_channel' => $attributes['origin_channel'] ?? Order::CHANNEL_MANUAL,
                 'entry_mode' => $attributes['entry_mode'] ?? Order::CHANNEL_MANUAL,
                 'fulfillment_type' => $attributes['fulfillment_type'] ?? null,
+                'fulfillment_status' => $attributes['fulfillment_status']
+                    ?? $this->defaultFulfillmentStatus($attributes['fulfillment_type'] ?? null),
                 'priority' => $attributes['priority'] ?? Order::PRIORITY_NORMAL,
                 'is_manual' => $attributes['is_manual'] ?? (($attributes['origin_channel'] ?? Order::CHANNEL_MANUAL) !== Order::CHANNEL_WHATSAPP),
                 'is_fragmented' => $attributes['is_fragmented'] ?? false,
@@ -211,7 +213,8 @@ class OrderWorkflowService
     {
         $subtotal = (int) $order->items()->sum('total_price_cents');
         $adjustments = (int) $order->adjustments_cents;
-        $total = $subtotal + $adjustments;
+        $deliveryFee = (int) ($order->delivery_fee_cents ?? 0);
+        $total = $subtotal + $adjustments + $deliveryFee;
         $amountPaid = (int) ($order->amount_paid_cents ?? 0);
 
         $order->forceFill([
@@ -233,6 +236,14 @@ class OrderWorkflowService
     private function buildCode(CarbonInterface $date, int $dailySequence): string
     {
         return $date->format('Ymd').'-'.str_pad((string) $dailySequence, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function defaultFulfillmentStatus(?string $fulfillmentType): string
+    {
+        return match ($fulfillmentType) {
+            Order::FULFILLMENT_PICKUP, Order::FULFILLMENT_COUNTER => Order::FULFILLMENT_STATUS_PICKUP_PENDING,
+            default => Order::FULFILLMENT_STATUS_PENDING,
+        };
     }
 
     private function resolveDate(mixed $date): CarbonInterface

@@ -63,6 +63,21 @@ class Company extends Model
         return $this->hasMany(Order::class);
     }
 
+    public function customerAddresses(): HasMany
+    {
+        return $this->hasMany(CustomerAddress::class);
+    }
+
+    public function deliverySetting(): HasOne
+    {
+        return $this->hasOne(DeliverySetting::class);
+    }
+
+    public function deliveryQuotes(): HasMany
+    {
+        return $this->hasMany(DeliveryQuote::class);
+    }
+
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);

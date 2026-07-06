@@ -18,7 +18,9 @@ class CompanyResource extends JsonResource
             'slug' => $this->slug,
             'profile' => new RestaurantProfileResource($this->whenLoaded('restaurantProfile')),
             'setting' => new CompanySettingResource($this->whenLoaded('setting')),
+            'delivery_setting' => new DeliverySettingResource($this->whenLoaded('deliverySetting')),
             'operating_hours' => OperatingHourResource::collection($this->whenLoaded('operatingHours')),
+            'customer_addresses' => CustomerAddressResource::collection($this->whenLoaded('customerAddresses')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

@@ -21,6 +21,7 @@ class CustomerResource extends JsonResource
             'notes' => $this->notes,
             'credit_balance_cents' => $this->credit_balance_cents,
             'credit_currency' => $this->credit_currency,
+            'addresses' => CustomerAddressResource::collection($this->whenLoaded('addresses')),
             'credit_movements' => CustomerCreditMovementResource::collection($this->whenLoaded('creditMovements')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

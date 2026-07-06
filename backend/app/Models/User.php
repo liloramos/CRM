@@ -89,6 +89,11 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(CustomerCreditMovement::class, 'created_by_user_id');
     }
 
+    public function deliveryQuotes(): HasMany
+    {
+        return $this->hasMany(DeliveryQuote::class, 'quoted_by_user_id');
+    }
+
     public function assignRole(Role|string $role): void
     {
         $roleModel = $role instanceof Role
