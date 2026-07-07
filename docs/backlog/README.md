@@ -33,7 +33,8 @@ CHATBOTCRM/
         ├── codex/
         ├── modules/
         ├── adr/
-        └── front/
+        ├── front/
+        └── roadmap/
 ```
 
 ## Primeiro arquivo para o Codex ler
@@ -53,3 +54,14 @@ docs/backlog/codex/PROMPT_INICIAL_CODEX_M00.md
 O Codex deve executar **um módulo por vez**.  
 Não deve implementar tudo junto.  
 Não deve avançar sem autorização do Murilo.
+
+## Roadmap CRM/SaaS
+
+As notas estruturais do M12 ficam em:
+
+```txt
+docs/backlog/roadmap/CRM_SAAS_EVOLUTION_M12.md
+```
+
+Esse documento registra pontos de extensao, limites de escopo e preparacao para
+evolucao SaaS/CRM sem implementar funcionalidades futuras.

@@ -3,6 +3,8 @@
 **Arquivo:** `M12_ROADMAP_CRM_SAAS.md`  
 **Commit esperado:** `docs: update crm saas roadmap implementation notes`
 
+**Commit sugerido nesta execucao:** `docs(roadmap): prepare crm saas evolution structure`
+
 ## Objetivo
 Documentar evolução para SaaS multiempresa.
 
@@ -25,6 +27,18 @@ Além disso, ler ADRs relacionados quando existirem.
 - Planejar billing/assinaturas futuro sem implementar agora.
 - Planejar white label/branding futuro.
 - Não inflar escopo da V1.
+
+## Entregavel tecnico-documental
+
+O planejamento estrutural do M12 fica registrado em:
+
+```txt
+docs/backlog/roadmap/CRM_SAAS_EVOLUTION_M12.md
+docs/backlog/roadmap/README.md
+```
+
+Esse entregavel documenta pontos de extensao e limites de escopo para a evolucao
+CRM/SaaS, sem criar funcionalidades grandes ou regras futuras no codigo.
 
 ## Fora de escopo deste módulo
 
@@ -62,7 +76,7 @@ Arquivos alterados
 Comandos executados
 Resultado das validações
 Pendências
-Commit: docs: update crm saas roadmap implementation notes
+Commit: docs(roadmap): prepare crm saas evolution structure
 ```
 
 Depois parar e aguardar autorização do Murilo.
