@@ -21,7 +21,7 @@ Antes de alterar qualquer arquivo, leia e entenda a estrutura do projeto. Analis
 - docs/backlog/atendimento-real-whatsapp.md
 - docs/backlog/comanda-e-impressao.md, se existir
 - docs/CRM_DOCUMENTACAO_EXECUTAVEL_V1.9_COMPLEMENTO.md, se existir
-- docscodex/, se existir
+- docs/backlog/codex/, se existir
 
 Regras obrigatórias:
 1. Não altere `.env`.

@@ -2,8 +2,8 @@
 
 ## Público operacional
 
-- [NOME_OPERACIONAL_REMOVIDO]: admin/gerente.
-- [NOME_OPERACIONAL_REMOVIDO]: atendente.
+- Admin/Gerente piloto.
+- Atendente piloto.
 - Murilo: super-admin/desenvolvedor.
 
 ## Rotas sugeridas

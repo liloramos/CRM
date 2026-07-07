@@ -30,6 +30,8 @@ lerna-debug.log*
 *.pfx
 auth.json
 
+docs/**/*.docx
+
 .phpunit.cache/
 .phpunit.result.cache
 .phpactor.json

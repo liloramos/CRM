@@ -14,7 +14,7 @@ class ConversationSeeder extends Seeder
     public function run(): void
     {
         $conversation = Conversation::create([
-            'company_id' => 1,  
+            'company_id' => 1,
             'customer_id' => 1,
             'channel' => 'whatsapp',
             'status' => 'open',
@@ -26,6 +26,6 @@ class ConversationSeeder extends Seeder
             'sender' => 'customer',
             'content' => 'Olá, gostaria de fazer um pedido.',
             'type' => 'text',
-        ]); 
+        ]);
     }
 }

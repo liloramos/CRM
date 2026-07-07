@@ -55,6 +55,18 @@ A automação completa com IA e WhatsApp será incorporada em uma etapa posterio
 
 ## Status do projeto
 
+Atualizacao final apos a execucao modular M00-M13:
+
+```text
+M00-M13 executados e revisados em sequencia.
+Backend preparado para autenticacao, restaurante, cardapio, pedidos, pagamentos,
+credito, entrega, comanda/impressao, WhatsApp plugavel, IA/manual e integracoes futuras.
+Frontend operacional refinado em React/Vite, com mocks ficticios centralizados.
+M12 e M13 sao estruturais/documentais; nao ativam funcionalidades futuras reais.
+```
+
+O historico abaixo descreve etapas iniciais da fundacao do projeto.
+
 O projeto está em desenvolvimento ativo.
 
 A base inicial do CRM/chatbot já foi implementada e validada:
@@ -68,11 +80,11 @@ A base inicial do CRM/chatbot já foi implementada e validada:
 * banco recriado e populado com `migrate:fresh --seed`;
 * estrutura validada via Laravel Tinker.
 
-Status atual:
+Historico inicial:
 
 ```text
 V1 - Fundação CRM/Chatbot: finalizada
-V2 - Cardápio, pedidos e comanda: próxima etapa
+V2 - Cardápio, pedidos e comanda: etapa planejada naquele momento
 ```
 
 ---
@@ -94,10 +106,10 @@ V2 - Cardápio, pedidos e comanda: próxima etapa
 ### Frontend
 
 * React
-* Inertia.js
-* TypeScript
-* Tailwind CSS
 * Vite
+* TypeScript
+* CSS modular por componentes/telas
+* Estrutura backend Inertia preservada no Laravel starter
 
 ### Banco de dados
 
@@ -132,15 +144,14 @@ ChatBotCRM
 │
 ├── bpmn
 │
-├── docker
+├── docker-compose.yml
 │
 ├── docs
 │
-├── docscodex
+├── docs/backlog/codex
 │
-├── .env
+├── .env.example
 ├── .gitignore
-├── docker-compose.yml
 └── README.md
 ```
 
@@ -151,9 +162,8 @@ ChatBotCRM
 | `backend`   | Aplicação Laravel, models, migrations, seeders, rotas e regras de negócio. |
 | `frontend`  | Camada de interface da aplicação.                                          |
 | `bpmn`      | Diagramas de processo do sistema.                                          |
-| `docker`    | Arquivos auxiliares para ambiente containerizado.                          |
 | `docs`      | Documentação geral do projeto.                                             |
-| `docscodex` | Documentação modular para orientar desenvolvimento assistido por IA/Codex. |
+| `docs/backlog/codex` | Documentação modular para orientar desenvolvimento assistido por IA/Codex. |
 
 ---
 
@@ -176,16 +186,16 @@ O backend é responsável por:
 * permissões;
 * integrações externas.
 
-O frontend consome os dados e fluxos do backend por meio da estrutura Laravel + Inertia + React.
+O frontend operacional atual fica em `frontend/` e consome dados por uma camada de service preparada para API futura. A estrutura Inertia do starter Laravel permanece no `backend/resources/js` como base autenticada do backend.
 
 A arquitetura planejada evita que ferramentas externas, como n8n ou provedores de IA, sejam a fonte principal dos dados. Essas ferramentas devem funcionar como camadas auxiliares de automação.
 
 Representação simplificada:
 
 ```text
-Frontend
+Frontend React/Vite
    ↓
-Laravel / Inertia
+Laravel API / backend autenticado
    ↓
 Serviços de domínio
    ↓
@@ -323,6 +333,27 @@ A aplicação será evoluída por módulos.
 
 ## Módulos implementados
 
+Estado atual do ciclo M00-M13:
+
+```text
+M00 - Preparacao do repositorio e padroes
+M01 - Autenticacao, usuarios, papeis e permissoes
+M02 - Restaurante/tenant/base SaaS
+M03 - Cardapio, produtos, extras e disponibilidade
+M04 - Pedidos e status operacionais
+M05 - Pix, comprovantes, pagamentos e credito de cliente
+M06 - Entrega, retirada e regra de taxa por km
+M07 - Comanda HTML e fluxo de impressao operacional
+M08 - WhatsApp plugavel com provider fake/Meta preparado
+M09 - IA, automacao, sugestoes e fallback manual
+M10 - Front operacional refinado
+M11 - Dashboard financeiro basico
+M12 - Roadmap/estrutura para evolucao CRM SaaS
+M13 - Preparacao documental/estrutural para Google Workspace futuro
+```
+
+Observacao: os dados de exemplo do front e dos seeders devem continuar ficticios e sanitizados.
+
 ### Fundação CRM/Chatbot
 
 A primeira etapa do banco foi implementada com as seguintes tabelas:
@@ -366,7 +397,7 @@ Exemplo:
 
 ```text
 Restaurante Sol
-└── João Silva
+└── Cliente Exemplo
     └── Conversa via WhatsApp
         └── "Olá, gostaria de fazer uma reserva."
 ```
@@ -537,14 +568,14 @@ bpmn
 
 ## Documentação para desenvolvimento assistido
 
-A pasta `docscodex` será usada para organizar instruções de desenvolvimento em módulos pequenos e sequenciais.
+A pasta `docs/backlog/codex` organiza instruções de desenvolvimento em módulos pequenos e sequenciais.
 
 O objetivo é permitir que ferramentas de apoio ao desenvolvimento leiam o contexto do projeto com clareza e executem tarefas sem quebrar a base já validada.
 
 Estrutura recomendada:
 
 ```text
-docscodex
+docs/backlog/codex
 ├── 00-contexto-geral.md
 ├── 01-banco-atual-v1.md
 ├── 02-modulo-cardapio.md
@@ -634,9 +665,9 @@ Configurar a conexão com o banco:
 DB_CONNECTION=pgsql
 DB_HOST=127.0.0.1
 DB_PORT=5432
-DB_DATABASE=crm_restaurante_sol
-DB_USERNAME=postgres
-DB_PASSWORD=*******
+DB_DATABASE=
+DB_USERNAME=
+DB_PASSWORD=
 ```
 
 ### 6. Gerar chave da aplicação
@@ -783,7 +814,7 @@ Order::where('company_id', auth()->user()->company_id)->get();
 * Dividir tarefas em módulos pequenos.
 * Evitar prompts genéricos como “crie o sistema inteiro”.
 * Validar cada etapa antes de avançar.
-* Manter documentação atualizada em `docscodex`.
+* Manter documentação atualizada em `docs/backlog/codex`.
 * Garantir que novas alterações não quebrem a V1.
 
 ### Commits
@@ -813,7 +844,7 @@ git commit -m "feat: create initial chatbot crm database structure"
 
 * [x] Estrutura inicial do projeto
 * [x] Laravel configurado
-* [x] React + Inertia configurado
+* [x] React/Vite operacional configurado
 * [x] TypeScript configurado
 * [x] Tailwind CSS configurado
 * [x] Vite configurado
@@ -890,7 +921,11 @@ git commit -m "feat: create initial chatbot crm database structure"
 
 ---
 
-## Próxima etapa técnica
+## Proxima etapa tecnica
+
+Nao avancar automaticamente para novas features. Depois da revisao final, qualquer proxima etapa deve ser autorizada explicitamente e deve seguir os documentos em `docs/backlog/modules/`.
+
+Historico da etapa inicial:
 
 A próxima etapa de desenvolvimento é a criação do módulo operacional do restaurante:
 

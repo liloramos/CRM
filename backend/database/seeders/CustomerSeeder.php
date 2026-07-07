@@ -14,10 +14,10 @@ class CustomerSeeder extends Seeder
     {
         Customer::create([
             'company_id' => 1,
-            'name' => 'João Silva',
-            'phone' => '62999999999',
-            'email' => 'joao@email.com',
-            'notes' => 'Cliente de tester',
+            'name' => 'Cliente Exemplo',
+            'phone' => null,
+            'email' => 'cliente.exemplo@example.test',
+            'notes' => 'Cliente ficticio para seed local.',
         ]);
     }
 }

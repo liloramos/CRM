@@ -99,9 +99,9 @@ GOOGLE_CLIENT_SECRET=
 Proibido:
 
 ```env
-META_WHATSAPP_TOKEN=[TOKEN_REMOVIDO]
-GOOGLE_CLIENT_SECRET=[CREDENCIAL_REMOVIDA]
-DB_PASSWORD=[CREDENCIAL_REMOVIDA]
+META_WHATSAPP_TOKEN=<valor-sensivel-nao-versionar>
+GOOGLE_CLIENT_SECRET=<valor-sensivel-nao-versionar>
+DB_PASSWORD=<valor-sensivel-nao-versionar>
 ```
 
 ## Política de commits

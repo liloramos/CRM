@@ -15,18 +15,18 @@ return new class extends Migration
             $table->id();
 
             $table->foreignId('company_id')
-                  ->constrained()
-                  ->cascadeOnDelete();
+                ->constrained()
+                ->cascadeOnDelete();
 
             $table->foreignId('customer_id')
-                  ->constrained()
-                  ->cascadeOnDelete();
+                ->constrained()
+                ->cascadeOnDelete();
 
-            $table ->string('channel')->default('whatsapp');
-            $table ->string('status')->default('open');
+            $table->string('channel')->default('whatsapp');
+            $table->string('status')->default('open');
 
-            $table ->timestamp('started_at')->nullable();
-            $table ->timestamp('closed_at')->nullable();
+            $table->timestamp('started_at')->nullable();
+            $table->timestamp('closed_at')->nullable();
 
             $table->timestamps();
         });

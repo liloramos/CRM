@@ -29,12 +29,12 @@ Princípio estratégico: primeiro construir um núcleo operacional perfeito para
 | --- | --- | --- |
 | Empresa piloto | Sol Restaurante | O projeto nasce em operação real e depois vira base SaaS. |
 | Responsável técnico | Murilo - super-admin/desenvolvedor | Acesso total e decisões técnicas. |
-| Usuários iniciais | [NOME_OPERACIONAL_REMOVIDO] admin/gerente; [NOME_OPERACIONAL_REMOVIDO] atendente | Permissões separadas por papel. |
-| Dono/gestão futura | [NOME_OPERACIONAL_REMOVIDO]; [NOME_OPERACIONAL_REMOVIDO]/cozinha | Perfis futuros para visão gerencial e cozinha. |
-| Telefone/Pix | [TELEFONE_REMOVIDO] / chave Pix [PIX_REMOVIDO] | Cadastro em company_settings. |
+| Usuários iniciais | Admin/Gerente piloto; Atendente piloto | Permissões separadas por papel. |
+| Dono/gestão futura | Gestor proprietário; perfil de cozinha | Perfis futuros para visão gerencial e cozinha. |
+| Telefone/Pix | Dados operacionais privados e configuraveis | Cadastro em company_settings; valores reais nao devem ser versionados. |
 | Horário de operação | 10:00 às 14:00 | IA deve respeitar esse intervalo. |
-| Endereço origem | [ENDERECO_REMOVIDO] | Base para cálculo de entrega. Cidade/UF devem ser confirmadas. |
-| Entrega | distância_km x R$ 2,00 | Regra base informada pela [NOME_OPERACIONAL_REMOVIDO]. |
+| Endereco origem | Endereco operacional privado e configuravel | Base para calculo de entrega em delivery_settings/company_settings; valor real nao deve ser versionado. |
+| Entrega | distância_km x R$ 2,00 | Regra base informada pela operação piloto. |
 | Acréscimo entrega | 10% sobre a taxa de entrega | Não incide sobre produtos; deve ser configurável. |
 | Pix V1 | Chave Pix textual + comprovante via WhatsApp + confirmação humana | Sem API bancária na V1; QR Code não é obrigatório. |
 | Pagamentos | Pix, dinheiro, cartão de débito, cartão de crédito | Pedido guarda método e status. |
@@ -118,11 +118,11 @@ Observação: qualquer tecnologia de frontend ainda não confirmada deve ser tra
 20. Pedido muda de status até finalização.
 
 ## 9. Perfis, papéis e permissões
-- **Super-admin - Murilo:** acesso total técnico, configurações globais, empresas, usuários, permissões, integrações, auditoria, ajustes críticos e manutenção.
-- **Admin/Gerente - [NOME_OPERACIONAL_REMOVIDO]:** gestão operacional do restaurante, cardápio, disponibilidade, pedidos, pagamentos, impressão, usuários operacionais e dashboards.
-- **Atendente - [NOME_OPERACIONAL_REMOVIDO]:** conversas, montagem/edição de pedido, status, impressão e atendimento manual.
-- **Dono/Gestor - [NOME_OPERACIONAL_REMOVIDO]:** visão gerencial futura, relatórios, rendimentos, vendas, custos e desempenho.
-- **Cozinha - [NOME_OPERACIONAL_REMOVIDO]:** visão/recebimento de comandas, preparo e status de cozinha em fase futura.
+- **Super-admin / Desenvolvedor:** acesso total técnico, configurações globais, empresas, usuários, permissões, integrações, auditoria, ajustes críticos e manutenção.
+- **Admin/Gerente piloto:** gestão operacional do restaurante, cardápio, disponibilidade, pedidos, pagamentos, impressão, usuários operacionais e dashboards.
+- **Atendente piloto:** conversas, montagem/edição de pedido, status, impressão e atendimento manual.
+- **Dono/Gestor:** visão gerencial futura, relatórios, rendimentos, vendas, custos e desempenho.
+- **Cozinha:** visão/recebimento de comandas, preparo e status de cozinha em fase futura.
 - **Usuários adicionais:** criados com papéis e permissões específicas.
 
 ## 10. Regras de negócio consolidadas
@@ -150,15 +150,15 @@ Observação: qualquer tecnologia de frontend ainda não confirmada deve ser tra
 
 ### 10.3 Pix e pagamentos
 - Métodos aceitos: Pix, dinheiro, cartão de débito e cartão de crédito.
-- Chave Pix: [PIX_REMOVIDO].
-- QR Code Pix fixo não será necessário na V1; o sistema deve enviar a chave Pix em texto pelo WhatsApp.
+- Chave Pix: configurada de forma privada em company_settings, sem valor real versionado.
+- QR Code Pix fixo não será necessário na V1; o sistema deve enviar a chave Pix configurada em texto pelo WhatsApp.
 - V1 não depende de API bancária.
 - Cliente paga pelo próprio banco e envia comprovante pelo WhatsApp.
 - Comprovante deve ser anexado ao pedido.
 - Confirmação final do pagamento deve ser humana no início.
 
 ### 10.4 Entrega
-- Origem: [ENDERECO_REMOVIDO].
+- Origem: endereco operacional privado configurado em delivery_settings/company_settings.
 - Fórmula base: `delivery_fee_base = distance_km * 2.00`.
 - Fórmula com acréscimo: `delivery_fee_final = (distance_km * 2.00) * 1.10`.
 - O acréscimo de 10% incide somente sobre a entrega, nunca sobre os produtos.
@@ -178,7 +178,7 @@ Observação: qualquer tecnologia de frontend ainda não confirmada deve ser tra
 - Impressora confirmada: Epson TM-T20X 031.
 - Modelo técnico informado: M352A.
 - Alimentação informada: 100-240V, 50-60Hz, 1.0A.
-- Número de série informado: [SERIAL_IMPRESSORA_REMOVIDO]. Se o repositório ficar público, este número deve ser removido ou tratado como dado interno.
+- Numero de serie da impressora: dado interno, nao deve ser versionado.
 - Estratégia V1: gerar comanda HTML/PDF otimizada para impressão pelo navegador.
 - Estratégia V1.1: instalar driver Epson no computador do restaurante e validar largura da bobina, corte e qualidade de impressão.
 - Estratégia V2: avaliar impressão direta/silenciosa com ESC/POS, QZ Tray ou agente local próprio.
@@ -312,7 +312,7 @@ Essas pendências não impedem a criação do banco e do backlog. Elas devem ser
 - Webhook público HTTPS ativo.
 - Políticas/templates mínimos criados quando necessário.
 - Impressão testada na Epson TM-T20X real com driver instalado, bobina correta e fluxo de reimpressão validado.
-- Testes com [NOME_OPERACIONAL_REMOVIDO]/[NOME_OPERACIONAL_REMOVIDO] em cenário real de almoço.
+- Testes com equipe piloto em cenário real de almoço.
 
 ## 19. Critérios de aceite gerais da V1
 - Cliente consegue pedir cardápio pelo WhatsApp.
@@ -356,7 +356,7 @@ Com as informações atuais, já é possível iniciar a execução técnica aman
 Nesta versão, duas pendências foram refinadas:
 
 - A impressora foi confirmada como **Epson**, mas o modelo exato ainda precisa ser identificado. O sistema deve manter a estratégia inicial de comanda HTML/PDF imprimível no navegador. Após confirmação do modelo, deve ser validado se a impressora trabalha com papel térmico 58 mm ou 80 mm, se aceita ESC/POS, se será usada por USB/rede e se será necessário agente local de impressão.
-- O **QR Code Pix não será necessário na V1**. O fluxo oficial do Sol Restaurante será: enviar a chave Pix textual `[PIX_REMOVIDO]`, receber comprovante pelo WhatsApp, anexar o comprovante ao pedido e aguardar confirmação humana do pagamento por atendente/gerente.
+- O **QR Code Pix não será necessário na V1**. O fluxo oficial do Sol Restaurante será: enviar a chave Pix textual configurada em ambiente privado, receber comprovante pelo WhatsApp, anexar o comprovante ao pedido e aguardar confirmação humana do pagamento por atendente/gerente.
 
 Impacto técnico:
 
@@ -452,7 +452,7 @@ O Codex deve usar as imagens como inspiracao visual e consultar os arquivos de f
 ## Decisões adicionadas
 
 1. A impressora do restaurante foi identificada como **Epson TM-T20X 031**, modelo **M352A**, alimentação **100-240V, 50-60Hz, 1.0A**.
-2. O número de série informado foi **[SERIAL_IMPRESSORA_REMOVIDO]**. Este dado deve ser tratado como informação interna e removido caso o repositório seja público.
+2. O número de série da impressora é dado interno e não deve ser versionado no repositório.
 3. A estratégia de impressão permanece: **V1 com HTML/PDF imprimível pelo navegador**, porque é mais simples, testável e segura.
 4. A evolução de impressão direta/silenciosa deve ser tratada como etapa posterior, com driver Epson, ESC/POS, QZ Tray ou agente local próprio.
 5. Para planner, agenda, funil e SaaS futuro, a estratégia aprovada é usar **integrações Google opcionais**, principalmente Calendar, Tasks, Sheets/Drive e Maps, sempre com OAuth e escopos mínimos.
@@ -567,9 +567,9 @@ GOOGLE_CLIENT_SECRET=
 Exemplo proibido:
 
 ```env
-META_WHATSAPP_TOKEN=[TOKEN_REMOVIDO]
-GOOGLE_CLIENT_SECRET=[CREDENCIAL_REMOVIDA]
-DB_PASSWORD=[CREDENCIAL_REMOVIDA]
+META_WHATSAPP_TOKEN=<valor-sensivel-nao-versionar>
+GOOGLE_CLIENT_SECRET=<valor-sensivel-nao-versionar>
+DB_PASSWORD=<valor-sensivel-nao-versionar>
 ```
 
 ### 21.5 Regra sobre imagens do front

@@ -87,15 +87,15 @@ A comanda deve conter:
 Exemplo:
 
 ```txt
-Cliente: [NOME_OPERACIONAL_REMOVIDO]
-Retirada por: [NOME_OPERACIONAL_REMOVIDO]
+Cliente: Cliente A
+Retirada por: Pessoa B
 Observação: cliente pediu para deixar separado e avisar quando estiver pronto.
 ```
 
 Regras:
 
 - O cliente pagador pode ser diferente de quem retira.
-- Uma marmita pode ter dono específico, como “marmita da [NOME_OPERACIONAL_REMOVIDO]”, “marmita do [NOME_OPERACIONAL_REMOVIDO]”, “marmita do funcionário”.
+- Uma marmita pode ter dono específico, como "marmita do Cliente A", "marmita da Pessoa B", "marmita do funcionario".
 - O sistema deve permitir observações por pessoa/marmita.
 
 ---
@@ -124,7 +124,7 @@ Exemplo:
 
 ```txt
 1x Marmitex N8 — R$ 14,00
-Para: [NOME_OPERACIONAL_REMOVIDO]
+Para: Cliente A
 Carnes: porco macio, frango ao molho
 Acompanhamentos: arroz, feijão de caldo
 Saladas/legumes: berinjela, repolho
@@ -136,10 +136,10 @@ Exemplo com item diferente no mesmo pedido:
 
 ```txt
 1x Marmitex N8 — R$ 14,00
-Para: [NOME_OPERACIONAL_REMOVIDO]
+Para: Pessoa B
 Carnes: variadas
 Acompanhamentos: arroz, feijão, macarrão, maionese
-Observação: cliente informou que ele pode montar/retirar.
+Observação: cliente informou que a pessoa autorizada pode montar/retirar.
 ```
 
 ---
@@ -361,13 +361,13 @@ Tipo: Retirada
 Criado: 06/07/2026 11:32
 Impresso: 06/07/2026 11:34
 --------------------------------
-Cliente: [NOME_OPERACIONAL_REMOVIDO]
-Retirada por: [NOME_OPERACIONAL_REMOVIDO]
+Cliente: Cliente A
+Retirada por: Pessoa B
 --------------------------------
 ITENS
 
 1x Marmitex N8
-Para: [NOME_OPERACIONAL_REMOVIDO]
+Para: Cliente A
 Carnes: porco macio, frango molho
 Itens: arroz, feijão caldo,
 berinjela, repolho
@@ -375,7 +375,7 @@ Remover: macarrão, frituras
 Obs: pouco arroz, caprichar carnes
 
 1x Marmitex N8
-Para: [NOME_OPERACIONAL_REMOVIDO]
+Para: Pessoa B
 Carnes: variadas
 Itens: arroz, feijão, macarrão,
 maionese

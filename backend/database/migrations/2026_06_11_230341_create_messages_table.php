@@ -15,8 +15,8 @@ return new class extends Migration
             $table->id();
 
             $table->foreignId('conversation_id')
-                  ->constrained()
-                  ->cascadeOnDelete();
+                ->constrained()
+                ->cascadeOnDelete();
 
             $table->string('sender'); // 'customer' or 'agent'
             $table->text('content');

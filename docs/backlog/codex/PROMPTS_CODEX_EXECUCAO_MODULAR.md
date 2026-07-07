@@ -62,7 +62,7 @@ Regras:
 1. Não avance para M02 ainda.
 2. Implementar autenticação, usuários, perfis e permissões conforme documentação.
 3. Perfis mínimos: super_admin, admin_gerente, atendente.
-4. Considerar Murilo como super-admin/desenvolvedor, [NOME_OPERACIONAL_REMOVIDO] como admin/gerente e [NOME_OPERACIONAL_REMOVIDO] como atendente nos seeders se o módulo solicitar.
+4. Considerar perfis ficticios/sanitizados para super-admin/desenvolvedor, admin/gerente e atendente nos seeders se o módulo solicitar.
 5. Não armazenar senhas reais em texto puro.
 6. Não alterar .env real.
 7. Atualizar .env.example apenas com variáveis seguras.
