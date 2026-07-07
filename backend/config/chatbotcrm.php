@@ -25,6 +25,16 @@ return [
         ],
     ],
 
+    'ai' => [
+        'provider' => env('AI_PROVIDER', 'fake'),
+        'automation_enabled' => env('AI_AUTOMATION_ENABLED', true),
+        'allow_auto_send' => env('AI_ALLOW_AUTO_SEND', false),
+
+        'n8n' => [
+            'webhook_path' => env('N8N_AI_WEBHOOK_PATH'),
+        ],
+    ],
+
     'integrations' => [
         'n8n' => [
             'webhook_base_url' => env('N8N_WEBHOOK_BASE_URL'),

@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             RestaurantBaseSeeder::class,
             PrintingSeeder::class,
             WhatsAppSeeder::class,
+            AiAutomationSeeder::class,
             MenuSeeder::class,
             RoleAndPermissionSeeder::class,
             UserAccessSeeder::class,

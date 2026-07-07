@@ -127,4 +127,19 @@ class Company extends Model
     {
         return $this->hasMany(WhatsAppMediaFile::class);
     }
+
+    public function aiAutomationSettings(): HasMany
+    {
+        return $this->hasMany(AiAutomationSetting::class);
+    }
+
+    public function aiResponseSuggestions(): HasMany
+    {
+        return $this->hasMany(AiResponseSuggestion::class);
+    }
+
+    public function automationEvents(): HasMany
+    {
+        return $this->hasMany(AutomationEvent::class);
+    }
 }

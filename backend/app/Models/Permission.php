@@ -30,6 +30,8 @@ class Permission extends Model
         'printing.manage' => 'Gerenciar impressao, reimpressao e excecoes de comanda',
         'whatsapp.view' => 'Visualizar status e configuracao tecnica do WhatsApp',
         'whatsapp.manage' => 'Gerenciar provider, webhooks e integracao WhatsApp',
+        'ai.view' => 'Visualizar status e configuracao tecnica de IA e automacao',
+        'ai.manage' => 'Gerenciar modo de automacao, sugestoes e fallback manual',
     ];
 
     protected $fillable = [

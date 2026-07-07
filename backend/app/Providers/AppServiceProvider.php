@@ -2,9 +2,12 @@
 
 namespace App\Providers;
 
+use App\Contracts\Ai\AiProviderInterface;
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Models\Permission;
 use App\Models\User;
+use App\Services\Ai\Providers\FakeAiProvider;
+use App\Services\Ai\Providers\N8nAiProvider;
 use App\Services\WhatsApp\Providers\FakeWhatsAppProvider;
 use App\Services\WhatsApp\Providers\MetaCloudWhatsAppProvider;
 use Carbon\CarbonImmutable;
@@ -21,6 +24,15 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(AiProviderInterface::class, function ($app): AiProviderInterface {
+            $provider = (string) config('chatbotcrm.ai.provider', config('chatbotcrm.providers.ai', 'fake'));
+
+            return match ($provider) {
+                'n8n' => $app->make(N8nAiProvider::class),
+                default => $app->make(FakeAiProvider::class),
+            };
+        });
+
         $this->app->bind(WhatsAppProviderInterface::class, function ($app): WhatsAppProviderInterface {
             $provider = (string) config('chatbotcrm.whatsapp.provider', config('chatbotcrm.providers.whatsapp', 'fake'));
 

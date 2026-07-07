@@ -46,4 +46,14 @@ class Message extends Model
     {
         return $this->hasMany(WhatsAppMessageDelivery::class);
     }
+
+    public function aiResponseSuggestions(): HasMany
+    {
+        return $this->hasMany(AiResponseSuggestion::class);
+    }
+
+    public function automationEvents(): HasMany
+    {
+        return $this->hasMany(AutomationEvent::class);
+    }
 }
