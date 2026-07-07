@@ -43,6 +43,7 @@ export type PaymentStatus = 'pendente' | 'parcial' | 'pago' | 'credito' | 'revis
 export type FulfillmentType = 'retirada' | 'entrega' | 'balcao'
 export type AutomationMode = 'ia' | 'manual' | 'atencao'
 export type PrintStatus = 'aguardando' | 'imprimindo' | 'impresso' | 'reimpressao' | 'erro'
+export type PaymentMethod = 'pix' | 'dinheiro' | 'cartao' | 'credito_cliente' | 'misto' | 'a_confirmar'
 
 export type CustomerSummary = {
   id: string
@@ -132,9 +133,50 @@ export type DeliveryTask = {
 export type FinanceEntry = {
   id: string
   label: string
+  orderCode: string
   status: PaymentStatus
   amount: number
+  receivedAmount: number
+  pendingAmount: number
+  creditApplied: number
   method: string
+  paymentMethod: PaymentMethod
+  createdLabel: string
+  description: string
+}
+
+export type ExpenseEntry = {
+  id: string
+  label: string
+  category: string
+  amount: number
+  createdLabel: string
+  notes: string
+}
+
+export type PaymentMethodSummary = {
+  method: PaymentMethod
+  label: string
+  amount: number
+  count: number
+  percentage: number
+  tone: BadgeTone
+}
+
+export type DailyFinancialSummary = {
+  dateLabel: string
+  ordersCount: number
+  paidOrders: number
+  pendingOrders: number
+  grossRevenue: number
+  confirmedRevenue: number
+  pendingAmount: number
+  expensesAmount: number
+  netProfit: number
+  pixAmount: number
+  creditUsed: number
+  customerCreditBalance: number
+  averageTicket: number
 }
 
 export type IntegrationStatus = {

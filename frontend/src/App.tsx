@@ -36,7 +36,15 @@ function App() {
       case 'cadastro':
         return <AuthPreviewPage mode={activeRoute} />
       case 'dashboard':
-        return <DashboardPage conversations={snapshot.conversations} onNavigate={setActiveRoute} orders={snapshot.orders} />
+        return (
+          <DashboardPage
+            conversations={snapshot.conversations}
+            financialSummary={snapshot.financialSummary}
+            onNavigate={setActiveRoute}
+            orders={snapshot.orders}
+            paymentMethods={snapshot.paymentMethods}
+          />
+        )
       case 'conversas':
         return (
           <ConversationsPage
@@ -61,9 +69,27 @@ function App() {
       case 'entregas':
         return <DeliveryPage deliveries={snapshot.deliveries} />
       case 'pagamentos':
-        return <FinancePage entries={snapshot.financeEntries} mode="pagamentos" onOpenModal={setActiveModal} />
+        return (
+          <FinancePage
+            entries={snapshot.financeEntries}
+            expenses={snapshot.expenses}
+            mode="pagamentos"
+            onOpenModal={setActiveModal}
+            paymentMethods={snapshot.paymentMethods}
+            summary={snapshot.financialSummary}
+          />
+        )
       case 'financeiro':
-        return <FinancePage entries={snapshot.financeEntries} mode="financeiro" onOpenModal={setActiveModal} />
+        return (
+          <FinancePage
+            entries={snapshot.financeEntries}
+            expenses={snapshot.expenses}
+            mode="financeiro"
+            onOpenModal={setActiveModal}
+            paymentMethods={snapshot.paymentMethods}
+            summary={snapshot.financialSummary}
+          />
+        )
       case 'clientes':
         return <CustomersPage customers={snapshot.customers} />
       case 'relatorios':

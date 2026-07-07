@@ -459,6 +459,10 @@ label textarea {
   margin-bottom: 18px;
 }
 
+.dashboard-stats-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .stat-card {
   position: relative;
   min-height: 148px;
@@ -513,6 +517,10 @@ label textarea {
   gap: 16px;
 }
 
+.dashboard-card-wide {
+  grid-column: 1 / -1;
+}
+
 .sales-card {
   min-height: 310px;
 }
@@ -533,6 +541,42 @@ label textarea {
   min-height: 24px;
   border-radius: 8px 8px 0 0;
   background: linear-gradient(180deg, var(--color-brand), rgba(255, 138, 0, 0.2));
+}
+
+.dashboard-money-grid,
+.finance-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dashboard-money-grid {
+  margin-top: 14px;
+}
+
+.dashboard-money-grid div,
+.finance-meta-grid div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.dashboard-money-grid span,
+.finance-meta-grid span,
+.payment-method-row span,
+.expense-item span,
+.expense-item p,
+.table-main small {
+  color: var(--color-text-secondary);
+}
+
+.dashboard-money-grid strong,
+.finance-meta-grid strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text);
 }
 
 .status-list,
@@ -658,6 +702,74 @@ label textarea {
 .table-main {
   display: grid;
   gap: 4px;
+}
+
+.finance-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.finance-table-card {
+  min-width: 0;
+}
+
+.finance-side-stack,
+.payment-breakdown,
+.expense-list,
+.finance-note-card {
+  display: grid;
+  gap: 14px;
+}
+
+.payment-method-row {
+  display: grid;
+  gap: 9px;
+}
+
+.payment-method-row__top,
+.expense-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.payment-method-row__top {
+  align-items: center;
+}
+
+.payment-method-row__top > div,
+.expense-item > div {
+  display: grid;
+  gap: 4px;
+}
+
+.payment-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+}
+
+.payment-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-brand), var(--color-brand-2));
+}
+
+.expense-item {
+  align-items: start;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.expense-item__value {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .detail-list {
@@ -1156,7 +1268,8 @@ label textarea {
 
   .orders-layout,
   .conversation-layout,
-  .dashboard-grid {
+  .dashboard-grid,
+  .finance-dashboard-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1190,6 +1303,7 @@ label textarea {
   .page-header,
   .auth-preview,
   .split-grid,
+  .finance-dashboard-grid,
   .order-detail-grid,
   .print-panel__layout,
   .composer {
@@ -1210,7 +1324,18 @@ label textarea {
   .product-grid,
   .settings-grid,
   .customer-grid,
-  .state-grid {
+  .state-grid,
+  .dashboard-money-grid,
+  .finance-meta-grid {
     grid-template-columns: 1fr;
+  }
+
+  .payment-method-row__top,
+  .expense-item {
+    display: grid;
+  }
+
+  .expense-item__value {
+    text-align: left;
   }
 }

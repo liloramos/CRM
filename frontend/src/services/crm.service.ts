@@ -1,7 +1,14 @@
 import { productsMock } from '../mocks/cardapio.mock'
 import { customersMock } from '../mocks/clientes.mock'
 import { conversationsMock } from '../mocks/conversas.mock'
-import { deliveryTasksMock, financeEntriesMock, integrationsMock } from '../mocks/operacional.mock'
+import {
+  dailyFinancialSummaryMock,
+  deliveryTasksMock,
+  expenseEntriesMock,
+  financeEntriesMock,
+  integrationsMock,
+  paymentMethodSummaryMock,
+} from '../mocks/operacional.mock'
 import { ordersMock } from '../mocks/pedidos.mock'
 
 export function getOperationalSnapshot() {
@@ -12,6 +19,9 @@ export function getOperationalSnapshot() {
     products: productsMock,
     deliveries: deliveryTasksMock,
     financeEntries: financeEntriesMock,
+    financialSummary: dailyFinancialSummaryMock,
+    expenses: expenseEntriesMock,
+    paymentMethods: paymentMethodSummaryMock,
     integrations: integrationsMock,
   }
 }

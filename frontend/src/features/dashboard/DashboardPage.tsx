@@ -4,42 +4,50 @@ import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { StatCard } from '../../components/ui/StatCard'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import type { Conversation, Order, RouteKey } from '../../types/crm'
-import { formatCurrency, formatPercent } from '../../utils/formatters'
+import { PaymentMethodBreakdown } from '../financeiro/PaymentMethodBreakdown'
+import type { Conversation, DailyFinancialSummary, Order, PaymentMethodSummary, RouteKey } from '../../types/crm'
+import { formatCurrency } from '../../utils/formatters'
 
 type DashboardPageProps = {
   orders: Order[]
   conversations: Conversation[]
+  financialSummary: DailyFinancialSummary
+  paymentMethods: PaymentMethodSummary[]
   onNavigate: (route: RouteKey) => void
 }
 
-export function DashboardPage({ conversations, onNavigate, orders }: DashboardPageProps) {
+export function DashboardPage({ conversations, financialSummary, onNavigate, orders, paymentMethods }: DashboardPageProps) {
   const openOrders = orders.filter((order) => order.status !== 'finalizado' && order.status !== 'cancelado')
-  const total = orders.reduce((sum, order) => sum + order.total, 0)
   const waitingPrint = orders.filter((order) => order.printStatus !== 'impresso').length
 
   return (
     <PageContainer>
       <PageHeader
         actions={
-          <Button icon="orders" onClick={() => onNavigate('pedidos')} variant="primary">
-            Abrir fila
-          </Button>
+          <div className="inline-actions">
+            <Button icon="orders" onClick={() => onNavigate('pedidos')} variant="primary">
+              Abrir fila
+            </Button>
+            <Button icon="finance" onClick={() => onNavigate('financeiro')} variant="secondary">
+              Financeiro
+            </Button>
+          </div>
         }
         description="Visao operacional para atendimento, pedidos, pagamentos e impressao."
         title="Dashboard"
       />
 
-      <div className="stats-grid">
-        <StatCard icon="chat" label="Conversas ativas" trend={formatPercent(20)} value={`${conversations.length}`} />
-        <StatCard icon="orders" label="Pedidos em fluxo" trend={formatPercent(12)} value={`${openOrders.length}`} />
-        <StatCard icon="finance" label="Total em pedidos" trend={formatPercent(8)} value={formatCurrency(total)} />
+      <div className="stats-grid dashboard-stats-grid">
+        <StatCard icon="chat" label="Conversas ativas" value={`${conversations.length}`} />
+        <StatCard icon="orders" label="Pedidos em fluxo" trend={`${financialSummary.paidOrders}/${financialSummary.ordersCount} pagos`} value={`${openOrders.length}`} />
+        <StatCard icon="finance" label="Faturamento confirmado" tone="success" value={formatCurrency(financialSummary.confirmedRevenue)} />
+        <StatCard icon="payment" label="Pendencias" tone="warning" value={formatCurrency(financialSummary.pendingAmount)} />
         <StatCard icon="printer" label="Comandas pendentes" tone="warning" value={`${waitingPrint}`} />
       </div>
 
       <div className="dashboard-grid">
         <Card className="sales-card">
-          <SectionTitle eyebrow="Ultimas horas" title="Fluxo operacional" />
+          <SectionTitle eyebrow={financialSummary.dateLabel} title="Resumo financeiro do dia" />
           <div className="line-chart" aria-label="Grafico visual de fluxo operacional">
             <span style={{ height: '24%' }} />
             <span style={{ height: '38%' }} />
@@ -49,6 +57,24 @@ export function DashboardPage({ conversations, onNavigate, orders }: DashboardPa
             <span style={{ height: '72%' }} />
             <span style={{ height: '64%' }} />
             <span style={{ height: '82%' }} />
+          </div>
+          <div className="dashboard-money-grid">
+            <div>
+              <span>Bruto</span>
+              <strong>{formatCurrency(financialSummary.grossRevenue)}</strong>
+            </div>
+            <div>
+              <span>Pix</span>
+              <strong>{formatCurrency(financialSummary.pixAmount)}</strong>
+            </div>
+            <div>
+              <span>Credito usado</span>
+              <strong>{formatCurrency(financialSummary.creditUsed)}</strong>
+            </div>
+            <div>
+              <span>Lucro simples</span>
+              <strong>{formatCurrency(financialSummary.netProfit)}</strong>
+            </div>
           </div>
         </Card>
 
@@ -64,7 +90,12 @@ export function DashboardPage({ conversations, onNavigate, orders }: DashboardPa
           </div>
         </Card>
 
-        <Card className="activity-card">
+        <Card>
+          <SectionTitle title="Pagamentos do dia" />
+          <PaymentMethodBreakdown methods={paymentMethods} />
+        </Card>
+
+        <Card className="activity-card dashboard-card-wide">
           <SectionTitle title="Atividades recentes" />
           <div className="activity-list">
             {orders.flatMap((order) =>
