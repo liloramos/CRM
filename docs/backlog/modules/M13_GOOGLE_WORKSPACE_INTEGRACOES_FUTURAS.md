@@ -3,6 +3,8 @@
 **Arquivo:** `M13_GOOGLE_WORKSPACE_INTEGRACOES_FUTURAS.md`  
 **Commit esperado:** `docs(integrations): add google workspace future integration plan`
 
+**Commit sugerido nesta execucao:** `chore(integrations): prepare future workspace integrations`
+
 ## Objetivo
 Planejar Google Maps, Calendar, Tasks, Sheets e Drive como integrações opcionais.
 
@@ -25,6 +27,19 @@ Além disso, ler ADRs relacionados quando existirem.
 - Google Tasks para tarefas operacionais.
 - Google Sheets/Drive para exportações.
 - Evitar Gmail na V1 por escopos sensíveis.
+
+## Entregavel tecnico-documental
+
+O planejamento estrutural do M13 fica registrado em:
+
+```txt
+docs/backlog/integrations/GOOGLE_WORKSPACE_FUTURE_M13.md
+docs/backlog/integrations/README.md
+```
+
+Esse entregavel documenta Google Workspace, webhooks, agenda/calendario, e-mail
+e exportacoes futuras sem criar credenciais, chamadas externas reais ou
+funcionalidades fora do escopo.
 
 ## Fora de escopo deste módulo
 
@@ -62,7 +77,7 @@ Arquivos alterados
 Comandos executados
 Resultado das validações
 Pendências
-Commit: docs(integrations): add google workspace future integration plan
+Commit: chore(integrations): prepare future workspace integrations
 ```
 
 Depois parar e aguardar autorização do Murilo.

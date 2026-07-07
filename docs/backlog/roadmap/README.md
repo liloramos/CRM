@@ -9,6 +9,8 @@ futuras e nao substituem os documentos oficiais de regra de negocio.
 ## Documentos
 
 - `CRM_SAAS_EVOLUTION_M12.md`: notas do modulo M12 para evolucao SaaS/CRM.
+- `../integrations/GOOGLE_WORKSPACE_FUTURE_M13.md`: plano de integracoes
+  futuras para Google Workspace, webhooks e exportacoes.
 
 ## Regras
 

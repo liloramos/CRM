@@ -34,7 +34,8 @@ CHATBOTCRM/
         ├── modules/
         ├── adr/
         ├── front/
-        └── roadmap/
+        ├── roadmap/
+        └── integrations/
 ```
 
 ## Primeiro arquivo para o Codex ler
@@ -65,3 +66,14 @@ docs/backlog/roadmap/CRM_SAAS_EVOLUTION_M12.md
 
 Esse documento registra pontos de extensao, limites de escopo e preparacao para
 evolucao SaaS/CRM sem implementar funcionalidades futuras.
+
+## Integracoes futuras
+
+As notas estruturais do M13 ficam em:
+
+```txt
+docs/backlog/integrations/GOOGLE_WORKSPACE_FUTURE_M13.md
+```
+
+Esse documento planeja Google Workspace, webhooks, agenda/calendario, e-mail e
+exportacoes futuras sem credenciais reais ou chamadas externas.
