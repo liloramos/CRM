@@ -28,6 +28,8 @@ class Permission extends Model
         'delivery.manage' => 'Gerenciar entregas, retiradas e calculo de taxas',
         'printing.view' => 'Visualizar comandas e previas de impressao',
         'printing.manage' => 'Gerenciar impressao, reimpressao e excecoes de comanda',
+        'whatsapp.view' => 'Visualizar status e configuracao tecnica do WhatsApp',
+        'whatsapp.manage' => 'Gerenciar provider, webhooks e integracao WhatsApp',
     ];
 
     protected $fillable = [

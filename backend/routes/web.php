@@ -2,12 +2,17 @@
 
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
 use App\Http\Controllers\Printing\PrintJobController;
+use App\Http\Controllers\WhatsApp\WhatsAppStatusController;
 use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'welcome')->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('dashboard', 'dashboard')->name('dashboard');
+
+    Route::get('settings/whatsapp/status', [WhatsAppStatusController::class, 'show'])
+        ->middleware('permission:whatsapp.view')
+        ->name('settings.whatsapp.status');
 
     Route::get('orders/{order}/ticket/preview', OrderTicketPreviewController::class)
         ->middleware('permission:printing.view')

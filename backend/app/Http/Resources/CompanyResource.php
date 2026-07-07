@@ -21,6 +21,7 @@ class CompanyResource extends JsonResource
             'delivery_setting' => new DeliverySettingResource($this->whenLoaded('deliverySetting')),
             'printer_settings' => PrinterSettingResource::collection($this->whenLoaded('printerSettings')),
             'receipt_templates' => ReceiptTemplateResource::collection($this->whenLoaded('receiptTemplates')),
+            'whatsapp_accounts' => WhatsAppAccountResource::collection($this->whenLoaded('whatsappAccounts')),
             'operating_hours' => OperatingHourResource::collection($this->whenLoaded('operatingHours')),
             'customer_addresses' => CustomerAddressResource::collection($this->whenLoaded('customerAddresses')),
             'created_at' => $this->created_at,

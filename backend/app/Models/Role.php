@@ -44,6 +44,8 @@ class Role extends Model
             'delivery.manage',
             'printing.view',
             'printing.manage',
+            'whatsapp.view',
+            'whatsapp.manage',
         ],
         self::ADMIN_GERENTE => [
             'dashboard.view',
@@ -62,6 +64,8 @@ class Role extends Model
             'delivery.manage',
             'printing.view',
             'printing.manage',
+            'whatsapp.view',
+            'whatsapp.manage',
         ],
         self::ATENDENTE => [
             'dashboard.view',
@@ -74,6 +78,7 @@ class Role extends Model
             'delivery.manage',
             'printing.view',
             'printing.manage',
+            'whatsapp.view',
         ],
     ];
 

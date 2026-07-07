@@ -107,4 +107,24 @@ class Company extends Model
     {
         return $this->hasMany(PrintJobEvent::class);
     }
+
+    public function whatsappAccounts(): HasMany
+    {
+        return $this->hasMany(WhatsAppAccount::class);
+    }
+
+    public function whatsappWebhookEvents(): HasMany
+    {
+        return $this->hasMany(WhatsAppWebhookEvent::class);
+    }
+
+    public function whatsappMessageDeliveries(): HasMany
+    {
+        return $this->hasMany(WhatsAppMessageDelivery::class);
+    }
+
+    public function whatsappMediaFiles(): HasMany
+    {
+        return $this->hasMany(WhatsAppMediaFile::class);
+    }
 }
