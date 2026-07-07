@@ -42,6 +42,8 @@ class Role extends Model
             'payments.manage',
             'delivery.view',
             'delivery.manage',
+            'printing.view',
+            'printing.manage',
         ],
         self::ADMIN_GERENTE => [
             'dashboard.view',
@@ -58,6 +60,8 @@ class Role extends Model
             'payments.manage',
             'delivery.view',
             'delivery.manage',
+            'printing.view',
+            'printing.manage',
         ],
         self::ATENDENTE => [
             'dashboard.view',
@@ -68,6 +72,8 @@ class Role extends Model
             'payments.manage',
             'delivery.view',
             'delivery.manage',
+            'printing.view',
+            'printing.manage',
         ],
     ];
 

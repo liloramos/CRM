@@ -87,4 +87,24 @@ class Company extends Model
     {
         return $this->hasMany(CustomerCreditMovement::class);
     }
+
+    public function printerSettings(): HasMany
+    {
+        return $this->hasMany(PrinterSetting::class);
+    }
+
+    public function receiptTemplates(): HasMany
+    {
+        return $this->hasMany(ReceiptTemplate::class);
+    }
+
+    public function printJobs(): HasMany
+    {
+        return $this->hasMany(PrintJob::class);
+    }
+
+    public function printJobEvents(): HasMany
+    {
+        return $this->hasMany(PrintJobEvent::class);
+    }
 }

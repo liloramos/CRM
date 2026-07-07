@@ -94,6 +94,26 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(DeliveryQuote::class, 'quoted_by_user_id');
     }
 
+    public function requestedPrintJobs(): HasMany
+    {
+        return $this->hasMany(PrintJob::class, 'requested_by_user_id');
+    }
+
+    public function printedPrintJobs(): HasMany
+    {
+        return $this->hasMany(PrintJob::class, 'printed_by_user_id');
+    }
+
+    public function printJobEvents(): HasMany
+    {
+        return $this->hasMany(PrintJobEvent::class);
+    }
+
+    public function printWaivedOrders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'print_waived_by_user_id');
+    }
+
     public function assignRole(Role|string $role): void
     {
         $roleModel = $role instanceof Role

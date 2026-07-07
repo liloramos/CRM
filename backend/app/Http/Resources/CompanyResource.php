@@ -19,6 +19,8 @@ class CompanyResource extends JsonResource
             'profile' => new RestaurantProfileResource($this->whenLoaded('restaurantProfile')),
             'setting' => new CompanySettingResource($this->whenLoaded('setting')),
             'delivery_setting' => new DeliverySettingResource($this->whenLoaded('deliverySetting')),
+            'printer_settings' => PrinterSettingResource::collection($this->whenLoaded('printerSettings')),
+            'receipt_templates' => ReceiptTemplateResource::collection($this->whenLoaded('receiptTemplates')),
             'operating_hours' => OperatingHourResource::collection($this->whenLoaded('operatingHours')),
             'customer_addresses' => CustomerAddressResource::collection($this->whenLoaded('customerAddresses')),
             'created_at' => $this->created_at,

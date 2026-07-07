@@ -181,6 +181,12 @@ class OrderWorkflowService
         }
 
         return DB::transaction(function () use ($order, $status, $user, $reason, $notes, $metadata): Order {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($status === Order::STATUS_IN_PREPARATION) {
+                $this->assertCanAdvanceToPreparation($order);
+            }
+
             $fromStatus = $order->status;
             $timestampFields = $this->timestampFieldsFor($status);
 
@@ -231,6 +237,19 @@ class OrderWorkflowService
         if (! $order->canBeEdited()) {
             throw new DomainException('Order cannot be edited after printing, preparation, finalization or cancellation.');
         }
+    }
+
+    public function assertCanAdvanceToPreparation(Order $order): void
+    {
+        if (! $order->print_required) {
+            return;
+        }
+
+        if (in_array($order->print_status, Order::PREPARATION_PRINT_RELEASE_STATUSES, true)) {
+            return;
+        }
+
+        throw new DomainException('Order cannot move to preparation before ticket is printed or manually authorized.');
     }
 
     private function buildCode(CarbonInterface $date, int $dailySequence): string

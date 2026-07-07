@@ -88,6 +88,26 @@ class Order extends Model
 
     public const PICKUP_STATUS_PICKED_UP = 'picked_up';
 
+    public const PRINT_STATUS_PENDING = 'pending';
+
+    public const PRINT_STATUS_PREVIEWED = 'previewed';
+
+    public const PRINT_STATUS_QUEUED = 'queued';
+
+    public const PRINT_STATUS_PRINTING = 'printing';
+
+    public const PRINT_STATUS_PRINTED = 'printed';
+
+    public const PRINT_STATUS_FAILED = 'failed';
+
+    public const PRINT_STATUS_REPRINT_REQUESTED = 'reprint_requested';
+
+    public const PRINT_STATUS_PRINTER_UNAVAILABLE = 'printer_unavailable';
+
+    public const PRINT_STATUS_MANUAL_CONFIRMED = 'manual_confirmed';
+
+    public const PRINT_STATUS_WAIVED = 'waived';
+
     /**
      * @var list<string>
      */
@@ -121,6 +141,15 @@ class Order extends Model
         self::STATUS_CANCELLED,
     ];
 
+    /**
+     * @var list<string>
+     */
+    public const PREPARATION_PRINT_RELEASE_STATUSES = [
+        self::PRINT_STATUS_PRINTED,
+        self::PRINT_STATUS_MANUAL_CONFIRMED,
+        self::PRINT_STATUS_WAIVED,
+    ];
+
     protected $fillable = [
         'company_id',
         'payer_customer_id',
@@ -128,6 +157,7 @@ class Order extends Model
         'created_by_user_id',
         'recurring_order_reference_id',
         'delivery_address_id',
+        'latest_print_job_id',
         'order_date',
         'daily_sequence',
         'code',
@@ -162,6 +192,14 @@ class Order extends Model
         'delivery_notes',
         'delivery_address_snapshot',
         'delivery_calculated_at',
+        'print_required',
+        'print_status',
+        'ticket_generated_at',
+        'printed_at',
+        'print_waived_at',
+        'print_waived_by_user_id',
+        'print_waiver_reason',
+        'print_error_message',
         'payment_method',
         'payment_status',
         'subtotal_cents',
@@ -193,6 +231,10 @@ class Order extends Model
             'delivery_fee_cents' => 'integer',
             'delivery_address_snapshot' => 'array',
             'delivery_calculated_at' => 'datetime',
+            'print_required' => 'boolean',
+            'ticket_generated_at' => 'datetime',
+            'printed_at' => 'datetime',
+            'print_waived_at' => 'datetime',
             'is_manual' => 'boolean',
             'is_fragmented' => 'boolean',
             'customer_confirmation_required' => 'boolean',
@@ -244,6 +286,16 @@ class Order extends Model
         return $this->belongsTo(CustomerAddress::class, 'delivery_address_id');
     }
 
+    public function latestPrintJob(): BelongsTo
+    {
+        return $this->belongsTo(PrintJob::class, 'latest_print_job_id');
+    }
+
+    public function printWaivedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'print_waived_by_user_id');
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
@@ -277,6 +329,16 @@ class Order extends Model
     public function deliveryQuotes(): HasMany
     {
         return $this->hasMany(DeliveryQuote::class);
+    }
+
+    public function printJobs(): HasMany
+    {
+        return $this->hasMany(PrintJob::class);
+    }
+
+    public function printJobEvents(): HasMany
+    {
+        return $this->hasMany(PrintJobEvent::class);
     }
 
     public function canBeEdited(): bool
