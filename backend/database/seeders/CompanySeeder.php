@@ -12,9 +12,9 @@ class CompanySeeder extends Seeder
      */
     public function run(): void
     {
-        Company::create([
-            'name' => 'Restaurante Sol',
-            'slug' => 'restaurante-sol',
-        ]);
+        Company::query()->updateOrCreate(
+            ['slug' => 'restaurante-sol'],
+            ['name' => 'Restaurante Sol'],
+        );
     }
 }

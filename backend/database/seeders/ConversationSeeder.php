@@ -2,7 +2,9 @@
 
 namespace Database\Seeders;
 
+use App\Models\Company;
 use App\Models\Conversation;
+use App\Models\Customer;
 use App\Models\Message;
 use Illuminate\Database\Seeder;
 
@@ -13,19 +15,44 @@ class ConversationSeeder extends Seeder
      */
     public function run(): void
     {
-        $conversation = Conversation::create([
-            'company_id' => 1,
-            'customer_id' => 1,
-            'channel' => 'whatsapp',
-            'status' => 'open',
-            'started_at' => now(),
-        ]);
+        $company = Company::query()->firstOrCreate(
+            ['slug' => 'restaurante-sol'],
+            ['name' => 'Restaurante Sol'],
+        );
 
-        Message::create([
-            'conversation_id' => $conversation->id,
-            'sender' => 'customer',
-            'content' => 'Olá, gostaria de fazer um pedido.',
-            'type' => 'text',
-        ]);
+        $customer = Customer::query()->updateOrCreate(
+            [
+                'company_id' => $company->id,
+                'email' => 'cliente.exemplo@example.test',
+            ],
+            [
+                'name' => 'Cliente Exemplo',
+                'phone' => null,
+                'notes' => 'Cliente ficticio para seed local.',
+            ],
+        );
+
+        $conversation = Conversation::query()->updateOrCreate(
+            [
+                'company_id' => $company->id,
+                'customer_id' => $customer->id,
+                'channel' => 'whatsapp',
+            ],
+            [
+                'status' => 'open',
+                'started_at' => now(),
+            ],
+        );
+
+        Message::query()->firstOrCreate(
+            [
+                'conversation_id' => $conversation->id,
+                'sender' => 'customer',
+                'type' => 'text',
+            ],
+            [
+                'content' => 'Ola, gostaria de fazer um pedido.',
+            ],
+        );
     }
 }

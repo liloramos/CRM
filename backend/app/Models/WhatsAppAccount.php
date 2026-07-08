@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WhatsAppAccount extends Model
 {
+    protected $table = 'whatsapp_accounts';
+
     public const PROVIDER_FAKE = 'fake';
 
     public const PROVIDER_META_CLOUD = 'meta_cloud';

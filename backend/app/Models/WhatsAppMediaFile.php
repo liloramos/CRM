@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WhatsAppMediaFile extends Model
 {
+    protected $table = 'whatsapp_media_files';
+
     public const STATUS_RECEIVED = 'received';
 
     public const STATUS_STORED = 'stored';

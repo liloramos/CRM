@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Company;
 use App\Models\Customer;
 use Illuminate\Database\Seeder;
 
@@ -12,12 +13,21 @@ class CustomerSeeder extends Seeder
      */
     public function run(): void
     {
-        Customer::create([
-            'company_id' => 1,
-            'name' => 'Cliente Exemplo',
-            'phone' => null,
-            'email' => 'cliente.exemplo@example.test',
-            'notes' => 'Cliente ficticio para seed local.',
-        ]);
+        $company = Company::query()->firstOrCreate(
+            ['slug' => 'restaurante-sol'],
+            ['name' => 'Restaurante Sol'],
+        );
+
+        Customer::query()->updateOrCreate(
+            [
+                'company_id' => $company->id,
+                'email' => 'cliente.exemplo@example.test',
+            ],
+            [
+                'name' => 'Cliente Exemplo',
+                'phone' => null,
+                'notes' => 'Cliente ficticio para seed local.',
+            ],
+        );
     }
 }

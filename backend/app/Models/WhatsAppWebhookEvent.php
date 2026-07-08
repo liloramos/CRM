@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class WhatsAppWebhookEvent extends Model
 {
+    protected $table = 'whatsapp_webhook_events';
+
     public const STATUS_RECEIVED = 'received';
 
     public const STATUS_PROCESSED = 'processed';
