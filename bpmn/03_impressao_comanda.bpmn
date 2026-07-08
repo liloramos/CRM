@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_ImpressaoComanda" targetNamespace="https://chatbotcrm.local/bpmn">
+  <bpmn:process id="Process_ImpressaoComanda" name="Impressão da Comanda" isExecutable="false">
+    <bpmn:documentation>Fluxo de impressão de comanda para cozinha usando impressora térmica não fiscal. Inclui geração de layout, verificação de disponibilidade, fila/PDF, alerta visual e reimpressão.</bpmn:documentation>
+    <bpmn:startEvent id="Start_PedidoFeito" name="Pedido feito">
+      <bpmn:outgoing>Flow_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="Task_BotaoImprimir" name="Atendente clica em imprimir">
+      <bpmn:incoming>Flow_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_2</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="Task_GerarLayout" name="Gerar layout da comanda não fiscal">
+      <bpmn:incoming>Flow_2</bpmn:incoming>
+      <bpmn:incoming>Flow_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_ImpressoraOnline" name="Impressora disponível?">
+      <bpmn:incoming>Flow_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_EnviarImpressora" name="Enviar para impressora térmica">
+      <bpmn:incoming>Flow_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_ImpressaoOK" name="Impressão OK?">
+      <bpmn:incoming>Flow_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="Task_RegistrarImpresso" name="Registrar comanda impressa e horário">
+      <bpmn:incoming>Flow_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Cozinha" name="Comanda enviada para cozinha">
+      <bpmn:incoming>Flow_7</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_FilaImpressao" name="Salvar em fila de impressão / PDF">
+      <bpmn:incoming>Flow_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="Task_AlertaAtendente" name="Alertar atendente para conferir impressora">
+      <bpmn:incoming>Flow_9</bpmn:incoming>
+      <bpmn:incoming>Flow_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_11</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="Task_Reimprimir" name="Reimprimir ou ajustar comanda">
+      <bpmn:incoming>Flow_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_12</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:sequenceFlow id="Flow_1" sourceRef="Start_PedidoFeito" targetRef="Task_BotaoImprimir" />
+    <bpmn:sequenceFlow id="Flow_2" sourceRef="Task_BotaoImprimir" targetRef="Task_GerarLayout" />
+    <bpmn:sequenceFlow id="Flow_3" sourceRef="Task_GerarLayout" targetRef="Gateway_ImpressoraOnline" />
+    <bpmn:sequenceFlow id="Flow_4" name="Sim" sourceRef="Gateway_ImpressoraOnline" targetRef="Task_EnviarImpressora" />
+    <bpmn:sequenceFlow id="Flow_5" sourceRef="Task_EnviarImpressora" targetRef="Gateway_ImpressaoOK" />
+    <bpmn:sequenceFlow id="Flow_6" name="Sim" sourceRef="Gateway_ImpressaoOK" targetRef="Task_RegistrarImpresso" />
+    <bpmn:sequenceFlow id="Flow_7" sourceRef="Task_RegistrarImpresso" targetRef="End_Cozinha" />
+    <bpmn:sequenceFlow id="Flow_8" name="Não" sourceRef="Gateway_ImpressoraOnline" targetRef="Task_FilaImpressao" />
+    <bpmn:sequenceFlow id="Flow_9" sourceRef="Task_FilaImpressao" targetRef="Task_AlertaAtendente" />
+    <bpmn:sequenceFlow id="Flow_10" name="Não" sourceRef="Gateway_ImpressaoOK" targetRef="Task_AlertaAtendente" />
+    <bpmn:sequenceFlow id="Flow_11" sourceRef="Task_AlertaAtendente" targetRef="Task_Reimprimir" />
+    <bpmn:sequenceFlow id="Flow_12" sourceRef="Task_Reimprimir" targetRef="Task_GerarLayout" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Process_ImpressaoComanda">
+    <bpmndi:BPMNPlane id="BPMNPlane_Process_ImpressaoComanda" bpmnElement="Process_ImpressaoComanda">
+      <bpmndi:BPMNShape id="Start_PedidoFeito_di" bpmnElement="Start_PedidoFeito">
+        <dc:Bounds x="80" y="205" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_BotaoImprimir_di" bpmnElement="Task_BotaoImprimir">
+        <dc:Bounds x="160" y="180" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_GerarLayout_di" bpmnElement="Task_GerarLayout">
+        <dc:Bounds x="400" y="180" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ImpressoraOnline_di" bpmnElement="Gateway_ImpressoraOnline">
+        <dc:Bounds x="655" y="198" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_EnviarImpressora_di" bpmnElement="Task_EnviarImpressora">
+        <dc:Bounds x="755" y="95" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_ImpressaoOK_di" bpmnElement="Gateway_ImpressaoOK">
+        <dc:Bounds x="1005" y="113" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RegistrarImpresso_di" bpmnElement="Task_RegistrarImpresso">
+        <dc:Bounds x="1110" y="95" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Cozinha_di" bpmnElement="End_Cozinha">
+        <dc:Bounds x="1365" y="120" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_FilaImpressao_di" bpmnElement="Task_FilaImpressao">
+        <dc:Bounds x="755" y="290" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_AlertaAtendente_di" bpmnElement="Task_AlertaAtendente">
+        <dc:Bounds x="995" y="290" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_Reimprimir_di" bpmnElement="Task_Reimprimir">
+        <dc:Bounds x="1235" y="290" width="190" height="86" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_1_di" bpmnElement="Flow_1">
+        <di:waypoint x="116" y="223" />
+        <di:waypoint x="160" y="223" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_2_di" bpmnElement="Flow_2">
+        <di:waypoint x="350" y="223" />
+        <di:waypoint x="400" y="223" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_3_di" bpmnElement="Flow_3">
+        <di:waypoint x="590" y="223" />
+        <di:waypoint x="655" y="223" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_4_di" bpmnElement="Flow_4">
+        <di:waypoint x="705" y="223" />
+        <di:waypoint x="730" y="223" />
+        <di:waypoint x="730" y="138" />
+        <di:waypoint x="755" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_5_di" bpmnElement="Flow_5">
+        <di:waypoint x="945" y="138" />
+        <di:waypoint x="1005" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_6_di" bpmnElement="Flow_6">
+        <di:waypoint x="1055" y="138" />
+        <di:waypoint x="1110" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_7_di" bpmnElement="Flow_7">
+        <di:waypoint x="1300" y="138" />
+        <di:waypoint x="1365" y="138" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_8_di" bpmnElement="Flow_8">
+        <di:waypoint x="705" y="223" />
+        <di:waypoint x="730" y="223" />
+        <di:waypoint x="730" y="333" />
+        <di:waypoint x="755" y="333" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_9_di" bpmnElement="Flow_9">
+        <di:waypoint x="945" y="333" />
+        <di:waypoint x="995" y="333" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_10_di" bpmnElement="Flow_10">
+        <di:waypoint x="1055" y="138" />
+        <di:waypoint x="1025" y="138" />
+        <di:waypoint x="1025" y="333" />
+        <di:waypoint x="995" y="333" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_11_di" bpmnElement="Flow_11">
+        <di:waypoint x="1185" y="333" />
+        <di:waypoint x="1235" y="333" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_12_di" bpmnElement="Flow_12">
+        <di:waypoint x="1425" y="333" />
+        <di:waypoint x="912" y="333" />
+        <di:waypoint x="912" y="223" />
+        <di:waypoint x="400" y="223" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

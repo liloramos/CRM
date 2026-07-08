@@ -1,75 +1,29 @@
-# React + TypeScript + Vite
+# ChatBotCRM Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Interface operacional em React, TypeScript e Vite para o ChatBotCRM.
 
-Currently, two official plugins are available:
+## Organizacao
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `src/components/layout`: estrutura visual, sidebar, topo e container de pagina.
+- `src/components/ui`: componentes reutilizaveis de interface.
+- `src/features`: telas operacionais por dominio.
+- `src/mocks`: dados ficticios e sanitizados usados pela interface.
+- `src/constants`: menus, cores, status e configuracoes visuais.
+- `src/services`: camada de acesso aos dados mockados ou futura API.
+- `src/types`: tipos compartilhados da interface.
+- `src/utils`: formatadores e utilitarios.
 
-## React Compiler
+## Comandos
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
-
-Note: This will impact Vite dev & build performances.
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run lint
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Seguranca dos mocks
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Os mocks devem permanecer ficticios. Nao inserir telefone real, CPF, endereco real,
+chave Pix real, comprovante, token, credencial ou conversa real de WhatsApp.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+As imagens em `../imgs/referencias-front/` sao apenas referencia estetica e de UX.
+Nao copiar nomes, valores, enderecos, textos ou regras de negocio dessas imagens.
