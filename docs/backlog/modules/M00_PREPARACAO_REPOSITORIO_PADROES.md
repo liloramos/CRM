@@ -1,6 +1,6 @@
 # Preparação do repositório e padrões
 
-**Arquivo:** `M00_PREPARACAO_REPOSITORIO_PADROES.md`  
+**Arquivo:** `M00_PREPARACAO_REPOSITORIO_PADROES.md`
 **Commit esperado:** `chore: prepare repository standards for modular execution`
 
 ## Objetivo

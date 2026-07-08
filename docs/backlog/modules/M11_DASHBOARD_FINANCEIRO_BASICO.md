@@ -1,6 +1,6 @@
 # Financeiro básico
 
-**Arquivo:** `M11_DASHBOARD_FINANCEIRO_BASICO.md`  
+**Arquivo:** `M11_DASHBOARD_FINANCEIRO_BASICO.md`
 **Commit esperado:** `feat(finance): add basic financial dashboard foundation`
 
 ## Objetivo

@@ -1,6 +1,6 @@
 # Entrega e taxa por km
 
-**Arquivo:** `M06_ENTREGA_TAXA_KM.md`  
+**Arquivo:** `M06_ENTREGA_TAXA_KM.md`
 **Commit esperado:** `feat(delivery): add delivery fee calculation by distance`
 
 ## Objetivo

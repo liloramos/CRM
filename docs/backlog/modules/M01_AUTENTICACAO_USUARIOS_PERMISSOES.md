@@ -1,6 +1,6 @@
 # Autenticação, usuários e permissões
 
-**Arquivo:** `M01_AUTENTICACAO_USUARIOS_PERMISSOES.md`  
+**Arquivo:** `M01_AUTENTICACAO_USUARIOS_PERMISSOES.md`
 **Commit esperado:** `feat(auth): add users roles and permissions foundation`
 
 ## Objetivo

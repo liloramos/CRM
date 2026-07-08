@@ -1,6 +1,6 @@
 # IA, n8n e fallback manual
 
-**Arquivo:** `M09_IA_N8N_FALLBACK_MANUAL.md`  
+**Arquivo:** `M09_IA_N8N_FALLBACK_MANUAL.md`
 **Commit esperado:** `feat(ai): add automation and manual takeover foundations`
 
 ## Objetivo

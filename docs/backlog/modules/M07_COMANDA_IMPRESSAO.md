@@ -1,6 +1,6 @@
 # Comanda e impressão
 
-**Arquivo:** `M07_COMANDA_IMPRESSAO.md`  
+**Arquivo:** `M07_COMANDA_IMPRESSAO.md`
 **Commit esperado:** `feat(printing): add receipt and kitchen ticket generation`
 
 ## Objetivo

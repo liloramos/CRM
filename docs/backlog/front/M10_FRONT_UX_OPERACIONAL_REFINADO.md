@@ -1,6 +1,6 @@
 # Front UX operacional
 
-**Arquivo:** `M10_FRONT_UX_OPERACIONAL_REFINADO.md`  
+**Arquivo:** `M10_FRONT_UX_OPERACIONAL_REFINADO.md`
 **Commit esperado:** `feat(front): add operational CRM interface foundation`
 
 ## Objetivo

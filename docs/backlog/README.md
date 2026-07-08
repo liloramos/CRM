@@ -52,8 +52,8 @@ docs/backlog/codex/PROMPT_INICIAL_CODEX_M00.md
 
 ## Regra de ouro
 
-O Codex deve executar **um módulo por vez**.  
-Não deve implementar tudo junto.  
+O Codex deve executar **um módulo por vez**.
+Não deve implementar tudo junto.
 Não deve avançar sem autorização do Murilo.
 
 ## Roadmap CRM/SaaS

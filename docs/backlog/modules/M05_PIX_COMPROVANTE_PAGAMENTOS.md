@@ -1,6 +1,6 @@
 # Pix, comprovantes e pagamentos
 
-**Arquivo:** `M05_PIX_COMPROVANTE_PAGAMENTOS.md`  
+**Arquivo:** `M05_PIX_COMPROVANTE_PAGAMENTOS.md`
 **Commit esperado:** `feat(payments): add pix receipt confirmation flow`
 
 ## Objetivo

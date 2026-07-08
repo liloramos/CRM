@@ -1,6 +1,6 @@
 # Cardápio, produtos e disponibilidade
 
-**Arquivo:** `M03_CARDAPIO_PRODUTOS_DISPONIBILIDADE.md`  
+**Arquivo:** `M03_CARDAPIO_PRODUTOS_DISPONIBILIDADE.md`
 **Commit esperado:** `feat(menu): add products menu and availability management`
 
 ## Objetivo

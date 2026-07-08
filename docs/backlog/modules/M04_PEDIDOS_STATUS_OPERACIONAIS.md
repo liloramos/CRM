@@ -1,6 +1,6 @@
 # Pedidos e status operacionais
 
-**Arquivo:** `M04_PEDIDOS_STATUS_OPERACIONAIS.md`  
+**Arquivo:** `M04_PEDIDOS_STATUS_OPERACIONAIS.md`
 **Commit esperado:** `feat(orders): add order lifecycle and operational statuses`
 
 ## Objetivo

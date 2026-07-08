@@ -1,8 +1,8 @@
 # ChatBotCRM - Sol Restaurante
 
-**Documento Mestre de Produto, Operação, Arquitetura e Backlog Geral - Versão 1.8**  
+**Documento Mestre de Produto, Operação, Arquitetura e Backlog Geral - Versão 1.8**
 **Data:** 05/07/2026
-**Responsável técnico:** Murilo - Super-admin / Desenvolvedor  
+**Responsável técnico:** Murilo - Super-admin / Desenvolvedor
 **Empresa piloto:** Sol Restaurante
 
 ## 1. Propósito deste documento

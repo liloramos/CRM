@@ -4,19 +4,19 @@ Este diretório contém os fluxos BPMN iniciais do projeto ChatBotCRM.
 
 ## Arquivos gerados
 
-1. `01_atendimento_cliente.bpmn`  
+1. `01_atendimento_cliente.bpmn`
    Fluxo de atendimento via WhatsApp, identificação do cliente, conversa diária, IA, modo manual e encaminhamento para pedido.
 
-2. `02_montagem_pedido.bpmn`  
+2. `02_montagem_pedido.bpmn`
    Fluxo de montagem de pedido com cardápio diário, indisponibilidade de itens, extras, bebidas, preço, forma de pagamento, envio de chave Pix/QR Code, recebimento de comprovante pelo WhatsApp e status de pedido feito.
 
-3. `03_impressao_comanda.bpmn`  
+3. `03_impressao_comanda.bpmn`
    Fluxo de geração e impressão de comanda em impressora térmica não fiscal, incluindo fila/PDF, alerta de falha e reimpressão.
 
-4. `04_fluxo_futuro_ia_n8n.bpmn`  
+4. `04_fluxo_futuro_ia_n8n.bpmn`
    Fluxo futuro de automação com n8n, webhooks, agente de IA, fallback manual, triagem de comprovante Pix, logs e aprendizado.
 
-5. `05_login_autenticacao.bpmn`  
+5. `05_login_autenticacao.bpmn`
    Fluxo de login com perfis de acesso: super admin, admin/gerente e atendente.
 
 ## Como abrir

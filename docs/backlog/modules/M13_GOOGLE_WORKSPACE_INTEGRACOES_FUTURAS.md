@@ -1,6 +1,6 @@
 # Google Workspace integrações futuras
 
-**Arquivo:** `M13_GOOGLE_WORKSPACE_INTEGRACOES_FUTURAS.md`  
+**Arquivo:** `M13_GOOGLE_WORKSPACE_INTEGRACOES_FUTURAS.md`
 **Commit esperado:** `docs(integrations): add google workspace future integration plan`
 
 **Commit sugerido nesta execucao:** `chore(integrations): prepare future workspace integrations`

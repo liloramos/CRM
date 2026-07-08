@@ -1,6 +1,6 @@
 # Restaurante Banco V1
 
-**Arquivo:** `M02_RESTAURANTE_BANCO_V1.md`  
+**Arquivo:** `M02_RESTAURANTE_BANCO_V1.md`
 **Commit esperado:** `feat(restaurant): add restaurant database foundation`
 
 ## Objetivo
