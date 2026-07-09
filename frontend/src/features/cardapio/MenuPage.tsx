@@ -4,15 +4,16 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { EmptyState } from '../../components/ui/States'
-import type { AppModal, Product } from '../../types/crm'
+import type { AppModal, Product, SnapshotSource } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
 
 type MenuPageProps = {
   products: Product[]
+  source: SnapshotSource
   onOpenModal: (modal: AppModal) => void
 }
 
-export function MenuPage({ onOpenModal, products }: MenuPageProps) {
+export function MenuPage({ onOpenModal, products, source }: MenuPageProps) {
   const categories = Array.from(new Set(products.map((product) => product.category)))
 
   return (
@@ -23,7 +24,11 @@ export function MenuPage({ onOpenModal, products }: MenuPageProps) {
             Adicionar produto
           </Button>
         }
-        description="Cardapio preparado para disponibilidade, adicionais e observacoes por item."
+        description={
+          source === 'api'
+            ? 'Cardapio carregado do endpoint disponivel do Laravel.'
+            : 'Cardapio em fallback local de desenvolvimento.'
+        }
         title="Cardapio"
       />
 

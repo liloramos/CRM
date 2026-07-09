@@ -121,6 +121,12 @@ export type Product = {
   tags: string[]
 }
 
+export type CompanySummary = {
+  id: string
+  name: string
+  slug: string
+}
+
 export type DeliveryTask = {
   id: string
   orderCode: string
@@ -186,6 +192,39 @@ export type IntegrationStatus = {
   description: string
 }
 
+export type AuthUser = {
+  id: string
+  name: string
+  email: string
+  company: CompanySummary | null
+  roles: string[]
+  permissions: string[]
+}
+
+export type OperationalSnapshot = {
+  company?: CompanySummary
+  orders: Order[]
+  conversations: Conversation[]
+  customers: CustomerSummary[]
+  products: Product[]
+  deliveries: DeliveryTask[]
+  financeEntries: FinanceEntry[]
+  financialSummary: DailyFinancialSummary
+  expenses: ExpenseEntry[]
+  paymentMethods: PaymentMethodSummary[]
+  integrations: IntegrationStatus[]
+}
+
+export type SnapshotSource = 'api' | 'mock'
+
+export type PrintPreviewResult = {
+  id: string
+  status: string
+  html: string
+  previewUrl?: string | null
+  generatedAt?: string | null
+}
+
 export type AppModal =
   | 'confirm-payment'
   | 'cancel-order'
@@ -195,6 +234,7 @@ export type AppModal =
   | 'add-product'
   | 'add-user'
   | 'toggle-ai'
+  | 'print-preview'
   | 'print-error'
   | 'whatsapp-error'
   | null

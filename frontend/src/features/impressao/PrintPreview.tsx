@@ -1,15 +1,15 @@
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { StatusBadge } from '../../components/ui/StatusBadge'
-import type { AppModal, Order } from '../../types/crm'
+import type { Order } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
 
 type PrintPreviewProps = {
   order: Order
-  onOpenModal: (modal: AppModal) => void
+  onPreviewTicket: (orderId: string) => void
 }
 
-export function PrintPreview({ onOpenModal, order }: PrintPreviewProps) {
+export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
   return (
     <Card className="print-panel">
       <SectionTitle
@@ -93,11 +93,11 @@ export function PrintPreview({ onOpenModal, order }: PrintPreviewProps) {
             </div>
           </div>
           <div className="print-actions">
-            <Button icon="printer" onClick={() => onOpenModal('print-error')} variant="primary">
-              Imprimir comanda
+            <Button icon="printer" onClick={() => onPreviewTicket(order.id)} variant="primary">
+              Gerar previa HTML
             </Button>
-            <Button icon="arrow" onClick={() => onOpenModal('print-error')} variant="secondary">
-              Reimprimir
+            <Button icon="arrow" onClick={() => onPreviewTicket(order.id)} variant="secondary">
+              Regerar previa
             </Button>
           </div>
         </div>

@@ -12,8 +12,9 @@ import { formatCurrency, initialsFromName } from '../../utils/formatters'
 type ConversationsPageProps = {
   conversations: Conversation[]
   linkedOrder?: Order
-  selectedConversation: Conversation
+  selectedConversation?: Conversation
   onOpenModal: (modal: AppModal) => void
+  onPreviewTicket: (orderId: string) => void
   onSelectConversation: (conversationId: string) => void
 }
 
@@ -21,10 +22,11 @@ export function ConversationsPage({
   conversations,
   linkedOrder,
   onOpenModal,
+  onPreviewTicket,
   onSelectConversation,
   selectedConversation,
 }: ConversationsPageProps) {
-  const mode = conversationModeConfig[selectedConversation.mode]
+  const mode = selectedConversation ? conversationModeConfig[selectedConversation.mode] : conversationModeConfig.manual
 
   return (
     <PageContainer density="wide">
@@ -52,7 +54,7 @@ export function ConversationsPage({
           <div className="conversation-list">
             {conversations.map((conversation) => (
               <button
-                className={selectedConversation.id === conversation.id ? 'conversation-item is-active' : 'conversation-item'}
+                className={selectedConversation?.id === conversation.id ? 'conversation-item is-active' : 'conversation-item'}
                 key={conversation.id}
                 onClick={() => onSelectConversation(conversation.id)}
                 type="button"
@@ -66,37 +68,49 @@ export function ConversationsPage({
               </button>
             ))}
           </div>
+          {conversations.length === 0 ? (
+            <EmptyState description="Nenhuma conversa foi retornada pelo backend para este restaurante." title="Sem conversas ativas" />
+          ) : null}
         </Card>
 
         <Card className="chat-panel">
-          <div className="chat-panel__header">
-            <div>
-              <strong>{selectedConversation.customer.name}</strong>
-              <span>{selectedConversation.statusLabel}</span>
-            </div>
-            <Badge tone={mode.tone}>{mode.label}</Badge>
-          </div>
-          <div className="message-list">
-            {selectedConversation.messages.map((message) => (
-              <div className={`message-bubble message-bubble--${message.sender}`} key={message.id}>
-                <p>{message.body}</p>
-                <span>{message.timeLabel}</span>
+          {selectedConversation ? (
+            <>
+              <div className="chat-panel__header">
+                <div>
+                  <strong>{selectedConversation.customer.name}</strong>
+                  <span>{selectedConversation.statusLabel}</span>
+                </div>
+                <Badge tone={mode.tone}>{mode.label}</Badge>
               </div>
-            ))}
-          </div>
-          <div className="ai-assist-card">
-            <Badge tone="manual">Revisao humana</Badge>
-            <p>
-              A IA pode sugerir resposta e apontar duvidas, mas nao confirma pedido ambiguo, credito,
-              pagamento ou entrega sem o atendente.
-            </p>
-          </div>
-          <div className="composer">
-            <input aria-label="Mensagem para cliente" placeholder="Digite uma resposta revisada pelo atendente..." />
-            <Button icon="arrow" variant="primary">
-              Enviar
-            </Button>
-          </div>
+              <div className="message-list">
+                {selectedConversation.messages.map((message) => (
+                  <div className={`message-bubble message-bubble--${message.sender}`} key={message.id}>
+                    <p>{message.body}</p>
+                    <span>{message.timeLabel}</span>
+                  </div>
+                ))}
+                {selectedConversation.messages.length === 0 ? (
+                  <EmptyState description="Historico ainda vazio para esta conversa." title="Sem mensagens" />
+                ) : null}
+              </div>
+              <div className="ai-assist-card">
+                <Badge tone="manual">Revisao humana</Badge>
+                <p>
+                  A IA pode sugerir resposta e apontar duvidas, mas nao confirma pedido ambiguo, credito,
+                  pagamento ou entrega sem o atendente.
+                </p>
+              </div>
+              <div className="composer">
+                <input aria-label="Mensagem para cliente" placeholder="Digite uma resposta revisada pelo atendente..." />
+                <Button icon="arrow" variant="primary">
+                  Enviar
+                </Button>
+              </div>
+            </>
+          ) : (
+            <EmptyState description="Selecione uma conversa retornada pela API para iniciar o atendimento." title="Nenhuma conversa selecionada" />
+          )}
         </Card>
 
         <Card className="current-order-panel">
@@ -122,8 +136,8 @@ export function ConversationsPage({
                 <span>Comanda: {linkedOrder.printStatus}</span>
                 <span>Retirada: {linkedOrder.pickupPerson ?? 'A confirmar'}</span>
               </div>
-              <Button icon="printer" onClick={() => onOpenModal('print-error')} variant="primary">
-                Imprimir comanda
+              <Button icon="printer" onClick={() => onPreviewTicket(linkedOrder.id)} variant="primary">
+                Previa da comanda
               </Button>
             </div>
           ) : (

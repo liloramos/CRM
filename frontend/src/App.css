@@ -42,6 +42,17 @@
   box-shadow: 0 0 28px rgba(255, 179, 0, 0.22);
 }
 
+.sol-logo__image {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 179, 0, 0.38);
+  background: #050505;
+  box-shadow: 0 0 28px rgba(255, 179, 0, 0.2);
+}
+
 .sol-logo__mark span {
   width: 20px;
   height: 20px;
@@ -123,6 +134,16 @@
   display: block;
   margin-top: 5px;
   color: var(--color-text);
+}
+
+.plan-card small {
+  display: block;
+  margin-top: 8px;
+  color: var(--color-warning);
+}
+
+.plan-card--warning {
+  border-color: rgba(245, 158, 11, 0.42);
 }
 
 .plan-card__bar {
@@ -235,6 +256,10 @@ label textarea {
   background: var(--color-success);
 }
 
+.connection-pill--warning .connection-pill__dot {
+  background: var(--color-warning);
+}
+
 .topbar__new-order {
   border-color: rgba(255, 179, 0, 0.62);
   color: #101010;
@@ -311,6 +336,12 @@ label textarea {
   gap: 8px;
   padding: 0 16px;
   font-weight: 700;
+}
+
+.button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
 }
 
 .button--sm {
@@ -1205,11 +1236,91 @@ label textarea {
 }
 
 .modal {
-  width: min(560px, 100%);
+  width: min(720px, 100%);
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   background: var(--color-surface);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.ticket-frame {
+  width: 100%;
+  min-height: 520px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.form-error {
+  padding: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  border-radius: 8px;
+  color: var(--color-danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.center-screen,
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 179, 0, 0.06), transparent 320px),
+    var(--color-bg);
+}
+
+.login-screen {
+  grid-template-columns: minmax(280px, 0.8fr) minmax(340px, 520px);
+  gap: 32px;
+  place-items: center;
+}
+
+.login-screen__brand {
+  max-width: 560px;
+}
+
+.login-screen__brand h1 {
+  margin: 12px 0;
+  font-size: 42px;
+}
+
+.login-screen__brand p,
+.login-form p {
+  color: var(--color-text-secondary);
+}
+
+.login-screen__logo {
+  width: min(220px, 70vw);
+  height: auto;
+  margin-bottom: 24px;
+}
+
+.login-card,
+.login-form {
+  width: 100%;
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+}
+
+.login-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.checkbox-row {
+  display: flex;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-row input {
+  width: auto;
 }
 
 .modal__header,
@@ -1302,6 +1413,7 @@ label textarea {
   .topbar,
   .page-header,
   .auth-preview,
+  .login-screen,
   .split-grid,
   .finance-dashboard-grid,
   .order-detail-grid,

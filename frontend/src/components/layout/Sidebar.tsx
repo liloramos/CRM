@@ -1,15 +1,17 @@
 import { menuItems } from '../../constants/routes'
-import type { RouteKey } from '../../types/crm'
+import type { RouteKey, SnapshotSource } from '../../types/crm'
 import { Badge } from '../ui/Badge'
 import { Icon } from '../ui/Icon'
 import { SolLogo } from './SolLogo'
 
 type SidebarProps = {
   activeRoute: RouteKey
+  apiSource: SnapshotSource
+  fallbackReason: string | null
   onNavigate: (route: RouteKey) => void
 }
 
-export function Sidebar({ activeRoute, onNavigate }: SidebarProps) {
+export function Sidebar({ activeRoute, apiSource, fallbackReason, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
       <SolLogo />
@@ -28,9 +30,10 @@ export function Sidebar({ activeRoute, onNavigate }: SidebarProps) {
         ))}
       </nav>
       <div className="sidebar__footer">
-        <div className="plan-card">
-          <span>Plano operacional</span>
-          <strong>Ambiente local</strong>
+        <div className={apiSource === 'api' ? 'plan-card' : 'plan-card plan-card--warning'}>
+          <span>{apiSource === 'api' ? 'Dados operacionais' : 'Fallback desenvolvimento'}</span>
+          <strong>{apiSource === 'api' ? 'API Laravel ativa' : 'Mocks locais ativos'}</strong>
+          {fallbackReason ? <small>{fallbackReason}</small> : null}
           <div className="plan-card__bar">
             <span />
           </div>

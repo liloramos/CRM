@@ -18,6 +18,8 @@ export function modalTitle(modal: AppModal): string {
       return 'Adicionar usuario'
     case 'toggle-ai':
       return 'Alternar IA/manual'
+    case 'print-preview':
+      return 'Previa de comanda'
     case 'print-error':
       return 'Erro de impressao'
     case 'whatsapp-error':
@@ -35,6 +37,8 @@ export function modalDescription(modal: AppModal): string {
       return 'Esta acao altera o fluxo operacional e deve registrar motivo.'
     case 'toggle-ai':
       return 'A IA apoia o atendente, mas o modo manual deve assumir ambiguidades.'
+    case 'print-preview':
+      return 'Previa HTML gerada pelo backend. Impressao fisica real ainda depende de configuracao local.'
     case 'print-error':
       return 'A comanda nao deve liberar preparo sem impressao ou autorizacao manual.'
     case 'whatsapp-error':

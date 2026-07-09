@@ -4,16 +4,19 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
-import { EmptyState, ErrorState, LoadingState } from '../../components/ui/States'
+import { EmptyState, LoadingState } from '../../components/ui/States'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { PrintPreview } from '../impressao/PrintPreview'
 import type { AppModal, Order, OrderItem } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
 
 type OrdersPageProps = {
+  isLoading: boolean
   orders: Order[]
-  selectedOrder: Order
+  selectedOrder?: Order
+  onNewOrder: () => void
   onOpenModal: (modal: AppModal) => void
+  onPreviewTicket: (orderId: string) => void
   onSelectOrder: (orderId: string) => void
 }
 
@@ -33,17 +36,25 @@ const itemColumns: DataTableColumn<OrderItem>[] = [
   { key: 'total', header: 'Subtotal', render: (item) => formatCurrency(item.quantity * item.unitPrice), align: 'right' },
 ]
 
-export function OrdersPage({ onOpenModal, onSelectOrder, orders, selectedOrder }: OrdersPageProps) {
+export function OrdersPage({
+  isLoading,
+  onNewOrder,
+  onOpenModal,
+  onPreviewTicket,
+  onSelectOrder,
+  orders,
+  selectedOrder,
+}: OrdersPageProps) {
   return (
     <PageContainer density="wide">
       <PageHeader
         actions={
           <>
-            <Button icon="plus" onClick={() => onOpenModal('add-product')} variant="secondary">
-              Novo item
+            <Button icon="plus" onClick={selectedOrder ? () => onOpenModal('add-product') : onNewOrder} variant="secondary">
+              {selectedOrder ? 'Novo item' : 'Criar rascunho'}
             </Button>
-            <Button icon="printer" onClick={() => onOpenModal('print-error')} variant="primary">
-              Imprimir comanda
+            <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="primary">
+              Previa da comanda
             </Button>
           </>
         }
@@ -57,7 +68,7 @@ export function OrdersPage({ onOpenModal, onSelectOrder, orders, selectedOrder }
           <div className="orders-list">
             {orders.map((order) => (
               <button
-                className={selectedOrder.id === order.id ? 'order-list-item is-active' : 'order-list-item'}
+                className={selectedOrder?.id === order.id ? 'order-list-item is-active' : 'order-list-item'}
                 key={order.id}
                 onClick={() => onSelectOrder(order.id)}
                 type="button"
@@ -69,93 +80,113 @@ export function OrdersPage({ onOpenModal, onSelectOrder, orders, selectedOrder }
                 <StatusBadge status={order.status} type="order" />
               </button>
             ))}
+            {orders.length === 0 ? (
+              <EmptyState
+                actionLabel="Criar rascunho"
+                description="Nenhum pedido veio da API ainda. Crie um rascunho manual para iniciar a fila local."
+                onAction={onNewOrder}
+                title="Fila vazia"
+              />
+            ) : null}
           </div>
         </Card>
 
         <div className="orders-main">
-          <div className="order-kpis">
-            <Card>
-              <span className="mini-label">Status atual</span>
-              <StatusBadge status={selectedOrder.status} type="order" />
-            </Card>
-            <Card>
-              <span className="mini-label">Pagamento</span>
-              <strong>{formatCurrency(selectedOrder.paid)} recebido</strong>
-            </Card>
-            <Card>
-              <span className="mini-label">Total</span>
-              <strong>{formatCurrency(selectedOrder.total)}</strong>
-            </Card>
-            <Card>
-              <span className="mini-label">Comanda</span>
-              <StatusBadge status={selectedOrder.printStatus} type="print" />
-            </Card>
-          </div>
+          {isLoading ? <LoadingState description="Atualizando fila pelo backend..." title="Sincronizando pedidos" /> : null}
 
-          <Card>
-            <SectionTitle
-              action={
-                <Button icon="edit" onClick={() => onOpenModal('edit-item')} variant="ghost">
-                  Editar item
-                </Button>
-              }
-              title="Itens do pedido"
-            />
-            <DataTable columns={itemColumns} data={selectedOrder.items} getRowKey={(item) => item.id} />
-          </Card>
-
-          <div className="order-detail-grid">
-            <Card>
-              <SectionTitle title="Cliente e retirada" />
-              <div className="detail-list">
-                <span>Cliente pagador</span>
-                <strong>{selectedOrder.customer.name}</strong>
-                <span>Retirada/entrega</span>
-                <strong>{selectedOrder.pickupPerson ?? selectedOrder.deliveryLabel ?? 'A confirmar'}</strong>
-                <span>Credito</span>
-                <strong>{formatCurrency(selectedOrder.customer.creditBalance)}</strong>
+          {selectedOrder ? (
+            <>
+              <div className="order-kpis">
+                <Card>
+                  <span className="mini-label">Status atual</span>
+                  <StatusBadge status={selectedOrder.status} type="order" />
+                </Card>
+                <Card>
+                  <span className="mini-label">Pagamento</span>
+                  <strong>{formatCurrency(selectedOrder.paid)} recebido</strong>
+                </Card>
+                <Card>
+                  <span className="mini-label">Total</span>
+                  <strong>{formatCurrency(selectedOrder.total)}</strong>
+                </Card>
+                <Card>
+                  <span className="mini-label">Comanda</span>
+                  <StatusBadge status={selectedOrder.printStatus} type="print" />
+                </Card>
               </div>
-            </Card>
-            <Card>
-              <SectionTitle title="Historico e observacoes" />
-              <div className="timeline">
-                {selectedOrder.history.map((entry) => (
-                  <div className="timeline__item" key={entry.id}>
-                    <span />
-                    <div>
-                      <strong>{entry.title}</strong>
-                      <p>{entry.description}</p>
-                    </div>
-                    <small>{entry.timeLabel}</small>
+
+              <Card>
+                <SectionTitle
+                  action={
+                    <Button icon="plus" onClick={() => onOpenModal('add-product')} variant="ghost">
+                      Adicionar item
+                    </Button>
+                  }
+                  title="Itens do pedido"
+                />
+                <DataTable columns={itemColumns} data={selectedOrder.items} getRowKey={(item) => item.id} />
+                {selectedOrder.items.length === 0 ? (
+                  <EmptyState
+                    actionLabel="Adicionar item"
+                    description="Rascunho criado. Escolha um produto do cardapio para montar o pedido."
+                    onAction={() => onOpenModal('add-product')}
+                    title="Pedido sem itens"
+                  />
+                ) : null}
+              </Card>
+
+              <div className="order-detail-grid">
+                <Card>
+                  <SectionTitle title="Cliente e retirada" />
+                  <div className="detail-list">
+                    <span>Cliente pagador</span>
+                    <strong>{selectedOrder.customer.name}</strong>
+                    <span>Retirada/entrega</span>
+                    <strong>{selectedOrder.pickupPerson ?? selectedOrder.deliveryLabel ?? 'A confirmar'}</strong>
+                    <span>Credito</span>
+                    <strong>{formatCurrency(selectedOrder.customer.creditBalance)}</strong>
                   </div>
-                ))}
+                </Card>
+                <Card>
+                  <SectionTitle title="Historico e observacoes" />
+                  <div className="timeline">
+                    {selectedOrder.history.map((entry) => (
+                      <div className="timeline__item" key={entry.id}>
+                        <span />
+                        <div>
+                          <strong>{entry.title}</strong>
+                          <p>{entry.description}</p>
+                        </div>
+                        <small>{entry.timeLabel}</small>
+                      </div>
+                    ))}
+                    {selectedOrder.history.length === 0 ? <p className="muted-text">Sem historico registrado.</p> : null}
+                  </div>
+                </Card>
               </div>
-            </Card>
-          </div>
 
-          <PrintPreview onOpenModal={onOpenModal} order={selectedOrder} />
-
-          <div className="state-grid">
-            <LoadingState title="Carregando pedidos..." description="Estado previsto para sincronizacao com API." />
-            <EmptyState title="Nenhum pedido listado" description="Estado vazio para filtros sem resultado." />
-            <ErrorState
-              actionLabel="Tentar novamente"
-              description="Estado de erro visivel para a equipe operacional."
-              title="Nao foi possivel carregar pedidos"
+              <PrintPreview onPreviewTicket={onPreviewTicket} order={selectedOrder} />
+            </>
+          ) : (
+            <EmptyState
+              actionLabel="Criar primeiro rascunho"
+              description="A tela esta conectada ao backend. Crie um rascunho para iniciar um pedido manual seguro."
+              onAction={onNewOrder}
+              title="Nenhum pedido selecionado"
             />
-          </div>
+          )}
         </div>
 
         <Card className="order-side-panel">
           <SectionTitle title="Acoes criticas" />
           <div className="side-actions">
-            <Button icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
+            <Button disabled={!selectedOrder} icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
               Confirmar pagamento
             </Button>
-            <Button icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
+            <Button disabled={!selectedOrder} icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
               Alterar status
             </Button>
-            <Button icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
+            <Button disabled={!selectedOrder} icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
               Cancelar pedido
             </Button>
           </div>

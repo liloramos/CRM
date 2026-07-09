@@ -2,12 +2,32 @@
 
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
+use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\OperationalSnapshotController;
+use App\Http\Controllers\Api\OrderOperationsController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
 use App\Http\Controllers\Printing\PrintJobController;
 use App\Http\Controllers\WhatsApp\WhatsAppStatusController;
 use Illuminate\Support\Facades\Route;
 
 Route::inertia('/', 'welcome')->name('home');
+
+Route::prefix('api/app')->name('api.app.')->group(function () {
+    Route::get('csrf-token', [AppSessionController::class, 'csrf'])->name('csrf');
+    Route::get('session', [AppSessionController::class, 'show'])->name('session.show');
+    Route::post('login', [AppSessionController::class, 'login'])->name('session.login');
+
+    Route::middleware('auth')->group(function () {
+        Route::post('logout', [AppSessionController::class, 'logout'])->name('session.logout');
+        Route::get('operational-snapshot', OperationalSnapshotController::class)->name('operational-snapshot');
+        Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
+        Route::post('orders/drafts', [OrderOperationsController::class, 'storeDraft'])->name('orders.drafts.store');
+        Route::get('orders/{order}', [OrderOperationsController::class, 'show'])->name('orders.show');
+        Route::post('orders/{order}/items', [OrderOperationsController::class, 'addItem'])->name('orders.items.store');
+        Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
+        Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
+    });
+});
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::inertia('dashboard', 'dashboard')->name('dashboard');

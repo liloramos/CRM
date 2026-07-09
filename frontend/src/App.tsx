@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { AppShell } from './components/layout/AppShell'
 import { Modal } from './components/ui/Modal'
+import { ErrorState, LoadingState } from './components/ui/States'
 import { modalDescription, modalTitle } from './constants/modals'
-import { AuthPreviewPage } from './features/auth/AuthPreviewPage'
+import { LoginPage } from './features/auth/LoginPage'
+import { useAuth } from './features/auth/auth-state'
 import { MenuPage } from './features/cardapio/MenuPage'
 import { CustomersPage } from './features/clientes/CustomersPage'
 import { ConversationsPage } from './features/conversas/ConversationsPage'
@@ -14,27 +16,172 @@ import { FinancePage } from './features/financeiro/FinancePage'
 import { OperationalModalContent } from './features/pedidos/OperationalModalContent'
 import { OrdersPage } from './features/pedidos/OrdersPage'
 import { ReportsPage } from './features/relatorios/ReportsPage'
-import { getOperationalSnapshot } from './services/crm.service'
-import type { AppModal, RouteKey } from './types/crm'
-
-const snapshot = getOperationalSnapshot()
+import {
+  addOrderItem,
+  createDraftOrder,
+  generateTicketPreview,
+  getOperationalSnapshot,
+} from './services/crm.service'
+import type { AppModal, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
 
 function App() {
+  const { logout, status: authStatus, user } = useAuth()
   const [activeRoute, setActiveRoute] = useState<RouteKey>('dashboard')
-  const [selectedOrderId, setSelectedOrderId] = useState(snapshot.orders[0].id)
-  const [selectedConversationId, setSelectedConversationId] = useState(snapshot.conversations[0].id)
+  const [snapshot, setSnapshot] = useState<OperationalSnapshot | null>(null)
+  const [snapshotSource, setSnapshotSource] = useState<SnapshotSource>('api')
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null)
+  const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false)
+  const [snapshotError, setSnapshotError] = useState<string | null>(null)
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [activeModal, setActiveModal] = useState<AppModal>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [isActionBusy, setIsActionBusy] = useState(false)
+  const [selectedProductId, setSelectedProductId] = useState<string>('')
+  const [itemQuantity, setItemQuantity] = useState(1)
+  const [itemNotes, setItemNotes] = useState('')
+  const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
 
-  const selectedOrder = snapshot.orders.find((order) => order.id === selectedOrderId) ?? snapshot.orders[0]
-  const selectedConversation =
-    snapshot.conversations.find((conversation) => conversation.id === selectedConversationId) ?? snapshot.conversations[0]
-  const linkedOrder = snapshot.orders.find((order) => order.id === selectedConversation.linkedOrderId)
+  const loadSnapshot = useCallback(async () => {
+    setIsLoadingSnapshot(true)
+    setSnapshotError(null)
+
+    try {
+      const response = await getOperationalSnapshot()
+      setSnapshot(response.snapshot)
+      setSnapshotSource(response.source)
+      setFallbackReason(response.fallbackReason ?? null)
+      setSelectedOrderId((current) => current ?? response.snapshot.orders[0]?.id ?? null)
+      setSelectedConversationId((current) => current ?? response.snapshot.conversations[0]?.id ?? null)
+      setSelectedProductId((current) => current || response.snapshot.products[0]?.id || '')
+    } catch (error) {
+      setSnapshotError(error instanceof Error ? error.message : 'Nao foi possivel carregar dados operacionais.')
+    } finally {
+      setIsLoadingSnapshot(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (authStatus === 'authenticated') {
+      const timeout = window.setTimeout(() => {
+        void loadSnapshot()
+      }, 0)
+
+      return () => window.clearTimeout(timeout)
+    }
+
+    return undefined
+  }, [authStatus, loadSnapshot])
+
+  const selectedOrder = useMemo(() => {
+    if (!snapshot) {
+      return undefined
+    }
+
+    return snapshot.orders.find((order) => order.id === selectedOrderId) ?? snapshot.orders[0]
+  }, [selectedOrderId, snapshot])
+
+  const selectedConversation = useMemo(() => {
+    if (!snapshot) {
+      return undefined
+    }
+
+    return snapshot.conversations.find((conversation) => conversation.id === selectedConversationId) ?? snapshot.conversations[0]
+  }, [selectedConversationId, snapshot])
+
+  const linkedOrder = selectedConversation?.linkedOrderId
+    ? snapshot?.orders.find((order) => order.id === selectedConversation.linkedOrderId)
+    : undefined
+
+  async function handleNewOrder() {
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      const response = await createDraftOrder({
+        fulfillment_type: 'pickup',
+        general_notes: 'Rascunho manual criado na operacao local.',
+      })
+      setSelectedOrderId(response.data.id)
+      setActiveRoute('pedidos')
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel criar o rascunho.')
+      setActiveModal('add-product')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleModalPrimary() {
+    if (activeModal === 'add-product') {
+      await handleAddItem()
+      return
+    }
+
+    setActiveModal(null)
+  }
+
+  async function handleAddItem() {
+    if (!selectedOrder || !selectedProductId) {
+      setActionError('Selecione um pedido e um produto antes de adicionar item.')
+      return
+    }
+
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      const response = await addOrderItem(selectedOrder.id, {
+        product_id: selectedProductId,
+        quantity: itemQuantity,
+        item_notes: itemNotes,
+        beneficiary_name: selectedOrder.customer.name,
+      })
+
+      setSelectedOrderId(response.data.id)
+      setActiveModal(null)
+      setItemNotes('')
+      setItemQuantity(1)
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleTicketPreview(orderId: string) {
+    setActiveModal('print-preview')
+    setPrintPreview(null)
+    setActionError(null)
+    setIsActionBusy(true)
+
+    try {
+      const response = await generateTicketPreview(orderId)
+      setSelectedOrderId(response.data.order.id)
+      setPrintPreview(response.data.preview)
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel gerar a previa da comanda.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  function openModal(modal: AppModal) {
+    setActionError(null)
+    setActiveModal(modal)
+  }
 
   function renderPage() {
+    if (!snapshot) {
+      return null
+    }
+
     switch (activeRoute) {
       case 'login':
       case 'cadastro':
-        return <AuthPreviewPage mode={activeRoute} />
       case 'dashboard':
         return (
           <DashboardPage
@@ -50,7 +197,8 @@ function App() {
           <ConversationsPage
             conversations={snapshot.conversations}
             linkedOrder={linkedOrder}
-            onOpenModal={setActiveModal}
+            onOpenModal={openModal}
+            onPreviewTicket={handleTicketPreview}
             onSelectConversation={setSelectedConversationId}
             selectedConversation={selectedConversation}
           />
@@ -58,14 +206,17 @@ function App() {
       case 'pedidos':
         return (
           <OrdersPage
-            onOpenModal={setActiveModal}
+            isLoading={isLoadingSnapshot}
+            onNewOrder={handleNewOrder}
+            onOpenModal={openModal}
+            onPreviewTicket={handleTicketPreview}
             onSelectOrder={setSelectedOrderId}
             orders={snapshot.orders}
             selectedOrder={selectedOrder}
           />
         )
       case 'cardapio':
-        return <MenuPage onOpenModal={setActiveModal} products={snapshot.products} />
+        return <MenuPage onOpenModal={openModal} products={snapshot.products} source={snapshotSource} />
       case 'entregas':
         return <DeliveryPage deliveries={snapshot.deliveries} />
       case 'pagamentos':
@@ -74,7 +225,7 @@ function App() {
             entries={snapshot.financeEntries}
             expenses={snapshot.expenses}
             mode="pagamentos"
-            onOpenModal={setActiveModal}
+            onOpenModal={openModal}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
           />
@@ -85,7 +236,7 @@ function App() {
             entries={snapshot.financeEntries}
             expenses={snapshot.expenses}
             mode="financeiro"
-            onOpenModal={setActiveModal}
+            onOpenModal={openModal}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
           />
@@ -95,57 +246,93 @@ function App() {
       case 'relatorios':
         return <ReportsPage />
       case 'whatsapp':
-        return (
-          <SettingsPage
-            integrations={snapshot.integrations}
-            onNavigate={setActiveRoute}
-            onOpenModal={setActiveModal}
-            variant="whatsapp"
-          />
-        )
+        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="whatsapp" />
       case 'ia':
-        return (
-          <SettingsPage
-            integrations={snapshot.integrations}
-            onNavigate={setActiveRoute}
-            onOpenModal={setActiveModal}
-            variant="ia"
-          />
-        )
+        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="ia" />
       case 'perfil':
-        return (
-          <SettingsPage
-            integrations={snapshot.integrations}
-            onNavigate={setActiveRoute}
-            onOpenModal={setActiveModal}
-            variant="perfil"
-          />
-        )
+        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="perfil" />
       case 'configuracoes':
       default:
         return (
-          <SettingsPage
-            integrations={snapshot.integrations}
-            onNavigate={setActiveRoute}
-            onOpenModal={setActiveModal}
-            variant="configuracoes"
-          />
+          <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="configuracoes" />
         )
     }
   }
 
+  if (authStatus === 'checking') {
+    return (
+      <main className="center-screen">
+        <LoadingState description="Verificando sessao Laravel..." title="Carregando CRM" />
+      </main>
+    )
+  }
+
+  if (authStatus === 'unauthenticated') {
+    return <LoginPage />
+  }
+
+  if (!snapshot && isLoadingSnapshot) {
+    return (
+      <main className="center-screen">
+        <LoadingState description="Buscando dados operacionais do backend..." title="Sincronizando operacao" />
+      </main>
+    )
+  }
+
+  if (!snapshot && snapshotError) {
+    return (
+      <main className="center-screen">
+        <ErrorState
+          actionLabel="Tentar novamente"
+          description={snapshotError}
+          onAction={() => void loadSnapshot()}
+          title="Nao foi possivel abrir o CRM"
+        />
+      </main>
+    )
+  }
+
+  if (!snapshot) {
+    return null
+  }
+
   return (
-    <AppShell activeRoute={activeRoute} onNavigate={setActiveRoute} onNewOrder={() => setActiveModal('add-product')}>
+    <AppShell
+      activeRoute={activeRoute}
+      apiSource={snapshotSource}
+      fallbackReason={fallbackReason}
+      isSyncing={isLoadingSnapshot}
+      onLogout={() => void logout()}
+      onNavigate={setActiveRoute}
+      onNewOrder={() => void handleNewOrder()}
+      onRefresh={() => void loadSnapshot()}
+      user={user}
+    >
       {renderPage()}
       <Modal
         danger={activeModal === 'cancel-order' || activeModal === 'print-error' || activeModal === 'whatsapp-error'}
         description={modalDescription(activeModal)}
         onClose={() => setActiveModal(null)}
+        onPrimary={() => void handleModalPrimary()}
         open={activeModal !== null}
-        primaryLabel={activeModal === 'cancel-order' ? 'Cancelar pedido' : 'Confirmar'}
+        primaryDisabled={isActionBusy}
+        primaryLabel={activeModal === 'cancel-order' ? 'Cancelar pedido' : activeModal === 'add-product' ? 'Adicionar item' : 'Confirmar'}
         title={modalTitle(activeModal)}
       >
-        <OperationalModalContent modal={activeModal} />
+        <OperationalModalContent
+          actionError={actionError}
+          isActionBusy={isActionBusy}
+          itemNotes={itemNotes}
+          itemQuantity={itemQuantity}
+          modal={activeModal}
+          onItemNotesChange={setItemNotes}
+          onItemQuantityChange={setItemQuantity}
+          onProductChange={setSelectedProductId}
+          printPreview={printPreview}
+          products={snapshot.products}
+          selectedOrder={selectedOrder}
+          selectedProductId={selectedProductId}
+        />
       </Modal>
     </AppShell>
   )

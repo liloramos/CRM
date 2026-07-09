@@ -1,9 +1,7 @@
 export function SolLogo() {
   return (
     <div className="sol-logo" aria-label="Sol Restaurante">
-      <span className="sol-logo__mark" aria-hidden="true">
-        <span />
-      </span>
+      <img alt="" className="sol-logo__image" src="/sol-logo.png" />
       <div>
         <strong>SOL</strong>
         <small>Restaurante</small>

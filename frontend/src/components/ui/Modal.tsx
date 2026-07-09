@@ -7,11 +7,23 @@ type ModalProps = {
   description?: string
   children: ReactNode
   primaryLabel?: string
+  primaryDisabled?: boolean
   danger?: boolean
   onClose: () => void
+  onPrimary?: () => void
 }
 
-export function Modal({ children, danger = false, description, onClose, open, primaryLabel = 'Confirmar', title }: ModalProps) {
+export function Modal({
+  children,
+  danger = false,
+  description,
+  onClose,
+  onPrimary,
+  open,
+  primaryDisabled = false,
+  primaryLabel = 'Confirmar',
+  title,
+}: ModalProps) {
   if (!open) {
     return null
   }
@@ -31,7 +43,12 @@ export function Modal({ children, danger = false, description, onClose, open, pr
           <Button onClick={onClose} variant="secondary">
             Cancelar
           </Button>
-          <Button icon={danger ? 'alert' : 'check'} onClick={onClose} variant={danger ? 'danger' : 'primary'}>
+          <Button
+            disabled={primaryDisabled}
+            icon={danger ? 'alert' : 'check'}
+            onClick={onPrimary ?? onClose}
+            variant={danger ? 'danger' : 'primary'}
+          >
             {primaryLabel}
           </Button>
         </div>
