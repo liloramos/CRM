@@ -3,6 +3,7 @@
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
@@ -20,6 +21,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
     Route::middleware('auth')->group(function () {
         Route::post('logout', [AppSessionController::class, 'logout'])->name('session.logout');
         Route::get('operational-snapshot', OperationalSnapshotController::class)->name('operational-snapshot');
+        Route::patch('menu/options/{productOption}/availability', [MenuOptionAvailabilityController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.options.availability.update');
         Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
         Route::post('orders/drafts', [OrderOperationsController::class, 'storeDraft'])->name('orders.drafts.store');
         Route::get('orders/{order}', [OrderOperationsController::class, 'show'])->name('orders.show');

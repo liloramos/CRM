@@ -74,6 +74,7 @@ class Role extends Model
         self::ATENDENTE => [
             'dashboard.view',
             'menu.view',
+            'menu.manage',
             'orders.view',
             'orders.manage',
             'payments.view',

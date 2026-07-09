@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\DailyMenuOptionOverride;
 use App\Models\Order;
 use App\Models\Product;
+use App\Models\ProductOption;
 use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\Printing\PrintWorkflowService;
@@ -106,12 +108,21 @@ class OrderOperationsController extends Controller
             'quantity' => ['required', 'integer', 'min:1', 'max:50'],
             'item_notes' => ['nullable', 'string', 'max:1000'],
             'beneficiary_name' => ['nullable', 'string', 'max:120'],
+            'options' => ['sometimes', 'array'],
+            'options.*.product_option_id' => ['required_with:options', 'integer'],
+            'options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
         ]);
 
         $product = Product::query()
             ->where('company_id', $company->id)
             ->whereKey($validated['product_id'])
             ->firstOrFail();
+
+        $validated['options'] = $this->validatedOptionRows(
+            companyId: (int) $company->id,
+            product: $product,
+            optionRows: $validated['options'] ?? [],
+        );
 
         try {
             $orders->addItem($order, $product, $validated);
@@ -189,6 +200,72 @@ class OrderOperationsController extends Controller
                 ],
             ],
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $optionRows
+     * @return list<array<string, mixed>>
+     */
+    private function validatedOptionRows(int $companyId, Product $product, array $optionRows): array
+    {
+        $optionIds = collect($optionRows)
+            ->pluck('product_option_id')
+            ->filter()
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($optionIds->isEmpty()) {
+            return [];
+        }
+
+        $options = ProductOption::query()
+            ->where('company_id', $companyId)
+            ->active()
+            ->whereIn('id', $optionIds)
+            ->where(function ($query) use ($product): void {
+                $query->whereNull('product_id')
+                    ->orWhere('product_id', $product->id);
+            })
+            ->get()
+            ->keyBy('id');
+
+        if ($options->count() !== $optionIds->count()) {
+            throw ValidationException::withMessages([
+                'options' => ['Uma ou mais opcoes nao pertencem ao produto ou restaurante atual.'],
+            ]);
+        }
+
+        $unavailableOptionIds = DailyMenuOptionOverride::query()
+            ->where('company_id', $companyId)
+            ->whereDate('availability_date', now()->toDateString())
+            ->where('status', DailyMenuOptionOverride::STATUS_UNAVAILABLE)
+            ->whereIn('product_option_id', $optionIds)
+            ->pluck('product_option_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+
+        if ($unavailableOptionIds !== []) {
+            throw ValidationException::withMessages([
+                'options' => ['Uma ou mais opcoes selecionadas estao indisponiveis hoje.'],
+            ]);
+        }
+
+        return collect($optionRows)
+            ->map(function (array $row) use ($options): array {
+                $option = $options[(int) $row['product_option_id']];
+
+                return [
+                    'product_option_id' => $option->id,
+                    'name' => $option->name,
+                    'option_type' => $option->option_type,
+                    'group_code' => $option->group_code,
+                    'quantity' => (int) ($row['quantity'] ?? 1),
+                    'price_delta_cents' => (int) $option->price_delta_cents,
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     /**

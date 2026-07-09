@@ -44,6 +44,19 @@ export type FulfillmentType = 'retirada' | 'entrega' | 'balcao'
 export type AutomationMode = 'ia' | 'manual' | 'atencao'
 export type PrintStatus = 'aguardando' | 'imprimindo' | 'impresso' | 'reimpressao' | 'erro'
 export type PaymentMethod = 'pix' | 'dinheiro' | 'cartao' | 'credito_cliente' | 'misto' | 'a_confirmar'
+export type FulfillmentApiType = 'pickup' | 'delivery' | 'counter'
+
+export type MenuOption = {
+  id: string
+  name: string
+  type: string
+  groupCode: string
+  groupLabel: string
+  priceDelta: number
+  required: boolean
+  availableToday: boolean
+  dailyReason?: string | null
+}
 
 export type CustomerSummary = {
   id: string
@@ -83,6 +96,7 @@ export type Order = {
   total: number
   paid: number
   creditUsed: number
+  deliveryFee: number
   amountDue: number
   items: OrderItem[]
   history: Array<{
@@ -119,6 +133,7 @@ export type Product = {
   price: number
   available: boolean
   tags: string[]
+  options: MenuOption[]
 }
 
 export type CompanySummary = {

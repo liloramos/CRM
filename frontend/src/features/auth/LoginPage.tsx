@@ -14,6 +14,8 @@ export function LoginPage() {
   const [remember, setRemember] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [mode, setMode] = useState<'login' | 'access'>('login')
+  const isDev = import.meta.env.DEV
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -33,17 +35,32 @@ export function LoginPage() {
     <main className="login-screen">
       <section className="login-screen__brand">
         <img alt="Sol Restaurante" className="login-screen__logo" src="/sol-logo.png" />
-        <span className="eyebrow">ChatBot CRM</span>
-        <h1>Operacao do restaurante</h1>
-        <p>Entre para acompanhar conversas, pedidos, pagamentos e comandas com revisao humana.</p>
+        <span className="eyebrow">Sol Restaurante</span>
+        <h1>Central operacional</h1>
+        <p>Atendimento, pedidos, pagamento conferido e comanda HTML antes do preparo, em uma tela pensada para a rotina da equipe.</p>
+        <div className="login-screen__checks">
+          <span>Pedidos com revisao humana</span>
+          <span>Cardapio por componentes</span>
+          <span>Previa de comanda segura</span>
+        </div>
       </section>
 
       <Card className="login-card" tone="glow">
-        <form className="login-form" onSubmit={handleSubmit}>
+        <div className="login-tabs" role="tablist" aria-label="Acesso ao CRM">
+          <button className={mode === 'login' ? 'tab is-active' : 'tab'} onClick={() => setMode('login')} type="button">
+            Entrar
+          </button>
+          <button className={mode === 'access' ? 'tab is-active' : 'tab'} onClick={() => setMode('access')} type="button">
+            Solicitar acesso
+          </button>
+        </div>
+
+        {mode === 'login' ? (
+          <form className="login-form" onSubmit={handleSubmit}>
           <div>
             <span className="eyebrow">Acesso operacional</span>
-            <h2>Login</h2>
-            <p>Use uma conta cadastrada no Laravel. No ambiente local seedado, ha usuarios ficticios de desenvolvimento.</p>
+            <h2>Entrar no painel</h2>
+            <p>Use uma conta cadastrada no Laravel. Em desenvolvimento, o atalho local fica visivel apenas para teste.</p>
           </div>
 
           <label>
@@ -74,17 +91,51 @@ export function LoginPage() {
             <Button disabled={isSubmitting} icon="arrow" type="submit" variant="primary">
               {isSubmitting ? 'Entrando...' : 'Entrar'}
             </Button>
-            <Button
-              onClick={() => {
-                setEmail(LOCAL_DEMO_EMAIL)
-                setPassword(LOCAL_DEMO_PASSWORD)
-              }}
-              variant="ghost"
-            >
-              Usar acesso local
+            {isDev ? (
+              <Button
+                onClick={() => {
+                  setEmail(LOCAL_DEMO_EMAIL)
+                  setPassword(LOCAL_DEMO_PASSWORD)
+                }}
+                variant="ghost"
+              >
+                Preencher acesso local
+              </Button>
+            ) : null}
+          </div>
+          </form>
+        ) : (
+          <div className="login-form">
+            <div>
+              <span className="eyebrow">Cadastro controlado</span>
+              <h2>Solicitar acesso</h2>
+              <p>Cadastro publico nao fica aberto neste MVP. Um gerente deve criar ou liberar usuarios dentro da operacao.</p>
+            </div>
+            <label>
+              Nome
+              <input placeholder="Nome do colaborador" />
+            </label>
+            <label>
+              E-mail
+              <input placeholder="email@exemplo.local" type="email" />
+            </label>
+            <label>
+              Perfil solicitado
+              <select defaultValue="atendente">
+                <option value="atendente">Atendimento</option>
+                <option value="gerente">Gerencia</option>
+                <option value="cozinha">Cozinha / impressao</option>
+              </select>
+            </label>
+            <div className="attention-box">
+              <strong>Fluxo seguro</strong>
+              <p>Esta tela registra apenas a intencao visual do fluxo. A criacao real de usuario precisa de permissao administrativa.</p>
+            </div>
+            <Button icon="check" onClick={() => setMode('login')} variant="secondary">
+              Voltar ao login
             </Button>
           </div>
-        </form>
+        )}
       </Card>
     </main>
   )

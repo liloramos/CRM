@@ -27,6 +27,7 @@ const itemColumns: DataTableColumn<OrderItem>[] = [
     render: (item) => (
       <div className="table-main">
         <strong>{item.name}</strong>
+        {item.additions.length > 0 ? <small>{item.additions.join(', ')}</small> : null}
         <span>{item.notes}</span>
       </div>
     ),

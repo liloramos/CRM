@@ -26,7 +26,7 @@ export function Topbar({ activeRoute, apiSource, isSyncing, onLogout, onNewOrder
       <div className="topbar__actions">
         <span className={apiSource === 'api' ? 'connection-pill' : 'connection-pill connection-pill--warning'}>
           <span className="connection-pill__dot" />
-          {apiSource === 'api' ? 'API conectada' : 'Modo demo local'}
+          {apiSource === 'api' ? 'Operacao conectada' : 'Fallback dev'}
         </span>
         <IconButton disabled={isSyncing} icon="clock" label="Sincronizar dados" onClick={onRefresh} />
         <IconButton icon="bell" label="Notificacoes" />

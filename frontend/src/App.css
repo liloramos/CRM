@@ -650,6 +650,7 @@ label textarea {
 .order-list-item span,
 .conversation-item p,
 .table-main span,
+.table-main small,
 .activity-item p,
 .current-order__items small,
 .muted-text {
@@ -681,11 +682,13 @@ label textarea {
 
 .orders-layout {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 280px;
+  grid-template-columns: minmax(240px, 300px) minmax(520px, 1fr) minmax(260px, 320px);
   gap: 16px;
+  align-items: start;
 }
 
 .orders-main {
+  min-width: 0;
   display: grid;
   gap: 16px;
 }
@@ -733,6 +736,8 @@ label textarea {
 .table-main {
   display: grid;
   gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .finance-dashboard-grid {
@@ -1083,6 +1088,74 @@ label textarea {
   gap: 16px;
 }
 
+.availability-card {
+  display: grid;
+  gap: 16px;
+}
+
+.availability-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.availability-group {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.availability-group h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.availability-list {
+  display: grid;
+  gap: 8px;
+}
+
+.availability-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.availability-row.is-unavailable {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.availability-row strong,
+.availability-row span,
+.availability-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.availability-row span,
+.availability-row small {
+  color: var(--color-text-secondary);
+}
+
+.availability-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .product-grid,
 .settings-grid,
 .customer-grid {
@@ -1237,6 +1310,8 @@ label textarea {
 
 .modal {
   width: min(720px, 100%);
+  max-height: min(86vh, 920px);
+  overflow: hidden;
   border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   background: var(--color-surface);
@@ -1290,6 +1365,26 @@ label textarea {
   color: var(--color-text-secondary);
 }
 
+.login-screen__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.login-screen__checks span {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 179, 0, 0.28);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--color-brand);
+  background: rgba(255, 179, 0, 0.08);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .login-screen__logo {
   width: min(220px, 70vw);
   height: auto;
@@ -1304,6 +1399,12 @@ label textarea {
 .login-form {
   display: grid;
   gap: 16px;
+}
+
+.login-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
 }
 
 .login-actions {
@@ -1343,12 +1444,79 @@ label textarea {
 
 .modal__body {
   padding: 18px;
+  max-height: 68vh;
+  overflow: auto;
 }
 
 .modal__footer {
   justify-content: flex-end;
   border-top: 1px solid var(--color-border);
   border-bottom: 0;
+}
+
+.option-picker {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.option-picker p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+}
+
+.option-picker__group {
+  display: grid;
+  gap: 8px;
+}
+
+.option-picker__group > span {
+  color: var(--color-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.option-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.option-choice {
+  min-width: 0;
+  display: flex;
+  grid-template-columns: none;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.option-choice input {
+  width: auto;
+  margin-top: 4px;
+}
+
+.option-choice span,
+.option-choice small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.option-choice small {
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+}
+
+.option-choice.is-disabled {
+  opacity: 0.72;
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
 }
 
 @keyframes spin {
@@ -1380,7 +1548,8 @@ label textarea {
   .orders-layout,
   .conversation-layout,
   .dashboard-grid,
-  .finance-dashboard-grid {
+  .finance-dashboard-grid,
+  .availability-groups {
     grid-template-columns: 1fr;
   }
 
@@ -1438,8 +1607,17 @@ label textarea {
   .customer-grid,
   .state-grid,
   .dashboard-money-grid,
-  .finance-meta-grid {
+  .finance-meta-grid,
+  .option-picker__grid {
     grid-template-columns: 1fr;
+  }
+
+  .availability-row {
+    grid-template-columns: 1fr;
+  }
+
+  .availability-row__actions {
+    justify-content: flex-start;
   }
 
   .payment-method-row__top,

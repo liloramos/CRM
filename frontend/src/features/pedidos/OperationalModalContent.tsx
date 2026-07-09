@@ -1,37 +1,48 @@
 import { EmptyState, LoadingState } from '../../components/ui/States'
-import type { AppModal, Order, PrintPreviewResult, Product } from '../../types/crm'
+import type { AppModal, MenuOption, Order, PrintPreviewResult, Product } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
 
 type OperationalModalContentProps = {
   actionError: string | null
+  beneficiaryName: string
   isActionBusy: boolean
   itemNotes: string
   itemQuantity: number
   modal: AppModal
+  onBeneficiaryNameChange: (value: string) => void
   onItemNotesChange: (value: string) => void
   onItemQuantityChange: (value: number) => void
   onProductChange: (productId: string) => void
+  onSelectedOptionsChange: (optionIds: string[]) => void
   printPreview: PrintPreviewResult | null
   products: Product[]
   selectedOrder?: Order
+  selectedOptionIds: string[]
   selectedProductId: string
 }
 
 export function OperationalModalContent({
   actionError,
+  beneficiaryName,
   isActionBusy,
   itemNotes,
   itemQuantity,
   modal,
+  onBeneficiaryNameChange,
   onItemNotesChange,
   onItemQuantityChange,
   onProductChange,
+  onSelectedOptionsChange,
   printPreview,
   products,
   selectedOrder,
+  selectedOptionIds,
   selectedProductId,
 }: OperationalModalContentProps) {
   if (modal === 'add-product') {
+    const selectedProduct = products.find((product) => product.id === selectedProductId) ?? products[0]
+    const optionGroups = groupOptions(selectedProduct?.options ?? [])
+
     return (
       <div className="modal-fields">
         {selectedOrder ? (
@@ -52,6 +63,51 @@ export function OperationalModalContent({
             ))}
           </select>
         </label>
+        {selectedProduct && optionGroups.length > 0 ? (
+          <div className="option-picker">
+            <div>
+              <strong>Componentes e opcoes</strong>
+              <p>A opcao esgotada hoje fica bloqueada, mas o produto continua vendavel.</p>
+            </div>
+            {optionGroups.map((group) => (
+              <div className="option-picker__group" key={group.groupLabel}>
+                <span>{group.groupLabel}</span>
+                <div className="option-picker__grid">
+                  {group.options.map((option) => {
+                    const checked = selectedOptionIds.includes(option.id)
+
+                    return (
+                      <label className={option.availableToday ? 'option-choice' : 'option-choice is-disabled'} key={option.id}>
+                        <input
+                          checked={checked}
+                          disabled={!option.availableToday}
+                          onChange={() => {
+                            const nextIds = checked
+                              ? selectedOptionIds.filter((optionId) => optionId !== option.id)
+                              : [...selectedOptionIds, option.id]
+
+                            onSelectedOptionsChange(nextIds)
+                          }}
+                          type="checkbox"
+                        />
+                        <span>
+                          <strong>{option.name}</strong>
+                          <small>
+                            {option.availableToday
+                              ? option.priceDelta > 0
+                                ? `+ ${formatCurrency(option.priceDelta)}`
+                                : 'Sem adicional'
+                              : option.dailyReason ?? 'Esgotado hoje'}
+                          </small>
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <label>
           Quantidade
           <input
@@ -59,6 +115,14 @@ export function OperationalModalContent({
             onChange={(event) => onItemQuantityChange(Number(event.target.value))}
             type="number"
             value={itemQuantity}
+          />
+        </label>
+        <label>
+          Beneficiario / quem vai receber
+          <input
+            onChange={(event) => onBeneficiaryNameChange(event.target.value)}
+            placeholder={selectedOrder?.customer.name ?? 'Nome a confirmar'}
+            value={beneficiaryName}
           />
         </label>
         <label>
@@ -161,4 +225,15 @@ export function OperationalModalContent({
       </label>
     </div>
   )
+}
+
+function groupOptions(options: MenuOption[]): Array<{ groupLabel: string; options: MenuOption[] }> {
+  const orderedLabels = ['Bases/guarnicoes', 'Saladas', 'Carnes', 'Bebidas', 'Adicionais', 'Componentes']
+
+  return orderedLabels
+    .map((groupLabel) => ({
+      groupLabel,
+      options: options.filter((option) => option.groupLabel === groupLabel),
+    }))
+    .filter((group) => group.options.length > 0)
 }

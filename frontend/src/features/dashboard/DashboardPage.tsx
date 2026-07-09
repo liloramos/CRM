@@ -19,6 +19,14 @@ type DashboardPageProps = {
 export function DashboardPage({ conversations, financialSummary, onNavigate, orders, paymentMethods }: DashboardPageProps) {
   const openOrders = orders.filter((order) => order.status !== 'finalizado' && order.status !== 'cancelado')
   const waitingPrint = orders.filter((order) => order.printStatus !== 'impresso').length
+  const chartValues = [
+    { label: 'Pedidos', value: financialSummary.ordersCount },
+    { label: 'Pagos', value: financialSummary.paidOrders },
+    { label: 'Pendentes', value: financialSummary.pendingOrders },
+    { label: 'Conversas', value: conversations.length },
+    { label: 'Comandas', value: waitingPrint },
+  ]
+  const maxChartValue = Math.max(...chartValues.map((item) => item.value), 1)
 
   return (
     <PageContainer>
@@ -48,15 +56,15 @@ export function DashboardPage({ conversations, financialSummary, onNavigate, ord
       <div className="dashboard-grid">
         <Card className="sales-card">
           <SectionTitle eyebrow={financialSummary.dateLabel} title="Resumo financeiro do dia" />
-          <div className="line-chart" aria-label="Grafico visual de fluxo operacional">
-            <span style={{ height: '24%' }} />
-            <span style={{ height: '38%' }} />
-            <span style={{ height: '32%' }} />
-            <span style={{ height: '56%' }} />
-            <span style={{ height: '48%' }} />
-            <span style={{ height: '72%' }} />
-            <span style={{ height: '64%' }} />
-            <span style={{ height: '82%' }} />
+          <div className="line-chart" aria-label="Grafico simples com dados operacionais do dia">
+            {chartValues.map((item) => (
+              <span
+                aria-label={`${item.label}: ${item.value}`}
+                key={item.label}
+                style={{ height: `${Math.max(18, (item.value / maxChartValue) * 100)}%` }}
+                title={`${item.label}: ${item.value}`}
+              />
+            ))}
           </div>
           <div className="dashboard-money-grid">
             <div>

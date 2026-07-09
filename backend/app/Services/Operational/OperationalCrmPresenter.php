@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductOption;
 use App\Services\Menu\MenuAvailabilityService;
 use Illuminate\Support\Collection;
 
@@ -100,6 +101,7 @@ class OperationalCrmPresenter
             'total' => $this->cents((int) $order->total_cents),
             'paid' => $this->cents((int) $order->amount_paid_cents),
             'creditUsed' => $this->cents((int) $order->credit_used_cents),
+            'deliveryFee' => $this->cents((int) ($order->delivery_fee_cents ?? 0)),
             'amountDue' => $this->cents((int) $order->amount_due_cents),
             'items' => $order->items
                 ->sortBy('sort_order')
@@ -143,6 +145,19 @@ class OperationalCrmPresenter
                 $product->menu_rule_code,
                 $product->allows_item_notes ? 'aceita observacao' : null,
             ])->filter()->values()->all(),
+            'options' => $product->options
+                ->map(fn ($option): array => [
+                    'id' => (string) $option->id,
+                    'name' => $option->name,
+                    'type' => $option->option_type,
+                    'groupCode' => $option->group_code ?: 'componentes',
+                    'groupLabel' => $this->optionGroupLabel($option->group_code),
+                    'priceDelta' => $this->cents((int) $option->price_delta_cents),
+                    'required' => (bool) $option->is_required,
+                    'availableToday' => $this->optionAvailableToday($option),
+                    'dailyReason' => $this->optionDailyReason($option),
+                ])
+                ->values(),
         ];
     }
 
@@ -428,6 +443,36 @@ class OperationalCrmPresenter
             Order::STATUS_FINISHED => 'Finalizado',
             Order::STATUS_CANCELLED => 'Cancelado',
             default => 'Status atualizado',
+        };
+    }
+
+    private function optionAvailableToday(ProductOption $option): bool
+    {
+        $override = $option->relationLoaded('dailyMenuOptionOverrides')
+            ? $option->dailyMenuOptionOverrides->first()
+            : null;
+
+        return (bool) $option->is_active && $override?->status !== 'unavailable';
+    }
+
+    private function optionDailyReason(ProductOption $option): ?string
+    {
+        if (! $option->relationLoaded('dailyMenuOptionOverrides')) {
+            return null;
+        }
+
+        return $option->dailyMenuOptionOverrides->first()?->reason;
+    }
+
+    private function optionGroupLabel(?string $groupCode): string
+    {
+        return match ($groupCode) {
+            'base', 'bases', 'guarnicoes' => 'Bases/guarnicoes',
+            'salada' => 'Saladas',
+            'carne', 'bife' => 'Carnes',
+            'bebidas' => 'Bebidas',
+            'adicionais' => 'Adicionais',
+            default => 'Componentes',
         };
     }
 }

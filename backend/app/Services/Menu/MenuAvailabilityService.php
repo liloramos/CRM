@@ -3,8 +3,10 @@
 namespace App\Services\Menu;
 
 use App\Models\Company;
+use App\Models\DailyMenuOptionOverride;
 use App\Models\DailyMenuOverride;
 use App\Models\Product;
+use App\Models\ProductOption;
 use App\Models\WeeklyMenuItem;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -33,10 +35,7 @@ class MenuAvailabilityService
         return Product::query()
             ->with([
                 'category',
-                'options' => fn (Builder $query): Builder => $query
-                    ->active()
-                    ->orderBy('display_order')
-                    ->orderBy('name'),
+                'options' => fn (Builder $query): Builder => $this->availableOptionsQuery($query, $companyId, $availabilityDate),
             ])
             ->where('company_id', $companyId)
             ->active()
@@ -53,6 +52,43 @@ class MenuAvailabilityService
                             });
                     });
             })
+            ->orderBy('display_order')
+            ->orderBy('name');
+    }
+
+    public function setOptionAvailability(
+        Company $company,
+        ProductOption $productOption,
+        string $status,
+        ?string $reason = null,
+        ?int $markedByUserId = null,
+        ?CarbonInterface $date = null,
+    ): DailyMenuOptionOverride {
+        $serviceDate = $date ?? now();
+
+        return DailyMenuOptionOverride::query()->updateOrCreate(
+            [
+                'company_id' => $company->id,
+                'product_option_id' => $productOption->id,
+                'availability_date' => $serviceDate->toDateString(),
+            ],
+            [
+                'status' => $status,
+                'reason' => $reason,
+                'marked_by_user_id' => $markedByUserId,
+            ],
+        );
+    }
+
+    private function availableOptionsQuery(Builder $query, int $companyId, string $availabilityDate): Builder
+    {
+        return $query
+            ->active()
+            ->with([
+                'dailyMenuOptionOverrides' => fn (Builder $query): Builder => $query
+                    ->where('company_id', $companyId)
+                    ->whereDate('availability_date', $availabilityDate),
+            ])
             ->orderBy('display_order')
             ->orderBy('name');
     }

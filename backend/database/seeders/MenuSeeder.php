@@ -247,6 +247,37 @@ class MenuSeeder extends Seeder
             ],
         );
 
+        foreach (['n5-casa', 'n8-casa'] as $productSlug) {
+            foreach ([
+                'arroz' => 'Arroz',
+                'feijao' => 'Feijao',
+                'macarrao' => 'Macarrao',
+                'mandioca' => 'Mandioca',
+            ] as $slug => $name) {
+                $this->createProductOption($company, $products[$productSlug], [
+                    'slug' => "guarnicao-{$slug}",
+                    'name' => $name,
+                    'option_type' => ProductOption::TYPE_CHOICE,
+                    'group_code' => 'guarnicoes',
+                    'price_delta_cents' => 0,
+                    'rules' => ['component_kind' => 'base_or_side'],
+                    'display_order' => 12,
+                ]);
+            }
+        }
+
+        foreach (['n5-casa', 'n8-casa', 'n8-tradicional', 'n9-tradicional'] as $productSlug) {
+            $this->createProductOption($company, $products[$productSlug], [
+                'slug' => 'ovo-frito',
+                'name' => 'Ovo frito',
+                'option_type' => ProductOption::TYPE_ADDON,
+                'group_code' => 'adicionais',
+                'price_delta_cents' => 200,
+                'rules' => ['source' => 'official_menu'],
+                'display_order' => 18,
+            ]);
+        }
+
         $this->createProductOption($company, $products['n8-tradicional'], [
             'slug' => 'bife-somente-bife',
             'name' => 'Bife somente bife',
@@ -267,21 +298,39 @@ class MenuSeeder extends Seeder
             'display_order' => 30,
         ]);
 
+        foreach (['n5-casa', 'n8-casa'] as $productSlug) {
+            foreach ([
+                'repolho-com-tomate' => 'Repolho com tomate',
+                'vinagrete' => 'Vinagrete',
+                'beterraba' => 'Beterraba',
+                'cenoura' => 'Cenoura',
+            ] as $slug => $name) {
+                $this->createProductOption($company, $products[$productSlug], [
+                    'slug' => $slug,
+                    'name' => $name,
+                    'option_type' => ProductOption::TYPE_CHOICE,
+                    'group_code' => 'salada',
+                    'price_delta_cents' => 0,
+                    'is_required' => true,
+                    'rules' => ['min_choices' => 1, 'max_choices' => 1],
+                    'display_order' => 40,
+                ]);
+            }
+        }
+
         foreach ([
-            'repolho-com-tomate' => 'Repolho com tomate',
-            'vinagrete' => 'Vinagrete',
-            'beterraba' => 'Beterraba',
-            'cenoura' => 'Cenoura',
+            'bebida-latinha' => 'Latinha',
+            'bebida-latinha-zero' => 'Latinha Zero',
         ] as $slug => $name) {
-            $this->createProductOption($company, $products['n8-casa'], [
+            $this->createProductOption($company, $products['combo-n8-com-latinha'], [
                 'slug' => $slug,
                 'name' => $name,
                 'option_type' => ProductOption::TYPE_CHOICE,
-                'group_code' => 'salada',
+                'group_code' => 'bebidas',
                 'price_delta_cents' => 0,
                 'is_required' => true,
                 'rules' => ['min_choices' => 1, 'max_choices' => 1],
-                'display_order' => 40,
+                'display_order' => 50,
             ]);
         }
     }

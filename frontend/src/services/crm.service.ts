@@ -10,7 +10,7 @@ import {
   paymentMethodSummaryMock,
 } from '../mocks/operacional.mock'
 import { ordersMock } from '../mocks/pedidos.mock'
-import type { AuthUser, OperationalSnapshot, PrintPreviewResult, Product, SnapshotSource } from '../types/crm'
+import type { AuthUser, MenuOption, OperationalSnapshot, PrintPreviewResult, Product, SnapshotSource } from '../types/crm'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const MOCK_FALLBACK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_DISABLE_MOCK_FALLBACK !== 'true'
@@ -52,6 +52,28 @@ type AddItemPayload = {
   quantity: number
   item_notes?: string
   beneficiary_name?: string
+  options?: Array<{
+    product_option_id: string
+    quantity?: number
+  }>
+}
+
+type UpdateMenuOptionAvailabilityPayload = {
+  status: 'available' | 'unavailable'
+  reason?: string
+  date?: string
+}
+
+type BackendProductOption = {
+  id: number | string
+  name: string
+  option_type?: string | null
+  group_code?: string | null
+  group_label?: string | null
+  price_delta_cents?: number | null
+  is_required?: boolean
+  available_today?: boolean
+  daily_reason?: string | null
 }
 
 type BackendProduct = {
@@ -67,6 +89,7 @@ type BackendProduct = {
   category?: {
     name?: string | null
   } | null
+  options?: BackendProductOption[]
 }
 
 export class ApiError extends Error {
@@ -86,7 +109,10 @@ export function getMockOperationalSnapshot(): OperationalSnapshot {
     orders: ordersMock,
     conversations: conversationsMock,
     customers: customersMock,
-    products: productsMock,
+    products: productsMock.map((product) => ({
+      ...product,
+      options: product.options ?? [],
+    })),
     deliveries: deliveryTasksMock,
     financeEntries: financeEntriesMock,
     financialSummary: dailyFinancialSummaryMock,
@@ -174,6 +200,13 @@ export async function generateTicketPreview(orderId: string) {
   })
 }
 
+export async function updateMenuOptionAvailability(optionId: string, payload: UpdateMenuOptionAvailabilityPayload) {
+  return requestJson<ApiEnvelope<MenuOption>>(`/api/app/menu/options/${optionId}/availability`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+}
+
 async function getAvailableMenu(companySlug: string, fallbackProducts: Product[]): Promise<Product[]> {
   try {
     const response = await requestJson<ApiEnvelope<BackendProduct[]>>(`/api/restaurants/${companySlug}/menu/available`)
@@ -193,6 +226,41 @@ function mapBackendProduct(product: BackendProduct): Product {
     price: (product.base_price_cents ?? 0) / 100,
     available: Boolean(product.is_active ?? true) && Boolean(product.is_available_by_default ?? true),
     tags: [product.product_type, product.menu_rule_code, 'api'].filter(Boolean) as string[],
+    options: product.options?.map(mapBackendOption) ?? [],
+  }
+}
+
+function mapBackendOption(option: BackendProductOption): MenuOption {
+  return {
+    id: String(option.id),
+    name: option.name,
+    type: option.option_type ?? 'choice',
+    groupCode: option.group_code ?? 'componentes',
+    groupLabel: option.group_label ?? groupLabel(option.group_code),
+    priceDelta: (option.price_delta_cents ?? 0) / 100,
+    required: Boolean(option.is_required ?? false),
+    availableToday: Boolean(option.available_today ?? true),
+    dailyReason: option.daily_reason ?? null,
+  }
+}
+
+function groupLabel(groupCode?: string | null): string {
+  switch (groupCode) {
+    case 'base':
+    case 'bases':
+    case 'guarnicoes':
+      return 'Bases/guarnicoes'
+    case 'salada':
+      return 'Saladas'
+    case 'carne':
+    case 'bife':
+      return 'Carnes'
+    case 'bebidas':
+      return 'Bebidas'
+    case 'adicionais':
+      return 'Adicionais'
+    default:
+      return 'Componentes'
   }
 }
 

@@ -21,6 +21,7 @@ import {
   createDraftOrder,
   generateTicketPreview,
   getOperationalSnapshot,
+  updateMenuOptionAvailability,
 } from './services/crm.service'
 import type { AppModal, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
 
@@ -40,6 +41,8 @@ function App() {
   const [selectedProductId, setSelectedProductId] = useState<string>('')
   const [itemQuantity, setItemQuantity] = useState(1)
   const [itemNotes, setItemNotes] = useState('')
+  const [beneficiaryName, setBeneficiaryName] = useState('')
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
   const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
 
   const loadSnapshot = useCallback(async () => {
@@ -136,19 +139,48 @@ function App() {
         product_id: selectedProductId,
         quantity: itemQuantity,
         item_notes: itemNotes,
-        beneficiary_name: selectedOrder.customer.name,
+        beneficiary_name: beneficiaryName.trim() || selectedOrder.pickupPerson || selectedOrder.customer.name,
+        options: selectedOptionIds.map((optionId) => ({
+          product_option_id: optionId,
+          quantity: 1,
+        })),
       })
 
       setSelectedOrderId(response.data.id)
       setActiveModal(null)
       setItemNotes('')
       setItemQuantity(1)
+      setBeneficiaryName('')
+      setSelectedOptionIds([])
       await loadSnapshot()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
     } finally {
       setIsActionBusy(false)
     }
+  }
+
+  async function handleToggleOptionAvailability(optionId: string, availableToday: boolean) {
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      await updateMenuOptionAvailability(optionId, {
+        status: availableToday ? 'unavailable' : 'available',
+        reason: availableToday ? 'Marcado como esgotado pela operacao.' : 'Disponibilidade restabelecida pela operacao.',
+      })
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar a disponibilidade.')
+      setActiveModal('mark-unavailable')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  function handleProductChange(productId: string) {
+    setSelectedProductId(productId)
+    setSelectedOptionIds([])
   }
 
   async function handleTicketPreview(orderId: string) {
@@ -171,6 +203,10 @@ function App() {
 
   function openModal(modal: AppModal) {
     setActionError(null)
+    if (modal === 'add-product') {
+      setBeneficiaryName('')
+      setSelectedOptionIds([])
+    }
     setActiveModal(modal)
   }
 
@@ -216,7 +252,15 @@ function App() {
           />
         )
       case 'cardapio':
-        return <MenuPage onOpenModal={openModal} products={snapshot.products} source={snapshotSource} />
+        return (
+          <MenuPage
+            isUpdating={isActionBusy}
+            onOpenModal={openModal}
+            onToggleOptionAvailability={(optionId, availableToday) => void handleToggleOptionAvailability(optionId, availableToday)}
+            products={snapshot.products}
+            source={snapshotSource}
+          />
+        )
       case 'entregas':
         return <DeliveryPage deliveries={snapshot.deliveries} />
       case 'pagamentos':
@@ -321,16 +365,20 @@ function App() {
       >
         <OperationalModalContent
           actionError={actionError}
+          beneficiaryName={beneficiaryName}
           isActionBusy={isActionBusy}
           itemNotes={itemNotes}
           itemQuantity={itemQuantity}
           modal={activeModal}
+          onBeneficiaryNameChange={setBeneficiaryName}
           onItemNotesChange={setItemNotes}
           onItemQuantityChange={setItemQuantity}
-          onProductChange={setSelectedProductId}
+          onProductChange={handleProductChange}
+          onSelectedOptionsChange={setSelectedOptionIds}
           printPreview={printPreview}
           products={snapshot.products}
           selectedOrder={selectedOrder}
+          selectedOptionIds={selectedOptionIds}
           selectedProductId={selectedProductId}
         />
       </Modal>

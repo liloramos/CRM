@@ -46,7 +46,7 @@ export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }:
               <span className="avatar avatar--lg">AD</span>
               <div>
                 <h2>Usuario administrativo</h2>
-                <p>Perfil ficticio para pre-visualizacao do CRM.</p>
+                <p>Perfil demo para pre-visualizacao do CRM.</p>
               </div>
             </div>
           </Card>

@@ -14,7 +14,7 @@ export const deliveryTasksMock: DeliveryTask[] = [
     type: 'entrega',
     status: 'Em rota planejada',
     recipient: 'Cliente Brisa',
-    routeLabel: 'Endereco ficticio cadastrado',
+    routeLabel: 'Referencia de entrega cadastrada',
   },
   {
     id: 'entrega-002',
@@ -74,7 +74,7 @@ export const financeEntriesMock: FinanceEntry[] = [
 export const expenseEntriesMock: ExpenseEntry[] = [
   {
     id: 'desp-001',
-    label: 'Insumo operacional ficticio',
+    label: 'Insumo operacional demo',
     category: 'Despesa simples',
     amount: 12.5,
     createdLabel: 'Hoje',
@@ -86,7 +86,7 @@ export const expenseEntriesMock: ExpenseEntry[] = [
     category: 'Operacao',
     amount: 6,
     createdLabel: 'Hoje',
-    notes: 'Valor ficticio usado apenas para compor o resumo financeiro.',
+    notes: 'Valor demo usado apenas para compor o resumo financeiro.',
   },
 ]
 

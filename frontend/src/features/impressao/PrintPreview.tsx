@@ -47,6 +47,12 @@ export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
               <strong>{order.pickupPerson}</strong>
             </div>
           ) : null}
+          {order.deliveryLabel ? (
+            <div className="receipt-row receipt-row--stack">
+              <span>Entrega / referencia</span>
+              <strong>{order.deliveryLabel}</strong>
+            </div>
+          ) : null}
           <hr />
           {order.items.map((item) => (
             <div className="receipt-item" key={item.id}>
@@ -54,20 +60,34 @@ export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
                 {item.quantity}x {item.name}
               </strong>
               <span>Para: {item.beneficiary}</span>
+              {item.additions.length > 0 ? <span>Opcoes: {item.additions.join(', ')}</span> : null}
               <span>Obs: {item.notes}</span>
               <b>{formatCurrency(item.quantity * item.unitPrice)}</b>
             </div>
           ))}
           <hr />
           <div className="receipt-row">
+            <span>Entrega</span>
+            <strong>{formatCurrency(order.deliveryFee)}</strong>
+          </div>
+          <div className="receipt-row">
             <span>Credito usado</span>
             <strong>{formatCurrency(order.creditUsed)}</strong>
+          </div>
+          <div className="receipt-row">
+            <span>Pago</span>
+            <strong>{formatCurrency(order.paid)}</strong>
+          </div>
+          <div className="receipt-row">
+            <span>Falta</span>
+            <strong>{formatCurrency(order.amountDue)}</strong>
           </div>
           <div className="receipt-row receipt-row--total">
             <span>Total</span>
             <strong>{formatCurrency(order.total)}</strong>
           </div>
           <p className="receipt-note">{order.generalNotes}</p>
+          <p className="receipt-note">Previa HTML. Impressao fisica real depende de confirmacao/configuracao.</p>
         </div>
 
         <div className="print-panel__side">
