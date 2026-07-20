@@ -17,7 +17,7 @@ export function modalTitle(modal: AppModal): string {
     case 'add-user':
       return 'Adicionar usuario'
     case 'toggle-ai':
-      return 'Alternar IA/manual'
+      return 'Alternar IA/manual da conversa'
     case 'print-preview':
       return 'Previa de comanda'
     case 'print-error':
@@ -36,7 +36,7 @@ export function modalDescription(modal: AppModal): string {
     case 'cancel-order':
       return 'Esta acao altera o fluxo operacional e deve registrar motivo.'
     case 'toggle-ai':
-      return 'A IA apoia o atendente, mas o modo manual deve assumir ambiguidades.'
+      return 'Escolha como esta conversa deve seguir. A confirmacao humana continua obrigatoria em decisoes sensiveis.'
     case 'print-preview':
       return 'Previa HTML gerada pelo backend. Impressao fisica real ainda depende de configuracao local.'
     case 'print-error':

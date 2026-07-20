@@ -10,8 +10,8 @@ export type MenuItem = {
 
 export const menuItems: MenuItem[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', group: 'operacao' },
-  { key: 'conversas', label: 'Conversas', icon: 'chat', badge: '12', group: 'operacao' },
-  { key: 'pedidos', label: 'Pedidos', icon: 'orders', badge: '8', group: 'operacao' },
+  { key: 'conversas', label: 'Conversas', icon: 'chat', group: 'operacao' },
+  { key: 'pedidos', label: 'Pedidos', icon: 'orders', group: 'operacao' },
   { key: 'cardapio', label: 'Cardapio', icon: 'menu', group: 'operacao' },
   { key: 'entregas', label: 'Entregas', icon: 'delivery', group: 'operacao' },
   { key: 'pagamentos', label: 'Pagamentos / Pix', icon: 'payment', group: 'operacao' },

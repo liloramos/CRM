@@ -10,6 +10,7 @@ use App\Models\ProductOption;
 use App\Models\WeeklyMenuItem;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class MenuAvailabilityService
 {
@@ -35,7 +36,7 @@ class MenuAvailabilityService
         return Product::query()
             ->with([
                 'category',
-                'options' => fn (Builder $query): Builder => $this->availableOptionsQuery($query, $companyId, $availabilityDate),
+                'options' => fn (HasMany $query): HasMany => $this->availableOptionsQuery($query, $companyId, $availabilityDate),
             ])
             ->where('company_id', $companyId)
             ->active()
@@ -80,12 +81,12 @@ class MenuAvailabilityService
         );
     }
 
-    private function availableOptionsQuery(Builder $query, int $companyId, string $availabilityDate): Builder
+    private function availableOptionsQuery(HasMany $query, int $companyId, string $availabilityDate): HasMany
     {
         return $query
             ->active()
             ->with([
-                'dailyMenuOptionOverrides' => fn (Builder $query): Builder => $query
+                'dailyMenuOptionOverrides' => fn (HasMany $query): HasMany => $query
                     ->where('company_id', $companyId)
                     ->whereDate('availability_date', $availabilityDate),
             ])

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import { AppShell } from './components/layout/AppShell'
 import { Modal } from './components/ui/Modal'
-import { ErrorState, LoadingState } from './components/ui/States'
+import { LoadingState } from './components/ui/States'
 import { modalDescription, modalTitle } from './constants/modals'
 import { LoginPage } from './features/auth/LoginPage'
 import { useAuth } from './features/auth/auth-state'
@@ -13,7 +13,7 @@ import { SettingsPage } from './features/configuracoes/SettingsPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DeliveryPage } from './features/entregas/DeliveryPage'
 import { FinancePage } from './features/financeiro/FinancePage'
-import { OperationalModalContent } from './features/pedidos/OperationalModalContent'
+import { OperationalModalContent, type AutomationModeSelection } from './features/pedidos/OperationalModalContent'
 import { OrdersPage } from './features/pedidos/OrdersPage'
 import { ReportsPage } from './features/relatorios/ReportsPage'
 import {
@@ -21,18 +21,19 @@ import {
   createDraftOrder,
   generateTicketPreview,
   getOperationalSnapshot,
+  setConversationAutomationMode,
   updateMenuOptionAvailability,
 } from './services/crm.service'
-import type { AppModal, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
+import type { AppModal, AuthUser, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
 
 function App() {
   const { logout, status: authStatus, user } = useAuth()
   const [activeRoute, setActiveRoute] = useState<RouteKey>('dashboard')
   const [snapshot, setSnapshot] = useState<OperationalSnapshot | null>(null)
   const [snapshotSource, setSnapshotSource] = useState<SnapshotSource>('api')
-  const [fallbackReason, setFallbackReason] = useState<string | null>(null)
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false)
   const [snapshotError, setSnapshotError] = useState<string | null>(null)
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [activeModal, setActiveModal] = useState<AppModal>(null)
@@ -44,6 +45,7 @@ function App() {
   const [beneficiaryName, setBeneficiaryName] = useState('')
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
   const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
+  const [automationMode, setAutomationMode] = useState<AutomationModeSelection>('assisted')
 
   const loadSnapshot = useCallback(async () => {
     setIsLoadingSnapshot(true)
@@ -53,16 +55,18 @@ function App() {
       const response = await getOperationalSnapshot()
       setSnapshot(response.snapshot)
       setSnapshotSource(response.source)
-      setFallbackReason(response.fallbackReason ?? null)
+      setLastSyncedAt(new Date())
       setSelectedOrderId((current) => current ?? response.snapshot.orders[0]?.id ?? null)
       setSelectedConversationId((current) => current ?? response.snapshot.conversations[0]?.id ?? null)
       setSelectedProductId((current) => current || response.snapshot.products[0]?.id || '')
-    } catch (error) {
-      setSnapshotError(error instanceof Error ? error.message : 'Nao foi possivel carregar dados operacionais.')
+    } catch {
+      setSnapshotError('Verifique sua conexão e tente novamente.')
+      setSnapshot((current) => current ?? emptyOperationalSnapshot(user))
+      setSnapshotSource('api')
     } finally {
       setIsLoadingSnapshot(false)
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     if (authStatus === 'authenticated') {
@@ -119,6 +123,11 @@ function App() {
   async function handleModalPrimary() {
     if (activeModal === 'add-product') {
       await handleAddItem()
+      return
+    }
+
+    if (activeModal === 'toggle-ai') {
+      await handleToggleAutomationMode()
       return
     }
 
@@ -201,11 +210,40 @@ function App() {
     }
   }
 
+  async function handleToggleAutomationMode() {
+    if (!selectedConversation) {
+      setActionError('Selecione uma conversa antes de alternar IA/manual.')
+      return
+    }
+
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      await setConversationAutomationMode(selectedConversation.id, {
+        mode: automationMode,
+        reason:
+          automationMode === 'manual'
+            ? 'Atendimento manual assumido pela interface operacional.'
+            : 'IA assistida reativada pela interface operacional.',
+      })
+      setActiveModal(null)
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel alternar o modo da conversa.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
   function openModal(modal: AppModal) {
     setActionError(null)
     if (modal === 'add-product') {
       setBeneficiaryName('')
       setSelectedOptionIds([])
+    }
+    if (modal === 'toggle-ai') {
+      setAutomationMode(selectedConversation?.mode === 'manual' || selectedConversation?.mode === 'atencao' ? 'manual' : 'assisted')
     }
     setActiveModal(modal)
   }
@@ -222,10 +260,16 @@ function App() {
         return (
           <DashboardPage
             conversations={snapshot.conversations}
+            error={snapshotError}
+            financeEntries={snapshot.financeEntries}
             financialSummary={snapshot.financialSummary}
+            isLoading={isLoadingSnapshot}
             onNavigate={setActiveRoute}
+            onNewOrder={() => void handleNewOrder()}
+            onRetry={loadSnapshot}
             orders={snapshot.orders}
             paymentMethods={snapshot.paymentMethods}
+            source={snapshotSource}
           />
         )
       case 'conversas':
@@ -306,7 +350,7 @@ function App() {
   if (authStatus === 'checking') {
     return (
       <main className="center-screen">
-        <LoadingState description="Verificando sessao Laravel..." title="Carregando CRM" />
+        <LoadingState description="Preparando seu acesso..." title="Carregando CRM" />
       </main>
     )
   }
@@ -318,20 +362,7 @@ function App() {
   if (!snapshot && isLoadingSnapshot) {
     return (
       <main className="center-screen">
-        <LoadingState description="Buscando dados operacionais do backend..." title="Sincronizando operacao" />
-      </main>
-    )
-  }
-
-  if (!snapshot && snapshotError) {
-    return (
-      <main className="center-screen">
-        <ErrorState
-          actionLabel="Tentar novamente"
-          description={snapshotError}
-          onAction={() => void loadSnapshot()}
-          title="Nao foi possivel abrir o CRM"
-        />
+        <LoadingState description="Atualizando pedidos, pagamentos e atendimento..." title="Sincronizando operação" />
       </main>
     )
   }
@@ -343,33 +374,35 @@ function App() {
   return (
     <AppShell
       activeRoute={activeRoute}
-      apiSource={snapshotSource}
-      fallbackReason={fallbackReason}
       isSyncing={isLoadingSnapshot}
+      lastSyncedAt={lastSyncedAt}
       onLogout={() => void logout()}
       onNavigate={setActiveRoute}
-      onNewOrder={() => void handleNewOrder()}
       onRefresh={() => void loadSnapshot()}
       user={user}
     >
       {renderPage()}
       <Modal
+        closeDisabled={isActionBusy}
         danger={activeModal === 'cancel-order' || activeModal === 'print-error' || activeModal === 'whatsapp-error'}
         description={modalDescription(activeModal)}
         onClose={() => setActiveModal(null)}
         onPrimary={() => void handleModalPrimary()}
         open={activeModal !== null}
-        primaryDisabled={isActionBusy}
-        primaryLabel={activeModal === 'cancel-order' ? 'Cancelar pedido' : activeModal === 'add-product' ? 'Adicionar item' : 'Confirmar'}
+        primaryDisabled={isActionBusy || (activeModal === 'toggle-ai' && !selectedConversation)}
+        primaryLabel={primaryLabelForModal(activeModal)}
+        size={activeModal === 'add-product' || activeModal === 'print-preview' ? 'lg' : 'md'}
         title={modalTitle(activeModal)}
       >
         <OperationalModalContent
           actionError={actionError}
+          automationMode={automationMode}
           beneficiaryName={beneficiaryName}
           isActionBusy={isActionBusy}
           itemNotes={itemNotes}
           itemQuantity={itemQuantity}
           modal={activeModal}
+          onAutomationModeChange={setAutomationMode}
           onBeneficiaryNameChange={setBeneficiaryName}
           onItemNotesChange={setItemNotes}
           onItemQuantityChange={setItemQuantity}
@@ -377,6 +410,7 @@ function App() {
           onSelectedOptionsChange={setSelectedOptionIds}
           printPreview={printPreview}
           products={snapshot.products}
+          selectedConversation={selectedConversation}
           selectedOrder={selectedOrder}
           selectedOptionIds={selectedOptionIds}
           selectedProductId={selectedProductId}
@@ -384,6 +418,49 @@ function App() {
       </Modal>
     </AppShell>
   )
+}
+
+function primaryLabelForModal(modal: AppModal): string {
+  switch (modal) {
+    case 'cancel-order':
+      return 'Cancelar pedido'
+    case 'add-product':
+      return 'Adicionar item ao pedido'
+    case 'toggle-ai':
+      return 'Confirmar alteracao'
+    default:
+      return 'Confirmar'
+  }
+}
+
+function emptyOperationalSnapshot(user: AuthUser | null): OperationalSnapshot {
+  return {
+    company: user?.company ?? undefined,
+    orders: [],
+    conversations: [],
+    customers: [],
+    products: [],
+    deliveries: [],
+    financeEntries: [],
+    financialSummary: {
+      dateLabel: 'Hoje',
+      ordersCount: 0,
+      paidOrders: 0,
+      pendingOrders: 0,
+      grossRevenue: 0,
+      confirmedRevenue: 0,
+      pendingAmount: 0,
+      expensesAmount: 0,
+      netProfit: 0,
+      pixAmount: 0,
+      creditUsed: 0,
+      customerCreditBalance: 0,
+      averageTicket: 0,
+    },
+    expenses: [],
+    paymentMethods: [],
+    integrations: [],
+  }
 }
 
 export default App

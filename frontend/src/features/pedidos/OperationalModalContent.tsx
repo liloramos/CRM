@@ -1,14 +1,19 @@
 import { EmptyState, LoadingState } from '../../components/ui/States'
-import type { AppModal, MenuOption, Order, PrintPreviewResult, Product } from '../../types/crm'
+import { Icon } from '../../components/ui/Icon'
+import type { AppModal, Conversation, MenuOption, Order, PrintPreviewResult, Product } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
+
+export type AutomationModeSelection = 'assisted' | 'manual'
 
 type OperationalModalContentProps = {
   actionError: string | null
+  automationMode: AutomationModeSelection
   beneficiaryName: string
   isActionBusy: boolean
   itemNotes: string
   itemQuantity: number
   modal: AppModal
+  onAutomationModeChange: (mode: AutomationModeSelection) => void
   onBeneficiaryNameChange: (value: string) => void
   onItemNotesChange: (value: string) => void
   onItemQuantityChange: (value: number) => void
@@ -16,6 +21,7 @@ type OperationalModalContentProps = {
   onSelectedOptionsChange: (optionIds: string[]) => void
   printPreview: PrintPreviewResult | null
   products: Product[]
+  selectedConversation?: Conversation
   selectedOrder?: Order
   selectedOptionIds: string[]
   selectedProductId: string
@@ -23,11 +29,13 @@ type OperationalModalContentProps = {
 
 export function OperationalModalContent({
   actionError,
+  automationMode,
   beneficiaryName,
   isActionBusy,
   itemNotes,
   itemQuantity,
   modal,
+  onAutomationModeChange,
   onBeneficiaryNameChange,
   onItemNotesChange,
   onItemQuantityChange,
@@ -35,6 +43,7 @@ export function OperationalModalContent({
   onSelectedOptionsChange,
   printPreview,
   products,
+  selectedConversation,
   selectedOrder,
   selectedOptionIds,
   selectedProductId,
@@ -77,7 +86,14 @@ export function OperationalModalContent({
                     const checked = selectedOptionIds.includes(option.id)
 
                     return (
-                      <label className={option.availableToday ? 'option-choice' : 'option-choice is-disabled'} key={option.id}>
+                      <label
+                        className={[
+                          'option-choice',
+                          checked ? 'is-selected' : '',
+                          option.availableToday ? '' : 'is-disabled',
+                        ].filter(Boolean).join(' ')}
+                        key={option.id}
+                      >
                         <input
                           checked={checked}
                           disabled={!option.availableToday}
@@ -90,7 +106,8 @@ export function OperationalModalContent({
                           }}
                           type="checkbox"
                         />
-                        <span>
+                        <span className="option-choice__box" aria-hidden="true" />
+                        <span className="option-choice__content">
                           <strong>{option.name}</strong>
                           <small>
                             {option.availableToday
@@ -174,17 +191,57 @@ export function OperationalModalContent({
   }
 
   if (modal === 'toggle-ai') {
+    if (!selectedConversation) {
+      return (
+        <div className="mode-options">
+          <EmptyState
+            description="Selecione uma conversa na tela de atendimento antes de alternar IA/manual."
+            title="Nenhuma conversa selecionada"
+          />
+        </div>
+      )
+    }
+
     return (
       <div className="mode-options">
-        <label>
-          <input defaultChecked name="mode" type="radio" />
-          IA assistindo com revisao humana
+        <div className="mode-options__intro">
+          <strong>Conversa selecionada: {selectedConversation.customer.name}</strong>
+          <p>A alteracao vale para esta conversa. Situacoes ambiguas, pagamento, credito e entrega seguem com confirmacao humana.</p>
+        </div>
+
+        <label className={automationMode === 'assisted' ? 'mode-card is-selected' : 'mode-card'}>
+          <input
+            checked={automationMode === 'assisted'}
+            name="automation-mode"
+            onChange={() => onAutomationModeChange('assisted')}
+            type="radio"
+            value="assisted"
+          />
+          <span className="mode-card__icon">
+            <Icon name="ai" size={22} />
+          </span>
+          <span className="mode-card__copy">
+            <strong>IA assistida</strong>
+            <small>Sugere respostas e perguntas de confirmacao, sem confirmar decisoes sensiveis sozinha.</small>
+          </span>
         </label>
-        <label>
-          <input name="mode" type="radio" />
-          Atendimento manual
+        <label className={automationMode === 'manual' ? 'mode-card is-selected' : 'mode-card'}>
+          <input
+            checked={automationMode === 'manual'}
+            name="automation-mode"
+            onChange={() => onAutomationModeChange('manual')}
+            type="radio"
+            value="manual"
+          />
+          <span className="mode-card__icon">
+            <Icon name="user" size={22} />
+          </span>
+          <span className="mode-card__copy">
+            <strong>Atendimento manual</strong>
+            <small>A equipe assume a conversa; o sistema registra tomada manual e mantem revisao humana ativa.</small>
+          </span>
         </label>
-        <p>A IA nunca confirma ambiguidades, pagamentos, credito ou entrega sozinha.</p>
+        {actionError ? <p className="form-error">{actionError}</p> : null}
       </div>
     )
   }

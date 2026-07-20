@@ -1,48 +1,104 @@
+import { useEffect, useRef, useState, type FocusEvent, type MouseEvent } from 'react'
 import { menuItems } from '../../constants/routes'
-import type { RouteKey, SnapshotSource } from '../../types/crm'
+import type { RouteKey } from '../../types/crm'
 import { Badge } from '../ui/Badge'
 import { Icon } from '../ui/Icon'
 import { SolLogo } from './SolLogo'
 
 type SidebarProps = {
   activeRoute: RouteKey
-  apiSource: SnapshotSource
-  fallbackReason: string | null
+  collapsed: boolean
   onNavigate: (route: RouteKey) => void
+  onToggleCollapsed: () => void
 }
 
-export function Sidebar({ activeRoute, apiSource, fallbackReason, onNavigate }: SidebarProps) {
+export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed }: SidebarProps) {
+  const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu'
+  const activeItemRef = useRef<HTMLButtonElement | null>(null)
+  const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
+
+  useEffect(() => {
+    activeItemRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [activeRoute, collapsed])
+
+  function showTooltip(label: string, event: FocusEvent<HTMLButtonElement> | MouseEvent<HTMLButtonElement>) {
+    if (!collapsed) {
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    setTooltip({
+      label,
+      top: rect.top + rect.height / 2,
+    })
+  }
+
   return (
-    <aside className="sidebar">
-      <SolLogo />
+    <aside className={collapsed ? 'sidebar sidebar--collapsed' : 'sidebar'}>
+      <SolLogo compact={collapsed} />
+      <button
+        aria-label={toggleLabel}
+        className="sidebar__toggle"
+        onClick={onToggleCollapsed}
+        title={toggleLabel}
+        type="button"
+      >
+        <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={18} />
+      </button>
       <nav className="sidebar__nav" aria-label="Menu principal">
         {menuItems.map((item) => (
           <button
+            aria-current={activeRoute === item.key ? 'page' : undefined}
+            aria-label={item.label}
             className={activeRoute === item.key ? 'sidebar__item is-active' : 'sidebar__item'}
             key={item.key}
+            onBlur={() => setTooltip(null)}
             onClick={() => onNavigate(item.key)}
+            onFocus={(event) => showTooltip(item.label, event)}
+            onMouseEnter={(event) => showTooltip(item.label, event)}
+            onMouseLeave={() => setTooltip(null)}
+            ref={activeRoute === item.key ? activeItemRef : undefined}
             type="button"
           >
             <Icon name={item.icon} size={19} />
-            <span>{item.label}</span>
-            {item.badge ? <Badge tone="brand" size="sm">{item.badge}</Badge> : null}
+            <span className="sidebar__item-label">{item.label}</span>
+            {item.badge ? (
+              <Badge tone="brand" size="sm">
+                {formatCompactBadge(item.badge)}
+              </Badge>
+            ) : null}
           </button>
         ))}
       </nav>
       <div className="sidebar__footer">
-        <div className={apiSource === 'api' ? 'plan-card' : 'plan-card plan-card--warning'}>
-          <span>{apiSource === 'api' ? 'Dados operacionais' : 'Fallback desenvolvimento'}</span>
-          <strong>{apiSource === 'api' ? 'API Laravel ativa' : 'Mocks locais ativos'}</strong>
-          {fallbackReason ? <small>{fallbackReason}</small> : null}
-          <div className="plan-card__bar">
-            <span />
-          </div>
-        </div>
-        <button className="sidebar__item sidebar__item--support" type="button">
+        <button
+          aria-label="Ajuda e suporte"
+          className="sidebar__item sidebar__item--support"
+          onBlur={() => setTooltip(null)}
+          onFocus={(event) => showTooltip('Ajuda e suporte', event)}
+          onMouseEnter={(event) => showTooltip('Ajuda e suporte', event)}
+          onMouseLeave={() => setTooltip(null)}
+          type="button"
+        >
           <Icon name="chat" size={18} />
-          <span>Ajuda e suporte</span>
+          <span className="sidebar__item-label">Ajuda e suporte</span>
         </button>
       </div>
+      {collapsed && tooltip ? (
+        <span className="sidebar__floating-tooltip" role="tooltip" style={{ top: tooltip.top }}>
+          {tooltip.label}
+        </span>
+      ) : null}
     </aside>
   )
+}
+
+function formatCompactBadge(value: string) {
+  const numericValue = Number(value)
+
+  if (!Number.isFinite(numericValue)) {
+    return value
+  }
+
+  return numericValue > 99 ? '99+' : value
 }

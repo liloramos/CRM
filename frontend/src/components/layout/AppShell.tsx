@@ -1,43 +1,54 @@
-import type { ReactNode } from 'react'
-import type { AuthUser, RouteKey, SnapshotSource } from '../../types/crm'
+import { useEffect, useState, type ReactNode } from 'react'
+import type { AuthUser, RouteKey } from '../../types/crm'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
+const SIDEBAR_STORAGE_KEY = 'chatbotcrm.sidebar.v1.collapsed'
+
 type AppShellProps = {
   activeRoute: RouteKey
-  apiSource: SnapshotSource
   children: ReactNode
-  fallbackReason: string | null
   isSyncing: boolean
+  lastSyncedAt: Date | null
   onLogout: () => void
   onNavigate: (route: RouteKey) => void
-  onNewOrder: () => void
   onRefresh: () => void
   user: AuthUser | null
 }
 
 export function AppShell({
   activeRoute,
-  apiSource,
   children,
-  fallbackReason,
   isSyncing,
+  lastSyncedAt,
   onLogout,
   onNavigate,
-  onNewOrder,
   onRefresh,
   user,
 }: AppShellProps) {
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(readInitialSidebarPreference)
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, isSidebarCollapsed ? 'true' : 'false')
+    } catch {
+      // Prefer keeping navigation usable over failing on restricted storage.
+    }
+  }, [isSidebarCollapsed])
+
   return (
-    <div className="app-shell">
-      <Sidebar activeRoute={activeRoute} apiSource={apiSource} fallbackReason={fallbackReason} onNavigate={onNavigate} />
+    <div className={isSidebarCollapsed ? 'app-shell app-shell--sidebar-collapsed' : 'app-shell'}>
+      <Sidebar
+        activeRoute={activeRoute}
+        collapsed={isSidebarCollapsed}
+        onNavigate={onNavigate}
+        onToggleCollapsed={() => setIsSidebarCollapsed((current) => !current)}
+      />
       <div className="app-shell__content">
         <Topbar
-          activeRoute={activeRoute}
-          apiSource={apiSource}
           isSyncing={isSyncing}
+          lastSyncedAt={lastSyncedAt}
           onLogout={onLogout}
-          onNewOrder={onNewOrder}
           onRefresh={onRefresh}
           user={user}
         />
@@ -45,4 +56,16 @@ export function AppShell({
       </div>
     </div>
   )
+}
+
+function readInitialSidebarPreference() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
 }

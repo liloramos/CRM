@@ -1,34 +1,17 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
-import { Button, IconButton } from './Button'
+import { IconButton } from './Button'
 
-type ModalProps = {
+type DrawerProps = {
+  children: ReactNode
+  description?: string
+  footer?: ReactNode
   open: boolean
   title: string
-  description?: string
-  children: ReactNode
-  primaryLabel?: string
-  primaryDisabled?: boolean
-  closeDisabled?: boolean
-  danger?: boolean
   onClose: () => void
-  onPrimary?: () => void
-  size?: 'md' | 'lg'
 }
 
-export function Modal({
-  children,
-  closeDisabled = false,
-  danger = false,
-  description,
-  onClose,
-  onPrimary,
-  open,
-  primaryDisabled = false,
-  primaryLabel = 'Confirmar',
-  size = 'md',
-  title,
-}: ModalProps) {
-  const dialogRef = useRef<HTMLDivElement>(null)
+export function Drawer({ children, description, footer, onClose, open, title }: DrawerProps) {
+  const drawerRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
   const descriptionId = useId()
@@ -43,7 +26,7 @@ export function Modal({
     document.body.style.overflow = 'hidden'
 
     window.setTimeout(() => {
-      getFocusableElements(dialogRef.current)[0]?.focus()
+      getFocusableElements(drawerRef.current)[0]?.focus()
     }, 0)
 
     return () => {
@@ -57,13 +40,13 @@ export function Modal({
   }
 
   function handleBackdropMouseDown(event: MouseEvent<HTMLDivElement>) {
-    if (!closeDisabled && event.target === event.currentTarget) {
+    if (event.target === event.currentTarget) {
       onClose()
     }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Escape' && !closeDisabled) {
+    if (event.key === 'Escape') {
       event.stopPropagation()
       onClose()
       return
@@ -73,7 +56,7 @@ export function Modal({
       return
     }
 
-    const focusableElements = getFocusableElements(dialogRef.current)
+    const focusableElements = getFocusableElements(drawerRef.current)
 
     if (focusableElements.length === 0) {
       event.preventDefault()
@@ -93,38 +76,26 @@ export function Modal({
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={handleBackdropMouseDown} role="presentation">
-      <div
+    <div className="drawer-backdrop" onMouseDown={handleBackdropMouseDown} role="presentation">
+      <aside
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
-        className={`modal modal--${size}`}
+        className="drawer"
         onKeyDown={handleKeyDown}
-        ref={dialogRef}
+        ref={drawerRef}
         role="dialog"
       >
-        <div className="modal__header">
+        <div className="drawer__header">
           <div>
             <h2 id={titleId}>{title}</h2>
             {description ? <p id={descriptionId}>{description}</p> : null}
           </div>
-          <IconButton disabled={closeDisabled} icon="close" label="Fechar modal" onClick={onClose} />
+          <IconButton icon="close" label="Fechar detalhes" onClick={onClose} />
         </div>
-        <div className="modal__body">{children}</div>
-        <div className="modal__footer">
-          <Button disabled={closeDisabled} onClick={onClose} variant="secondary">
-            Cancelar
-          </Button>
-          <Button
-            disabled={primaryDisabled}
-            icon={danger ? 'alert' : 'check'}
-            onClick={onPrimary ?? onClose}
-            variant={danger ? 'danger' : 'primary'}
-          >
-            {primaryLabel}
-          </Button>
-        </div>
-      </div>
+        <div className="drawer__body">{children}</div>
+        {footer ? <div className="drawer__footer">{footer}</div> : null}
+      </aside>
     </div>
   )
 }

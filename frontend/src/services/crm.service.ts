@@ -13,7 +13,7 @@ import { ordersMock } from '../mocks/pedidos.mock'
 import type { AuthUser, MenuOption, OperationalSnapshot, PrintPreviewResult, Product, SnapshotSource } from '../types/crm'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
-const MOCK_FALLBACK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_DISABLE_MOCK_FALLBACK !== 'true'
+const MOCK_FALLBACK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
 
 let csrfToken: string | null = null
 
@@ -64,6 +64,11 @@ type UpdateMenuOptionAvailabilityPayload = {
   date?: string
 }
 
+type AutomationModePayload = {
+  mode: 'assisted' | 'manual'
+  reason?: string
+}
+
 type BackendProductOption = {
   id: number | string
   name: string
@@ -90,6 +95,22 @@ type BackendProduct = {
     name?: string | null
   } | null
   options?: BackendProductOption[]
+}
+
+const EMPTY_FINANCIAL_SUMMARY = {
+  dateLabel: 'Hoje',
+  ordersCount: 0,
+  paidOrders: 0,
+  pendingOrders: 0,
+  grossRevenue: 0,
+  confirmedRevenue: 0,
+  pendingAmount: 0,
+  expensesAmount: 0,
+  netProfit: 0,
+  pixAmount: 0,
+  creditUsed: 0,
+  customerCreditBalance: 0,
+  averageTicket: 0,
 }
 
 export class ApiError extends Error {
@@ -152,7 +173,7 @@ export async function logout(): Promise<void> {
 export async function getOperationalSnapshot(): Promise<SnapshotResponse> {
   try {
     const response = await requestJson<ApiEnvelope<OperationalSnapshot>>('/api/app/operational-snapshot')
-    const snapshot = response.data
+    const snapshot = normalizeOperationalSnapshot(response.data)
 
     if (snapshot.company?.slug) {
       snapshot.products = await getAvailableMenu(snapshot.company.slug, snapshot.products)
@@ -172,6 +193,29 @@ export async function getOperationalSnapshot(): Promise<SnapshotResponse> {
     }
 
     throw error
+  }
+}
+
+function normalizeOperationalSnapshot(snapshot: OperationalSnapshot | null | undefined): OperationalSnapshot {
+  if (!snapshot || typeof snapshot !== 'object') {
+    throw new ApiError('Payload operacional invalido.', 422, snapshot)
+  }
+
+  return {
+    ...snapshot,
+    orders: Array.isArray(snapshot.orders) ? snapshot.orders : [],
+    conversations: Array.isArray(snapshot.conversations) ? snapshot.conversations : [],
+    customers: Array.isArray(snapshot.customers) ? snapshot.customers : [],
+    products: Array.isArray(snapshot.products) ? snapshot.products : [],
+    deliveries: Array.isArray(snapshot.deliveries) ? snapshot.deliveries : [],
+    financeEntries: Array.isArray(snapshot.financeEntries) ? snapshot.financeEntries : [],
+    financialSummary: {
+      ...EMPTY_FINANCIAL_SUMMARY,
+      ...(snapshot.financialSummary ?? {}),
+    },
+    expenses: Array.isArray(snapshot.expenses) ? snapshot.expenses : [],
+    paymentMethods: Array.isArray(snapshot.paymentMethods) ? snapshot.paymentMethods : [],
+    integrations: Array.isArray(snapshot.integrations) ? snapshot.integrations : [],
   }
 }
 
@@ -196,6 +240,18 @@ export async function generateTicketPreview(orderId: string) {
       preview: PrintPreviewResult
     }>
   >(`/api/app/orders/${orderId}/ticket-preview`, {
+    method: 'POST',
+  })
+}
+
+export async function setConversationAutomationMode(conversationId: string, payload: AutomationModePayload) {
+  return requestJson<{
+    id: string | number
+    automation_mode: string
+    automation_status: string
+    human_review_required: boolean
+  }>(`/api/app/conversations/${conversationId}/automation/mode`, {
+    body: JSON.stringify(payload),
     method: 'POST',
   })
 }
