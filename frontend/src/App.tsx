@@ -25,10 +25,11 @@ import {
   updateMenuOptionAvailability,
 } from './services/crm.service'
 import type { AppModal, AuthUser, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
+import { ChampsPage } from './features/champs/ChampsPage'
 
 function App() {
   const { logout, status: authStatus, user } = useAuth()
-  const [activeRoute, setActiveRoute] = useState<RouteKey>('dashboard')
+  const [activeRoute, setActiveRoute] = useState<RouteKey>('champs')
   const [snapshot, setSnapshot] = useState<OperationalSnapshot | null>(null)
   const [snapshotSource, setSnapshotSource] = useState<SnapshotSource>('api')
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false)
@@ -254,6 +255,8 @@ function App() {
     }
 
     switch (activeRoute) {
+      case 'champs':
+        return <ChampsPage />
       case 'login':
       case 'cadastro':
       case 'dashboard':

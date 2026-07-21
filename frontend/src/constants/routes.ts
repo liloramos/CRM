@@ -9,19 +9,18 @@ export type MenuItem = {
 }
 
 export const menuItems: MenuItem[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', group: 'operacao' },
-  { key: 'conversas', label: 'Conversas', icon: 'chat', group: 'operacao' },
-  { key: 'pedidos', label: 'Pedidos', icon: 'orders', group: 'operacao' },
-  { key: 'cardapio', label: 'Cardapio', icon: 'menu', group: 'operacao' },
-  { key: 'entregas', label: 'Entregas', icon: 'delivery', group: 'operacao' },
-  { key: 'pagamentos', label: 'Pagamentos / Pix', icon: 'payment', group: 'operacao' },
-  { key: 'financeiro', label: 'Financeiro', icon: 'finance', group: 'analise' },
-  { key: 'clientes', label: 'Clientes', icon: 'customers', group: 'operacao' },
-  { key: 'relatorios', label: 'Relatorios', icon: 'reports', group: 'analise' },
-  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', group: 'configuracao' },
-  { key: 'whatsapp', label: 'WhatsApp / API', icon: 'api', group: 'configuracao' },
-  { key: 'ia', label: 'IA e Automacao', icon: 'ai', group: 'configuracao' },
-  { key: 'perfil', label: 'Perfil', icon: 'user', group: 'configuracao' },
+  {
+    key: 'champs',
+    label: 'Prospecção de leads',
+    icon: 'reports',
+    group: 'operacao',
+  },
+  {
+    key: 'perfil',
+    label: 'Perfil',
+    icon: 'user',
+    group: 'configuracao',
+  },
 ]
 
 export const routeLabels: Record<RouteKey, string> = {
@@ -40,4 +39,5 @@ export const routeLabels: Record<RouteKey, string> = {
   whatsapp: 'WhatsApp / API',
   ia: 'IA e Automacao',
   perfil: 'Perfil',
+  champs: 'Prospecção de leads',
 }

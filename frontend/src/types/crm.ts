@@ -14,6 +14,7 @@ export type RouteKey =
   | 'whatsapp'
   | 'ia'
   | 'perfil'
+  | 'champs'
 
 export type BadgeTone =
   | 'brand'
