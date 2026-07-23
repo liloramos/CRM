@@ -111,6 +111,68 @@ class MenuAdminFoundationTest extends TestCase
         $this->assertSame([], $this->day('2026-07-26')['catalog']['categories']);
     }
 
+    public function test_sol_baseline_product_service_days_match_official_inventory(): void
+    {
+        $this->seed([RoleAndPermissionSeeder::class, MenuSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
+
+        $otherProduct = $this->otherCompanyProduct();
+        ProductServiceDayModel::query()->create([
+            'company_id' => $otherProduct->company_id,
+            'product_id' => $otherProduct->id,
+            'service_day' => ProductServiceDay::Sunday->value,
+            'is_active' => true,
+        ]);
+
+        $this->seed(SolRestaurantMenuAdminBaselineSeeder::class);
+        $this->seed(SolRestaurantMenuAdminBaselineSeeder::class);
+
+        $mondayToSaturday = [
+            ProductServiceDay::Monday->value,
+            ProductServiceDay::Tuesday->value,
+            ProductServiceDay::Wednesday->value,
+            ProductServiceDay::Thursday->value,
+            ProductServiceDay::Friday->value,
+            ProductServiceDay::Saturday->value,
+        ];
+        $saturdayOnly = [ProductServiceDay::Saturday->value];
+
+        foreach (['n5-casa', 'n8-casa', 'n8-tradicional', 'n9-tradicional'] as $slug) {
+            $this->assertSame($mondayToSaturday, $this->productServiceDays($slug));
+        }
+
+        foreach (['combo-n8-casa-baby', 'combo-n8-com-latinha'] as $slug) {
+            $this->assertSame($mondayToSaturday, $this->productServiceDays($slug));
+        }
+
+        foreach ($this->officialBeverageSlugs() as $slug) {
+            $this->assertSame($mondayToSaturday, $this->productServiceDays($slug));
+        }
+
+        foreach (['suco', 'acai-500ml', 'ovo-frito-adicional'] as $slug) {
+            $this->assertSame($mondayToSaturday, $this->productServiceDays($slug));
+        }
+
+        foreach (['feijoada-250ml', 'feijoada-n5-500ml', 'feijoada-750ml', 'feijoada-grande-1100ml'] as $slug) {
+            $this->assertSame($saturdayOnly, $this->productServiceDays($slug));
+        }
+
+        $company = $this->company();
+
+        $this->assertSame([], $this->productServiceDays('feijoada'));
+        $this->assertSame(172, ProductServiceDayModel::query()->where('company_id', $company->id)->count());
+        $this->assertSame(0, ProductServiceDayModel::query()->where('company_id', $company->id)->where('service_day', ProductServiceDay::Sunday->value)->count());
+        $this->assertSame(0, ProductServiceDayModel::query()->where('company_id', $company->id)->where('is_active', false)->count());
+        $this->assertSame(
+            [ProductServiceDay::Sunday->value],
+            ProductServiceDayModel::query()
+                ->where('company_id', $otherProduct->company_id)
+                ->where('product_id', $otherProduct->id)
+                ->get()
+                ->map(fn (ProductServiceDayModel $serviceDay): string => $this->serviceDayValue($serviceDay->service_day))
+                ->all(),
+        );
+    }
+
     public function test_daily_override_is_final_for_active_products_but_does_not_bypass_inactive_products(): void
     {
         $this->seedAdminMenu();
@@ -606,5 +668,67 @@ class MenuAdminFoundationTest extends TestCase
             fn (array $item): string => $item['component']['slug'],
             $this->day($date)['sections'][$section->value],
         );
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function productServiceDays(string $productSlug): array
+    {
+        return ProductServiceDayModel::query()
+            ->where('company_id', $this->company()->id)
+            ->where('product_id', $this->product($productSlug)->id)
+            ->get()
+            ->map(fn (ProductServiceDayModel $serviceDay): string => $this->serviceDayValue($serviceDay->service_day))
+            ->sortBy(fn (string $day): int => $this->productServiceDayOrder($day))
+            ->values()
+            ->all();
+    }
+
+    private function serviceDayValue(ProductServiceDay|string $day): string
+    {
+        return $day instanceof ProductServiceDay ? $day->value : $day;
+    }
+
+    private function productServiceDayOrder(string $day): int
+    {
+        return match ($day) {
+            ProductServiceDay::Monday->value => 10,
+            ProductServiceDay::Tuesday->value => 20,
+            ProductServiceDay::Wednesday->value => 30,
+            ProductServiceDay::Thursday->value => 40,
+            ProductServiceDay::Friday->value => 50,
+            ProductServiceDay::Saturday->value => 60,
+            ProductServiceDay::Sunday->value => 70,
+            default => 99,
+        };
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function officialBeverageSlugs(): array
+    {
+        return [
+            'latinha',
+            'latinha-zero',
+            'coca-cola-2l',
+            'sprite-zero',
+            'coca-cola-1l',
+            'coca-cola-1l-zero',
+            'guarana-1l',
+            'mineiro-2l',
+            'h2o-limonetto',
+            'guarana-lata',
+            'guarana-mineiro-baby',
+            'mineiro-lata',
+            'coca-cola-lata-normal',
+            'coca-cola-zero-lata',
+            'mineiro-600ml',
+            'agua-com-gas',
+            'agua-mineral',
+            'coca-cola-600ml',
+            'mineiro-lata-zero',
+        ];
     }
 }

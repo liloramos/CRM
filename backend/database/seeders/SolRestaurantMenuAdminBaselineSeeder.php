@@ -132,18 +132,27 @@ class SolRestaurantMenuAdminBaselineSeeder extends Seeder
      */
     private function syncProductDays(Product $product, array $days): void
     {
-        foreach (ProductServiceDayEnum::cases() as $day) {
+        $days = collect($days)->unique()->values();
+
+        foreach ($days as $day) {
             ProductServiceDay::query()->updateOrCreate(
                 [
                     'company_id' => $product->company_id,
                     'product_id' => $product->id,
-                    'service_day' => $day->value,
+                    'service_day' => $day,
                 ],
                 [
-                    'is_active' => in_array($day->value, $days, true),
+                    'is_active' => true,
                 ],
             );
         }
+
+        ProductServiceDay::query()
+            ->where('company_id', $product->company_id)
+            ->where('product_id', $product->id)
+            ->whereNotIn('service_day', $days->all())
+            ->where('is_active', false)
+            ->delete();
     }
 
     private function nextComponentOrder(Company $company, MenuComponentType $type): int
