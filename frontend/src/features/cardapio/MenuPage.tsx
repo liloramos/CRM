@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -254,6 +254,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
   const rulesProducts = rulesCategories.flatMap((category) => category.products)
   const serviceDayLabel = dailyMenu?.service_day ? serviceDayLabels[dailyMenu.service_day] : 'Sem cardapio semanal'
   const formattedDate = formatDateLabel(dailyMenu?.date ?? selectedDate)
+  const timezoneLabel = friendlyTimezoneLabel(dailyMenu?.timezone)
 
   function openProductModal(product: StructuredMenuProduct) {
     setMutationError(null)
@@ -537,18 +538,15 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       />
 
       <div className="menu-admin-workspace">
-        <Card className="menu-date-card">
-          <div>
+        <Card className="menu-date-card menu-date-card--admin">
+          <div className="menu-date-card__summary">
             <span className="eyebrow">Data consultada</span>
             <strong>{formattedDate}</strong>
             <p>{serviceDayLabel}</p>
           </div>
           <div className="menu-admin-date-tools">
-            <label>
-              <span>Data</span>
-              <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
-            </label>
-            {dailyMenu?.timezone ? <Badge tone="info">{dailyMenu.timezone}</Badge> : null}
+            <CalendarDatePicker value={selectedDate} onChange={setSelectedDate} />
+            {timezoneLabel ? <Badge tone="info">{timezoneLabel}</Badge> : null}
           </div>
         </Card>
 
@@ -823,7 +821,7 @@ function DailyMenuItem({
 }) {
   return (
     <div className={item.available ? 'daily-menu-item' : 'daily-menu-item is-unavailable'}>
-      <div>
+      <div className="daily-menu-item__content">
         <strong>{item.component.name}</strong>
         <div className="menu-admin-inline-badges">
           <AvailabilityBadge availability={item.availability} />
@@ -838,7 +836,7 @@ function DailyMenuItem({
         {item.availability.replacement ? <span>Substituto sugerido: {item.availability.replacement.name}</span> : null}
       </div>
       {canManageMenu ? (
-        <div className="menu-admin-item-actions">
+        <div className="daily-menu-item__actions menu-admin-item-actions">
           <Button onClick={() => onOpenAvailability(item, 'sold_out')} size="sm" variant="secondary">
             Esgotado
           </Button>
@@ -1207,6 +1205,127 @@ function RulesTab({ products }: { products: StructuredMenuProduct[] }) {
           <StructuredProductCard key={product.id} product={product} />
         ))}
       </div>
+    </div>
+  )
+}
+
+function CalendarDatePicker({
+  onChange,
+  value,
+}: {
+  onChange: (value: string) => void
+  value: string
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const selectedDate = parseDateString(value) ?? new Date()
+  const [isOpen, setIsOpen] = useState(false)
+  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(selectedDate))
+
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsOpen(false)
+      }
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    document.addEventListener('mousedown', handlePointerDown)
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      document.removeEventListener('mousedown', handlePointerDown)
+    }
+  }, [isOpen])
+
+  const days = monthCalendarDays(visibleMonth)
+  const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(visibleMonth)
+  const today = todayDateString()
+
+  function toggleCalendar() {
+    setVisibleMonth(startOfMonth(parseDateString(value) ?? new Date()))
+    setIsOpen((current) => !current)
+  }
+
+  function selectDate(nextDate: string) {
+    onChange(nextDate)
+    setVisibleMonth(startOfMonth(parseDateString(nextDate) ?? new Date()))
+    setIsOpen(false)
+  }
+
+  return (
+    <div className="menu-datepicker" ref={containerRef}>
+      <span>Data</span>
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        className="menu-datepicker__trigger"
+        onClick={toggleCalendar}
+        type="button"
+      >
+        <strong>{formatDateLabel(value)}</strong>
+        <small>{value === today ? 'Hoje' : serviceDayNameForDate(value)}</small>
+      </button>
+      {isOpen ? (
+        <div aria-label="Selecionar data" className="menu-datepicker__popover" role="dialog">
+          <div className="menu-datepicker__header">
+            <button aria-label="Mes anterior" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, -1))} type="button">
+              {'<'}
+            </button>
+            <strong>{capitalize(monthLabel)}</strong>
+            <button aria-label="Proximo mes" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, 1))} type="button">
+              {'>'}
+            </button>
+          </div>
+          <div className="menu-datepicker__weekdays" aria-hidden="true">
+            {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'].map((day) => (
+              <span key={day}>{day}</span>
+            ))}
+          </div>
+          <div className="menu-datepicker__days" role="grid">
+            {days.map((day) => {
+              const dayValue = dateToString(day)
+              const isSelected = dayValue === value
+              const isToday = dayValue === today
+              const outsideMonth = day.getMonth() !== visibleMonth.getMonth()
+
+              return (
+                <button
+                  aria-current={isToday ? 'date' : undefined}
+                  aria-label={formatDateLabel(dayValue)}
+                  aria-selected={isSelected}
+                  className={[
+                    'menu-datepicker__day',
+                    isSelected ? 'is-selected' : '',
+                    isToday ? 'is-today' : '',
+                    outsideMonth ? 'is-outside' : '',
+                  ].filter(Boolean).join(' ')}
+                  key={dayValue}
+                  onClick={() => selectDate(dayValue)}
+                  role="gridcell"
+                  type="button"
+                >
+                  {day.getDate()}
+                </button>
+              )
+            })}
+          </div>
+          <div className="menu-datepicker__footer">
+            <Button onClick={() => selectDate(today)} size="sm" variant="secondary">
+              Hoje
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1984,6 +2103,79 @@ function normalizeSearch(value: string): string {
 
 function normalizeComponentType(value: string): MenuComponentTypeKey {
   return componentTypes.includes(value as MenuComponentTypeKey) ? (value as MenuComponentTypeKey) : 'extra'
+}
+
+function parseDateString(value: string): Date | null {
+  const [year, month, day] = value.split('-').map(Number)
+
+  if (!year || !month || !day) {
+    return null
+  }
+
+  const date = new Date(year, month - 1, day)
+
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null
+  }
+
+  return date
+}
+
+function startOfMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), 1)
+}
+
+function shiftMonth(date: Date, offset: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + offset, 1)
+}
+
+function monthCalendarDays(monthDate: Date): Date[] {
+  const firstDay = startOfMonth(monthDate)
+  const mondayBasedOffset = (firstDay.getDay() + 6) % 7
+  const firstCalendarDay = new Date(firstDay)
+  firstCalendarDay.setDate(firstDay.getDate() - mondayBasedOffset)
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = new Date(firstCalendarDay)
+    day.setDate(firstCalendarDay.getDate() + index)
+
+    return day
+  })
+}
+
+function dateToString(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+function serviceDayNameForDate(value: string): string {
+  const date = parseDateString(value)
+
+  if (!date) {
+    return 'Data invalida'
+  }
+
+  const day = serviceDayOrder[date.getDay() === 0 ? 6 : date.getDay() - 1]
+
+  return serviceDayLabels[day]
+}
+
+function friendlyTimezoneLabel(timezone?: string | null): string | null {
+  if (!timezone) {
+    return null
+  }
+
+  if (timezone === 'America/Sao_Paulo') {
+    return 'Anapolis/GO - Horario de Brasilia'
+  }
+
+  return timezone.replaceAll('_', ' ')
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
 function initialTab(): MenuAdminTab {
