@@ -144,6 +144,11 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(DailyProductComponentOverride::class, 'marked_by_user_id');
     }
 
+    public function markedDailyMenuComponentAdjustments(): HasMany
+    {
+        return $this->hasMany(DailyMenuComponentAdjustment::class, 'marked_by_user_id');
+    }
+
     public function assignRole(Role|string $role): void
     {
         $roleModel = $role instanceof Role

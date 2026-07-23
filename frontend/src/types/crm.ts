@@ -144,6 +144,7 @@ export type EffectiveAvailabilitySource =
   | 'component_default'
   | 'product_default'
   | 'daily_menu_override'
+  | 'product_service_day'
 
 export type EffectiveAvailability = {
   status: EffectiveAvailabilityStatus
@@ -178,6 +179,7 @@ export type StructuredMenuProductSummary = {
   is_active: boolean
   is_available_by_default: boolean
   availability: EffectiveAvailability
+  service_days: Array<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'>
   category: StructuredMenuCategorySummary | null
 }
 

@@ -45,6 +45,11 @@ class MenuComponent extends Model
         return $this->hasMany(WeeklyMenuComponentItem::class);
     }
 
+    public function dailyMenuAdjustments(): HasMany
+    {
+        return $this->hasMany(DailyMenuComponentAdjustment::class);
+    }
+
     public function dailyAvailabilities(): HasMany
     {
         return $this->hasMany(DailyComponentAvailability::class);

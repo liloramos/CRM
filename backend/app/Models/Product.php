@@ -80,6 +80,11 @@ class Product extends Model
         return $this->hasMany(ComboItem::class, 'combo_product_id');
     }
 
+    public function serviceDays(): HasMany
+    {
+        return $this->hasMany(ProductServiceDay::class);
+    }
+
     public function includedInComboItems(): HasMany
     {
         return $this->hasMany(ComboItem::class, 'included_product_id');

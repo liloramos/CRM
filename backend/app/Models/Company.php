@@ -48,6 +48,11 @@ class Company extends Model
         return $this->hasMany(Product::class);
     }
 
+    public function productServiceDays(): HasMany
+    {
+        return $this->hasMany(ProductServiceDay::class);
+    }
+
     public function comboItems(): HasMany
     {
         return $this->hasMany(ComboItem::class);
@@ -91,6 +96,11 @@ class Company extends Model
     public function dailyProductComponentOverrides(): HasMany
     {
         return $this->hasMany(DailyProductComponentOverride::class);
+    }
+
+    public function dailyMenuComponentAdjustments(): HasMany
+    {
+        return $this->hasMany(DailyMenuComponentAdjustment::class);
     }
 
     public function orders(): HasMany

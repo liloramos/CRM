@@ -2,6 +2,7 @@
 
 namespace App\Services\Menu;
 
+use App\Enums\ProductServiceDay;
 use App\Models\Company;
 use App\Models\DailyMenuOverride;
 use App\Models\Product;
@@ -86,9 +87,12 @@ class StructuredProductConfigurationService
     {
         return [
             'category',
+            'serviceDays',
             'optionGroups.componentOptions.component',
             'optionGroups.productOptions.selectableProduct.category',
+            'optionGroups.productOptions.selectableProduct.serviceDays',
             'comboItems.includedProduct.category',
+            'comboItems.includedProduct.serviceDays',
         ];
     }
 
@@ -109,6 +113,7 @@ class StructuredProductConfigurationService
             'is_active' => (bool) $product->is_active,
             'is_available_by_default' => (bool) $product->is_available_by_default,
             'availability' => $this->productAvailability($product, $company, $date),
+            'service_days' => $this->serviceDays($product),
             'category' => $product->category ? [
                 'id' => $product->category->id,
                 'slug' => $product->category->slug,
@@ -148,6 +153,16 @@ class StructuredProductConfigurationService
             ];
         }
 
+        if (! $this->productIsScheduledForDate($product, $date)) {
+            return [
+                'status' => DailyMenuOverride::STATUS_UNAVAILABLE,
+                'available' => false,
+                'source' => 'product_service_day',
+                'reason' => null,
+                'availability_date' => $dateString,
+            ];
+        }
+
         return [
             'status' => $product->is_available_by_default
                 ? DailyMenuOverride::STATUS_AVAILABLE
@@ -162,6 +177,49 @@ class StructuredProductConfigurationService
     public function isSellable(Product $product, Company $company, CarbonInterface $date): bool
     {
         return (bool) $this->productAvailability($product, $company, $date)['available'];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function serviceDays(Product $product): array
+    {
+        $product->loadMissing('serviceDays');
+
+        return $product->serviceDays
+            ->filter(fn ($serviceDay): bool => (bool) $serviceDay->is_active)
+            ->sortBy(fn ($serviceDay): int => $this->serviceDayOrder($serviceDay->service_day->value))
+            ->map(fn ($serviceDay): string => $serviceDay->service_day->value)
+            ->values()
+            ->all();
+    }
+
+    private function productIsScheduledForDate(Product $product, CarbonInterface $date): bool
+    {
+        $product->loadMissing('serviceDays');
+
+        if ($product->serviceDays->isEmpty()) {
+            return true;
+        }
+
+        $serviceDay = ProductServiceDay::fromDate($date);
+
+        return $product->serviceDays
+            ->contains(fn ($row): bool => $row->service_day === $serviceDay && (bool) $row->is_active);
+    }
+
+    private function serviceDayOrder(string $serviceDay): int
+    {
+        return match ($serviceDay) {
+            ProductServiceDay::Monday->value => 10,
+            ProductServiceDay::Tuesday->value => 20,
+            ProductServiceDay::Wednesday->value => 30,
+            ProductServiceDay::Thursday->value => 40,
+            ProductServiceDay::Friday->value => 50,
+            ProductServiceDay::Saturday->value => 60,
+            ProductServiceDay::Sunday->value => 70,
+            default => 99,
+        };
     }
 
     /**

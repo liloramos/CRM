@@ -3,14 +3,18 @@
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
+use App\Http\Controllers\Api\MenuComponentAdminController;
 use App\Http\Controllers\Api\MenuComponentAvailabilityController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
+use App\Http\Controllers\Api\MenuProductAdminController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
 use App\Http\Controllers\Api\ProductComponentAvailabilityController;
 use App\Http\Controllers\Api\ProductConfigurationController;
 use App\Http\Controllers\Api\StructuredMenuCatalogController;
+use App\Http\Controllers\Api\WeeklyMenuComponentAdminController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
 use App\Http\Controllers\Printing\PrintJobController;
 use App\Http\Controllers\WhatsApp\WhatsAppStatusController;
@@ -30,12 +34,36 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('menu/day', DailyStructuredMenuController::class)->name('menu.day');
         Route::get('menu/products/{product}/configuration', ProductConfigurationController::class)
             ->name('menu.products.configuration');
+        Route::patch('menu/products/{product}', [MenuProductAdminController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.update');
+        Route::post('menu/components', [MenuComponentAdminController::class, 'store'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.components.store');
+        Route::patch('menu/components/{component}', [MenuComponentAdminController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.components.update');
         Route::patch('menu/components/{component}/availability', [MenuComponentAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.components.availability.update');
         Route::delete('menu/components/{component}/availability', [MenuComponentAvailabilityController::class, 'destroy'])
             ->middleware('permission:menu.manage')
             ->name('menu.components.availability.destroy');
+        Route::patch('menu/weekly/components/{component}', [WeeklyMenuComponentAdminController::class, 'store'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.weekly.components.store');
+        Route::patch('menu/weekly-items/{item}', [WeeklyMenuComponentAdminController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.weekly-items.update');
+        Route::delete('menu/weekly-items/{item}', [WeeklyMenuComponentAdminController::class, 'destroy'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.weekly-items.destroy');
+        Route::patch('menu/day/components/{component}', [DailyMenuComponentAdjustmentController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.day.components.update');
+        Route::delete('menu/day/components/{component}', [DailyMenuComponentAdjustmentController::class, 'destroy'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.day.components.destroy');
         Route::patch('menu/products/{product}/components/{component}/availability', [ProductComponentAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.components.availability.update');

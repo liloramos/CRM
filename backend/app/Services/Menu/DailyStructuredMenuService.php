@@ -2,9 +2,11 @@
 
 namespace App\Services\Menu;
 
+use App\Enums\DailyMenuAdjustmentAction;
 use App\Enums\WeeklyMenuSection;
 use App\Enums\WeeklyMenuServiceDay;
 use App\Models\Company;
+use App\Models\DailyMenuComponentAdjustment;
 use App\Models\Product;
 use App\Models\WeeklyMenu;
 use Carbon\CarbonInterface;
@@ -35,7 +37,7 @@ class DailyStructuredMenuService
                 'is_service_day' => false,
                 'timezone' => $this->timezone($company),
                 'weekly_menu' => null,
-                'sections' => $this->emptySections(),
+                'sections' => $this->sections($company, weeklyMenu: null, serviceDay: null, date: $date),
                 'traditional_products' => $this->traditionalProducts($company, $date),
                 'catalog' => $catalog,
             ];
@@ -55,9 +57,7 @@ class DailyStructuredMenuService
                 'starts_on' => $weeklyMenu->starts_on?->toDateString(),
                 'ends_on' => $weeklyMenu->ends_on?->toDateString(),
             ] : null,
-            'sections' => $weeklyMenu
-                ? $this->sections($company, $weeklyMenu, $serviceDay, $date)
-                : $this->emptySections(),
+            'sections' => $this->sections($company, $weeklyMenu, $serviceDay, $date),
             'traditional_products' => $this->traditionalProducts($company, $date),
             'catalog' => $catalog,
         ];
@@ -68,19 +68,12 @@ class DailyStructuredMenuService
      */
     private function sections(
         Company $company,
-        WeeklyMenu $weeklyMenu,
-        WeeklyMenuServiceDay $serviceDay,
+        ?WeeklyMenu $weeklyMenu,
+        ?WeeklyMenuServiceDay $serviceDay,
         CarbonInterface $date,
     ): array {
-        $itemsBySection = $weeklyMenu->componentItems()
-            ->with('component')
-            ->where('company_id', $company->id)
-            ->where('service_day', $serviceDay->value)
-            ->where('is_active', true)
-            ->orderBy('display_order')
-            ->orderBy('id')
-            ->get()
-            ->groupBy(fn ($item): string => $item->section->value);
+        $rows = $this->sectionRows($company, $weeklyMenu, $serviceDay, $date);
+        $itemsBySection = $rows->groupBy(fn (array $item): string => $item['section']->value);
 
         return collect(WeeklyMenuSection::cases())
             ->mapWithKeys(fn (WeeklyMenuSection $section): array => [
@@ -90,23 +83,25 @@ class DailyStructuredMenuService
     }
 
     /**
-     * @param  Collection<int, mixed>  $items
+     * @param  Collection<int, array<string, mixed>>  $items
      * @return array<int, array<string, mixed>>
      */
     private function sectionItems(Company $company, Collection $items, CarbonInterface $date): array
     {
         return $items
-            ->map(function ($item) use ($company, $date): array {
-                $component = $item->component;
+            ->sortBy([['display_order', 'asc'], ['id', 'asc']])
+            ->map(function (array $item) use ($company, $date): array {
+                $component = $item['component'];
                 $availability = $this->availabilityResolver
                     ->resolve($company, $component, $date)
                     ->toArray();
 
                 return [
-                    'id' => $item->id,
-                    'section' => $item->section->value,
-                    'display_order' => $item->display_order,
-                    'notes' => $item->notes,
+                    'id' => $item['id'],
+                    'source' => $item['source'],
+                    'section' => $item['section']->value,
+                    'display_order' => $item['display_order'],
+                    'notes' => $item['notes'],
                     'component' => [
                         'id' => $component->id,
                         'slug' => $component->slug,
@@ -119,6 +114,77 @@ class DailyStructuredMenuService
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function sectionRows(
+        Company $company,
+        ?WeeklyMenu $weeklyMenu,
+        ?WeeklyMenuServiceDay $serviceDay,
+        CarbonInterface $date,
+    ): Collection {
+        $rows = collect();
+
+        if ($weeklyMenu !== null && $serviceDay !== null) {
+            $rows = $weeklyMenu->componentItems()
+                ->with('component')
+                ->where('company_id', $company->id)
+                ->where('service_day', $serviceDay->value)
+                ->where('is_active', true)
+                ->orderBy('display_order')
+                ->orderBy('id')
+                ->get()
+                ->map(fn ($item): array => [
+                    'id' => $item->id,
+                    'source' => 'weekly_menu',
+                    'section' => $item->section,
+                    'display_order' => $item->display_order,
+                    'notes' => $item->notes,
+                    'component' => $item->component,
+                ]);
+        }
+
+        $adjustments = DailyMenuComponentAdjustment::query()
+            ->with('component')
+            ->where('company_id', $company->id)
+            ->whereDate('availability_date', $date->toDateString())
+            ->orderBy('display_order')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($adjustments as $adjustment) {
+            $componentId = (int) $adjustment->menu_component_id;
+            $section = $adjustment->section;
+
+            if ($adjustment->action === DailyMenuAdjustmentAction::Exclude) {
+                $rows = $rows
+                    ->reject(fn (array $row): bool => (int) $row['component']->id === $componentId && $row['section'] === $section)
+                    ->values();
+
+                continue;
+            }
+
+            $alreadyPresent = $rows->contains(
+                fn (array $row): bool => (int) $row['component']->id === $componentId && $row['section'] === $section,
+            );
+
+            if ($alreadyPresent) {
+                continue;
+            }
+
+            $rows->push([
+                'id' => $adjustment->id,
+                'source' => 'daily_adjustment',
+                'section' => $section,
+                'display_order' => $adjustment->display_order ?? (9000 + $adjustment->id),
+                'notes' => $adjustment->notes,
+                'component' => $adjustment->component,
+            ]);
+        }
+
+        return $rows->values();
     }
 
     /**
