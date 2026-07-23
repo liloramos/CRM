@@ -70,6 +70,28 @@ class ComponentAvailabilityResolver
         );
     }
 
+    public function forget(Company $company, CarbonInterface|string $date, ?Product $product = null): void
+    {
+        $companyId = (int) $company->id;
+        $availabilityDate = $this->dateString($date);
+
+        unset($this->globalAvailabilityCache[$companyId][$availabilityDate]);
+
+        if ($product !== null) {
+            unset($this->productOverrideCache[$companyId][(int) $product->id][$availabilityDate]);
+
+            return;
+        }
+
+        unset($this->productOverrideCache[$companyId]);
+    }
+
+    public function flush(): void
+    {
+        $this->globalAvailabilityCache = [];
+        $this->productOverrideCache = [];
+    }
+
     private function result(
         MenuAvailabilityStatus $status,
         string $source,

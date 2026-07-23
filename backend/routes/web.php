@@ -4,9 +4,11 @@ use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AppSessionController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
+use App\Http\Controllers\Api\MenuComponentAvailabilityController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
+use App\Http\Controllers\Api\ProductComponentAvailabilityController;
 use App\Http\Controllers\Api\ProductConfigurationController;
 use App\Http\Controllers\Api\StructuredMenuCatalogController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
@@ -28,6 +30,18 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('menu/day', DailyStructuredMenuController::class)->name('menu.day');
         Route::get('menu/products/{product}/configuration', ProductConfigurationController::class)
             ->name('menu.products.configuration');
+        Route::patch('menu/components/{component}/availability', [MenuComponentAvailabilityController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.components.availability.update');
+        Route::delete('menu/components/{component}/availability', [MenuComponentAvailabilityController::class, 'destroy'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.components.availability.destroy');
+        Route::patch('menu/products/{product}/components/{component}/availability', [ProductComponentAvailabilityController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.components.availability.update');
+        Route::delete('menu/products/{product}/components/{component}/availability', [ProductComponentAvailabilityController::class, 'destroy'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.components.availability.destroy');
         Route::patch('menu/options/{productOption}/availability', [MenuOptionAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.options.availability.update');
