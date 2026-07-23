@@ -43,7 +43,7 @@ export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed 
         title={toggleLabel}
         type="button"
       >
-        <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={18} />
+        <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={15} />
       </button>
       <nav className="sidebar__nav" aria-label="Menu principal">
         {menuItems.map((item) => (
