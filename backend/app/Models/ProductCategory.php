@@ -21,6 +21,8 @@ class ProductCategory extends Model
 
     public const TYPE_ADICIONAIS = 'adicionais';
 
+    public const TYPE_ACAI = 'acai';
+
     protected $fillable = [
         'company_id',
         'name',

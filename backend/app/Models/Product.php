@@ -21,6 +21,8 @@ class Product extends Model
 
     public const TYPE_ADDON = 'addon';
 
+    public const TYPE_ACAI = 'acai';
+
     protected $fillable = [
         'company_id',
         'category_id',
