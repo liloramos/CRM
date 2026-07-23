@@ -141,7 +141,7 @@ class DailyStructuredMenuService
 
     private function weeklyMenu(Company $company, CarbonInterface $date): ?WeeklyMenu
     {
-        return WeeklyMenu::query()
+        $activeMenuQuery = WeeklyMenu::query()
             ->where('company_id', $company->id)
             ->active()
             ->where(function ($query) use ($date): void {
@@ -151,7 +151,22 @@ class DailyStructuredMenuService
             ->where(function ($query) use ($date): void {
                 $query->whereNull('ends_on')
                     ->orWhereDate('ends_on', '>=', $date->toDateString());
-            })
+            });
+
+        $structuredMenu = (clone $activeMenuQuery)
+            ->whereHas('componentItems')
+            ->withCount('componentItems')
+            ->orderByDesc('component_items_count')
+            ->orderByRaw('starts_on is null')
+            ->orderByDesc('starts_on')
+            ->orderBy('id')
+            ->first();
+
+        if ($structuredMenu !== null) {
+            return $structuredMenu;
+        }
+
+        return $activeMenuQuery
             ->orderByRaw('starts_on is null')
             ->orderByDesc('starts_on')
             ->orderBy('id')

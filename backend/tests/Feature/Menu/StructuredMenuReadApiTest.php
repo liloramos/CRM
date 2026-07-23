@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductOption;
 use App\Models\User;
+use App\Models\WeeklyMenu;
 use App\Services\Menu\ComponentAvailabilityResolver;
 use App\Services\Menu\DailyStructuredMenuService;
 use App\Services\Menu\StructuredMenuCatalogService;
@@ -259,6 +260,44 @@ class StructuredMenuReadApiTest extends TestCase
             'extra' => [],
         ], $sunday['sections']);
         $this->assertSame(['n8-tradicional', 'n9-tradicional'], array_column($sunday['traditional_products'], 'slug'));
+    }
+
+    public function test_daily_menu_prefers_structured_weekly_menu_when_legacy_menu_is_also_active(): void
+    {
+        $company = Company::query()->create([
+            'name' => 'Sol Restaurante',
+            'slug' => 'restaurante-sol',
+        ]);
+        WeeklyMenu::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cardapio semanal legado',
+            'slug' => 'cardapio-semanal-legado',
+            'is_active' => true,
+        ]);
+
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $payload = app(DailyStructuredMenuService::class)
+            ->day($company->refresh(), CarbonImmutable::parse('2026-07-23'));
+
+        $this->assertSame('cardapio-semanal-oficial', $payload['weekly_menu']['slug']);
+        $this->assertSame(
+            [
+                'arroz-branco',
+                'arroz-amarelo',
+                'feijao-tropeiro',
+                'macarrao-vermelho',
+                'macarrao-alho-e-oleo',
+                'mandioca',
+                'mix-de-legumes',
+                'banana-frita',
+                'batata-frita',
+                'repolho-alho-e-oleo',
+                'repolho-com-tomate',
+                'repolho-com-maionese',
+            ],
+            $this->sectionSlugs($payload, 'hot'),
+        );
     }
 
     public function test_daily_menu_keeps_sold_out_items_with_replacement_without_auto_swap(): void
