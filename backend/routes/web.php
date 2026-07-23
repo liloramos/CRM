@@ -3,9 +3,12 @@
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\DailyStructuredMenuController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
+use App\Http\Controllers\Api\ProductConfigurationController;
+use App\Http\Controllers\Api\StructuredMenuCatalogController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
 use App\Http\Controllers\Printing\PrintJobController;
 use App\Http\Controllers\WhatsApp\WhatsAppStatusController;
@@ -21,6 +24,10 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
     Route::middleware('auth')->group(function () {
         Route::post('logout', [AppSessionController::class, 'logout'])->name('session.logout');
         Route::get('operational-snapshot', OperationalSnapshotController::class)->name('operational-snapshot');
+        Route::get('menu/catalog', StructuredMenuCatalogController::class)->name('menu.catalog');
+        Route::get('menu/day', DailyStructuredMenuController::class)->name('menu.day');
+        Route::get('menu/products/{product}/configuration', ProductConfigurationController::class)
+            ->name('menu.products.configuration');
         Route::patch('menu/options/{productOption}/availability', [MenuOptionAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.options.availability.update');
