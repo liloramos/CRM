@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
+use App\Http\Controllers\Api\AdminMenuReadController;
 use App\Http\Controllers\Api\AppSessionController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
@@ -34,6 +35,18 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('menu/day', DailyStructuredMenuController::class)->name('menu.day');
         Route::get('menu/products/{product}/configuration', ProductConfigurationController::class)
             ->name('menu.products.configuration');
+        Route::get('menu/admin/products', [AdminMenuReadController::class, 'products'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.admin.products');
+        Route::get('menu/admin/components', [AdminMenuReadController::class, 'components'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.admin.components');
+        Route::get('menu/admin/weekly', [AdminMenuReadController::class, 'weekly'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.admin.weekly');
+        Route::get('menu/admin/day-adjustments', [AdminMenuReadController::class, 'dayAdjustments'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.admin.day-adjustments');
         Route::patch('menu/products/{product}', [MenuProductAdminController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.update');

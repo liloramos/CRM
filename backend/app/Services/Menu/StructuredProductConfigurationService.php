@@ -112,6 +112,7 @@ class StructuredProductConfigurationService
             'currency' => $product->currency,
             'is_active' => (bool) $product->is_active,
             'is_available_by_default' => (bool) $product->is_available_by_default,
+            'display_order' => $product->display_order,
             'availability' => $this->productAvailability($product, $company, $date),
             'service_days' => $this->serviceDays($product),
             'category' => $product->category ? [
