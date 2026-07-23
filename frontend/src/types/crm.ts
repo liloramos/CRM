@@ -146,6 +146,23 @@ export type EffectiveAvailabilitySource =
   | 'daily_menu_override'
   | 'product_service_day'
 
+export type ProductServiceDayKey =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday'
+
+export type WeeklyMenuServiceDayKey = Exclude<ProductServiceDayKey, 'sunday'>
+
+export type DailyMenuSectionKey = 'hot' | 'salad' | 'meat' | 'extra'
+
+export type MenuComponentTypeKey = 'base' | 'hot' | 'salad' | 'meat' | 'extra' | 'addon' | 'juice_flavor'
+
+export type DailyMenuAdjustmentAction = 'include' | 'exclude'
+
 export type EffectiveAvailability = {
   status: EffectiveAvailabilityStatus
   available: boolean
@@ -166,7 +183,7 @@ export type StructuredMenuComponentSummary = {
   id: number
   slug: string
   name: string
-  component_type: string
+  component_type: MenuComponentTypeKey | string
 }
 
 export type StructuredMenuProductSummary = {
@@ -178,8 +195,9 @@ export type StructuredMenuProductSummary = {
   currency: string
   is_active: boolean
   is_available_by_default: boolean
+  display_order: number
   availability: EffectiveAvailability
-  service_days: Array<'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'>
+  service_days: ProductServiceDayKey[]
   category: StructuredMenuCategorySummary | null
 }
 
@@ -192,7 +210,7 @@ export type StructuredComponentOption = {
   component_id: number
   slug: string
   name: string
-  component_type: string
+  component_type: MenuComponentTypeKey | string
   price_delta_cents: number
   final_price_cents: number | null
   included_quantity: number | null
@@ -260,6 +278,8 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
 export type StructuredMenuCategory = StructuredMenuCategorySummary & {
   products: StructuredMenuProduct[]
   display_order: number
+  description?: string | null
+  is_active?: boolean
 }
 
 export type StructuredMenuCatalogResponse = {
@@ -267,10 +287,9 @@ export type StructuredMenuCatalogResponse = {
   categories: StructuredMenuCategory[]
 }
 
-export type DailyMenuSectionKey = 'hot' | 'salad' | 'meat' | 'extra'
-
 export type DailyMenuComponent = {
   id: number
+  source?: 'weekly_menu' | 'daily_adjustment'
   section: DailyMenuSectionKey
   display_order: number
   notes: string | null
@@ -294,6 +313,82 @@ export type DailyStructuredMenu = {
   sections: Record<DailyMenuSectionKey, DailyMenuComponent[]>
   traditional_products: StructuredMenuProductSummary[]
   catalog: StructuredMenuCatalogResponse
+}
+
+export type AdminMenuProductsResponse = StructuredMenuCatalogResponse
+
+export type AdminMenuComponent = StructuredMenuComponentSummary & {
+  description: string | null
+  default_price_delta_cents: number
+  is_active: boolean
+  display_order: number
+  product_group_links_count: number
+  weekly_menu_items_count: number
+}
+
+export type AdminMenuComponentsResponse = {
+  components: AdminMenuComponent[]
+}
+
+export type AdminWeeklyMenuItem = {
+  id: number
+  service_day: WeeklyMenuServiceDayKey
+  section: DailyMenuSectionKey
+  display_order: number
+  is_active: boolean
+  notes: string | null
+  component: StructuredMenuComponentSummary
+}
+
+export type AdminWeeklyMenuResponse = {
+  weekly_menu: {
+    id: number
+    slug: string
+    name: string
+    starts_on: string | null
+    ends_on: string | null
+    is_active: boolean
+  } | null
+  days: Record<WeeklyMenuServiceDayKey, Record<DailyMenuSectionKey, AdminWeeklyMenuItem[]>>
+}
+
+export type AdminDailyMenuAdjustment = {
+  id: number
+  date: string
+  section: DailyMenuSectionKey
+  action: DailyMenuAdjustmentAction
+  display_order: number | null
+  notes: string | null
+  component: StructuredMenuComponentSummary
+}
+
+export type AdminDailyMenuAdjustmentsResponse = {
+  date: string
+  adjustments: AdminDailyMenuAdjustment[]
+}
+
+export type ComponentAvailabilityMutationResponse = {
+  scope: 'global' | 'product_override'
+  component: StructuredMenuComponentSummary
+  product?: StructuredMenuProductSummary
+  date: string
+  configured_status: EffectiveAvailabilityStatus | null
+  reason?: string | null
+  replacement?: StructuredMenuComponentSummary | null
+  effective_availability: EffectiveAvailability
+  cleared?: boolean
+}
+
+export type DailyMenuAdjustmentMutationResponse = {
+  cleared: boolean
+  id?: number
+  date: string
+  section: DailyMenuSectionKey
+  action?: DailyMenuAdjustmentAction
+  display_order?: number | null
+  notes?: string | null
+  marked_by_user_id?: number | null
+  component: StructuredMenuComponentSummary
 }
 
 export type CompanySummary = {

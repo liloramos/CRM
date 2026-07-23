@@ -280,6 +280,7 @@ function App() {
         return (
           <MenuPage
             onOpenModal={openModal}
+            user={user}
           />
         )
       case 'entregas':

@@ -11,15 +11,29 @@ import {
 } from '../mocks/operacional.mock'
 import { ordersMock } from '../mocks/pedidos.mock'
 import type {
+  AdminDailyMenuAdjustmentsResponse,
+  AdminMenuComponentsResponse,
+  AdminMenuComponent,
+  AdminMenuProductsResponse,
+  AdminWeeklyMenuItem,
+  AdminWeeklyMenuResponse,
   AuthUser,
+  ComponentAvailabilityMutationResponse,
+  DailyMenuAdjustmentMutationResponse,
+  DailyMenuAdjustmentAction,
+  DailyMenuSectionKey,
   DailyStructuredMenu,
+  EffectiveAvailabilityStatus,
   MenuOption,
+  MenuComponentTypeKey,
   OperationalSnapshot,
   PrintPreviewResult,
   Product,
+  ProductServiceDayKey,
   SnapshotSource,
   StructuredMenuCatalogResponse,
   StructuredMenuProduct,
+  WeeklyMenuServiceDayKey,
 } from '../types/crm'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -77,6 +91,56 @@ type UpdateMenuOptionAvailabilityPayload = {
 type AutomationModePayload = {
   mode: 'assisted' | 'manual'
   reason?: string
+}
+
+export type UpdateMenuProductPayload = {
+  date?: string
+  name: string
+  description: string | null
+  price_cents: number
+  is_active: boolean
+  is_available_by_default: boolean
+  display_order: number
+  service_days: ProductServiceDayKey[]
+}
+
+export type SaveMenuComponentPayload = {
+  name: string
+  component_type: MenuComponentTypeKey
+  description: string | null
+  is_active: boolean
+  display_order: number
+}
+
+export type UpdateComponentAvailabilityPayload = {
+  date: string
+  status: EffectiveAvailabilityStatus
+  reason?: string | null
+  replacement_component_id?: number | null
+}
+
+export type UpsertWeeklyMenuComponentPayload = {
+  service_day: WeeklyMenuServiceDayKey
+  section: DailyMenuSectionKey
+  display_order?: number | null
+  is_active?: boolean
+  notes?: string | null
+}
+
+export type UpdateWeeklyMenuItemPayload = {
+  service_day: WeeklyMenuServiceDayKey
+  section: DailyMenuSectionKey
+  display_order: number
+  is_active: boolean
+  notes: string | null
+}
+
+export type UpsertDailyMenuAdjustmentPayload = {
+  date: string
+  section: DailyMenuSectionKey
+  action: DailyMenuAdjustmentAction
+  display_order?: number | null
+  notes?: string | null
 }
 
 type BackendProductOption = {
@@ -290,6 +354,192 @@ export async function getDailyStructuredMenu(date?: string): Promise<DailyStruct
 export async function getStructuredProductConfiguration(productId: number | string, date?: string): Promise<StructuredMenuProduct> {
   const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(
     `/api/app/menu/products/${productId}/configuration${dateQuery(date)}`,
+  )
+
+  return response.data
+}
+
+export async function getAdminMenuProducts(date?: string): Promise<AdminMenuProductsResponse> {
+  const response = await requestJson<ApiEnvelope<AdminMenuProductsResponse>>(
+    `/api/app/menu/admin/products${dateQuery(date)}`,
+  )
+
+  return response.data
+}
+
+export async function getAdminMenuComponents(): Promise<AdminMenuComponentsResponse> {
+  const response = await requestJson<ApiEnvelope<AdminMenuComponentsResponse>>('/api/app/menu/admin/components')
+
+  return response.data
+}
+
+export async function getAdminWeeklyMenu(): Promise<AdminWeeklyMenuResponse> {
+  const response = await requestJson<ApiEnvelope<AdminWeeklyMenuResponse>>('/api/app/menu/admin/weekly')
+
+  return response.data
+}
+
+export async function getAdminDailyMenuAdjustments(date: string): Promise<AdminDailyMenuAdjustmentsResponse> {
+  const response = await requestJson<ApiEnvelope<AdminDailyMenuAdjustmentsResponse>>(
+    `/api/app/menu/admin/day-adjustments${dateQuery(date)}`,
+  )
+
+  return response.data
+}
+
+export async function updateMenuProduct(
+  productId: number | string,
+  payload: UpdateMenuProductPayload,
+): Promise<StructuredMenuProduct> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(`/api/app/menu/products/${productId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function createMenuComponent(payload: SaveMenuComponentPayload): Promise<AdminMenuComponent> {
+  const response = await requestJson<ApiEnvelope<AdminMenuComponent>>('/api/app/menu/components', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function updateMenuComponent(
+  componentId: number | string,
+  payload: SaveMenuComponentPayload,
+): Promise<AdminMenuComponent> {
+  const response = await requestJson<ApiEnvelope<AdminMenuComponent>>(`/api/app/menu/components/${componentId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function setComponentAvailability(
+  componentId: number | string,
+  payload: UpdateComponentAvailabilityPayload,
+): Promise<ComponentAvailabilityMutationResponse> {
+  const response = await requestJson<ApiEnvelope<ComponentAvailabilityMutationResponse>>(
+    `/api/app/menu/components/${componentId}/availability`,
+    {
+      body: JSON.stringify(payload),
+      method: 'PATCH',
+    },
+  )
+
+  return response.data
+}
+
+export async function clearComponentAvailability(
+  componentId: number | string,
+  date: string,
+): Promise<ComponentAvailabilityMutationResponse> {
+  const response = await requestJson<ApiEnvelope<ComponentAvailabilityMutationResponse>>(
+    `/api/app/menu/components/${componentId}/availability`,
+    {
+      body: JSON.stringify({ date }),
+      method: 'DELETE',
+    },
+  )
+
+  return response.data
+}
+
+export async function setProductComponentAvailability(
+  productId: number | string,
+  componentId: number | string,
+  payload: Omit<UpdateComponentAvailabilityPayload, 'replacement_component_id'>,
+): Promise<ComponentAvailabilityMutationResponse> {
+  const response = await requestJson<ApiEnvelope<ComponentAvailabilityMutationResponse>>(
+    `/api/app/menu/products/${productId}/components/${componentId}/availability`,
+    {
+      body: JSON.stringify(payload),
+      method: 'PATCH',
+    },
+  )
+
+  return response.data
+}
+
+export async function clearProductComponentAvailability(
+  productId: number | string,
+  componentId: number | string,
+  date: string,
+): Promise<ComponentAvailabilityMutationResponse> {
+  const response = await requestJson<ApiEnvelope<ComponentAvailabilityMutationResponse>>(
+    `/api/app/menu/products/${productId}/components/${componentId}/availability`,
+    {
+      body: JSON.stringify({ date }),
+      method: 'DELETE',
+    },
+  )
+
+  return response.data
+}
+
+export async function upsertWeeklyMenuComponent(
+  componentId: number | string,
+  payload: UpsertWeeklyMenuComponentPayload,
+): Promise<AdminWeeklyMenuItem> {
+  const response = await requestJson<ApiEnvelope<AdminWeeklyMenuItem>>(`/api/app/menu/weekly/components/${componentId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function updateWeeklyMenuItem(
+  itemId: number | string,
+  payload: UpdateWeeklyMenuItemPayload,
+): Promise<AdminWeeklyMenuItem> {
+  const response = await requestJson<ApiEnvelope<AdminWeeklyMenuItem>>(`/api/app/menu/weekly-items/${itemId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function deleteWeeklyMenuItem(itemId: number | string): Promise<{ cleared: boolean; id: number }> {
+  const response = await requestJson<ApiEnvelope<{ cleared: boolean; id: number }>>(`/api/app/menu/weekly-items/${itemId}`, {
+    method: 'DELETE',
+  })
+
+  return response.data
+}
+
+export async function upsertDailyMenuAdjustment(
+  componentId: number | string,
+  payload: UpsertDailyMenuAdjustmentPayload,
+): Promise<DailyMenuAdjustmentMutationResponse> {
+  const response = await requestJson<ApiEnvelope<DailyMenuAdjustmentMutationResponse>>(
+    `/api/app/menu/day/components/${componentId}`,
+    {
+      body: JSON.stringify(payload),
+      method: 'PATCH',
+    },
+  )
+
+  return response.data
+}
+
+export async function clearDailyMenuAdjustment(
+  componentId: number | string,
+  date: string,
+  section: DailyMenuSectionKey,
+): Promise<DailyMenuAdjustmentMutationResponse> {
+  const response = await requestJson<ApiEnvelope<DailyMenuAdjustmentMutationResponse>>(
+    `/api/app/menu/day/components/${componentId}`,
+    {
+      body: JSON.stringify({ date, section }),
+      method: 'DELETE',
+    },
   )
 
   return response.data

@@ -1890,6 +1890,206 @@ label textarea {
   background: var(--color-brand);
 }
 
+.menu-admin-workspace,
+.menu-admin-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.menu-admin-tabs,
+.menu-admin-day-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 179, 0, 0.38) transparent;
+}
+
+.menu-admin-tabs .tab,
+.menu-admin-day-tabs .tab {
+  min-height: 38px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-raised);
+}
+
+.menu-admin-tabs .tab.is-active,
+.menu-admin-day-tabs .tab.is-active {
+  color: #15110a;
+  border-color: rgba(255, 179, 0, 0.68);
+  background: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
+}
+
+.menu-admin-date-tools,
+.menu-admin-weekly-toolbar,
+.menu-admin-section-heading,
+.menu-admin-inline-badges,
+.menu-admin-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.menu-admin-date-tools {
+  justify-content: flex-end;
+}
+
+.menu-admin-date-tools label,
+.menu-admin-filters label,
+.modal-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.menu-admin-date-tools input {
+  min-width: 164px;
+}
+
+.menu-admin-feedback {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.menu-admin-feedback--success {
+  color: var(--color-success);
+  border-color: rgba(34, 197, 94, 0.28);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.menu-admin-feedback--warning {
+  color: var(--color-warning);
+  border-color: rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.menu-admin-filters,
+.menu-admin-form-grid,
+.menu-admin-check-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.menu-admin-filters {
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) minmax(160px, 200px);
+}
+
+.menu-admin-form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.menu-admin-check-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.menu-admin-check {
+  min-height: 40px;
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+}
+
+.menu-admin-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-brand);
+}
+
+.menu-admin-check:has(input:focus-visible) {
+  outline: 2px solid rgba(255, 179, 0, 0.42);
+  outline-offset: 2px;
+}
+
+.menu-admin-fieldset {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.menu-admin-fieldset legend {
+  padding: 0 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.menu-admin-adjustments {
+  display: grid;
+  gap: 10px;
+}
+
+.menu-admin-list {
+  display: grid;
+  gap: 8px;
+}
+
+.menu-admin-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.menu-admin-row.is-inactive {
+  border-color: rgba(148, 163, 184, 0.24);
+  opacity: 0.74;
+}
+
+.menu-admin-row strong,
+.menu-admin-row span,
+.menu-admin-row small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.menu-admin-row span,
+.menu-admin-row small {
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+}
+
+.menu-admin-weekly-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.menu-admin-section-heading {
+  justify-content: space-between;
+}
+
+.menu-admin-item-actions {
+  justify-content: flex-end;
+}
+
+.structured-product-card > .button {
+  justify-self: start;
+}
+
 .menu-skeleton {
   display: grid;
   gap: 12px;
@@ -4677,6 +4877,18 @@ button.dashboard-chart__legend-row:active {
 
   .login-hero-panel {
     display: flex;
+  }
+}
+
+@media (max-width: 980px) {
+  .menu-admin-filters,
+  .menu-admin-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .menu-admin-weekly-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
