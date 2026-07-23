@@ -12,6 +12,7 @@ class SolRestaurantStructuredMenuSeeder extends Seeder
             SolRestaurantOfficialMenuSeeder::class,
             SolRestaurantProductRuleSeeder::class,
             SolRestaurantWeeklyMenuSeeder::class,
+            SolRestaurantComboCompositionSeeder::class,
         ]);
     }
 }

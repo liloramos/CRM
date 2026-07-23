@@ -75,6 +75,16 @@ class Product extends Model
         return $this->hasMany(ProductOptionGroup::class);
     }
 
+    public function comboItems(): HasMany
+    {
+        return $this->hasMany(ComboItem::class, 'combo_product_id');
+    }
+
+    public function includedInComboItems(): HasMany
+    {
+        return $this->hasMany(ComboItem::class, 'included_product_id');
+    }
+
     public function weeklyMenuItems(): HasMany
     {
         return $this->hasMany(WeeklyMenuItem::class);
@@ -83,6 +93,11 @@ class Product extends Model
     public function dailyMenuOverrides(): HasMany
     {
         return $this->hasMany(DailyMenuOverride::class);
+    }
+
+    public function componentAvailabilityOverrides(): HasMany
+    {
+        return $this->hasMany(DailyProductComponentOverride::class);
     }
 
     public function orderItems(): HasMany

@@ -44,4 +44,19 @@ class MenuComponent extends Model
     {
         return $this->hasMany(WeeklyMenuComponentItem::class);
     }
+
+    public function dailyAvailabilities(): HasMany
+    {
+        return $this->hasMany(DailyComponentAvailability::class);
+    }
+
+    public function replacementAvailabilities(): HasMany
+    {
+        return $this->hasMany(DailyComponentAvailability::class, 'replacement_component_id');
+    }
+
+    public function productAvailabilityOverrides(): HasMany
+    {
+        return $this->hasMany(DailyProductComponentOverride::class);
+    }
 }
