@@ -2,28 +2,31 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Builder;
+use App\Enums\MenuComponentType;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class WeeklyMenu extends Model
+class MenuComponent extends Model
 {
     protected $fillable = [
         'company_id',
         'name',
         'slug',
-        'starts_on',
-        'ends_on',
+        'component_type',
+        'description',
+        'default_price_delta_cents',
         'is_active',
+        'display_order',
     ];
 
     protected function casts(): array
     {
         return [
-            'starts_on' => 'date',
-            'ends_on' => 'date',
+            'component_type' => MenuComponentType::class,
+            'default_price_delta_cents' => 'integer',
             'is_active' => 'boolean',
+            'display_order' => 'integer',
         ];
     }
 
@@ -32,18 +35,13 @@ class WeeklyMenu extends Model
         return $this->belongsTo(Company::class);
     }
 
-    public function items(): HasMany
+    public function productGroupLinks(): HasMany
     {
-        return $this->hasMany(WeeklyMenuItem::class);
+        return $this->hasMany(ProductGroupComponent::class);
     }
 
-    public function componentItems(): HasMany
+    public function weeklyMenuItems(): HasMany
     {
         return $this->hasMany(WeeklyMenuComponentItem::class);
-    }
-
-    public function scopeActive(Builder $query): Builder
-    {
-        return $query->where('is_active', true);
     }
 }

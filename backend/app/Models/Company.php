@@ -48,9 +48,24 @@ class Company extends Model
         return $this->hasMany(Product::class);
     }
 
+    public function menuComponents(): HasMany
+    {
+        return $this->hasMany(MenuComponent::class);
+    }
+
+    public function productOptionGroups(): HasMany
+    {
+        return $this->hasMany(ProductOptionGroup::class);
+    }
+
     public function weeklyMenus(): HasMany
     {
         return $this->hasMany(WeeklyMenu::class);
+    }
+
+    public function weeklyMenuComponentItems(): HasMany
+    {
+        return $this->hasMany(WeeklyMenuComponentItem::class);
     }
 
     public function dailyMenuOverrides(): HasMany

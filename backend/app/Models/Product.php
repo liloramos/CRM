@@ -68,6 +68,11 @@ class Product extends Model
         return $this->hasMany(ProductOption::class);
     }
 
+    public function optionGroups(): HasMany
+    {
+        return $this->hasMany(ProductOptionGroup::class);
+    }
+
     public function weeklyMenuItems(): HasMany
     {
         return $this->hasMany(WeeklyMenuItem::class);
