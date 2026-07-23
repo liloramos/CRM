@@ -22,7 +22,6 @@ import {
   generateTicketPreview,
   getOperationalSnapshot,
   setConversationAutomationMode,
-  updateMenuOptionAvailability,
 } from './services/crm.service'
 import type { AppModal, AuthUser, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
 
@@ -169,24 +168,6 @@ function App() {
     }
   }
 
-  async function handleToggleOptionAvailability(optionId: string, availableToday: boolean) {
-    setIsActionBusy(true)
-    setActionError(null)
-
-    try {
-      await updateMenuOptionAvailability(optionId, {
-        status: availableToday ? 'unavailable' : 'available',
-        reason: availableToday ? 'Marcado como esgotado pela operacao.' : 'Disponibilidade restabelecida pela operacao.',
-      })
-      await loadSnapshot()
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar a disponibilidade.')
-      setActiveModal('mark-unavailable')
-    } finally {
-      setIsActionBusy(false)
-    }
-  }
-
   function handleProductChange(productId: string) {
     setSelectedProductId(productId)
     setSelectedOptionIds([])
@@ -298,11 +279,7 @@ function App() {
       case 'cardapio':
         return (
           <MenuPage
-            isUpdating={isActionBusy}
             onOpenModal={openModal}
-            onToggleOptionAvailability={(optionId, availableToday) => void handleToggleOptionAvailability(optionId, availableToday)}
-            products={snapshot.products}
-            source={snapshotSource}
           />
         )
       case 'entregas':

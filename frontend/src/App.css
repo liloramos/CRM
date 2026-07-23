@@ -1659,6 +1659,33 @@ label textarea {
   gap: 16px;
 }
 
+.menu-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.menu-date-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.menu-date-card strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text);
+  font-size: 18px;
+}
+
+.menu-date-card p {
+  margin: 4px 0 0;
+  color: var(--color-text-secondary);
+}
+
 .availability-card {
   display: grid;
   gap: 16px;
@@ -1725,6 +1752,168 @@ label textarea {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.daily-menu-card,
+.structured-catalog,
+.structured-category-card {
+  display: grid;
+  gap: 16px;
+}
+
+.daily-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.daily-menu-section {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.daily-menu-section h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.daily-menu-list {
+  display: grid;
+  gap: 8px;
+}
+
+.daily-menu-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.daily-menu-item.is-unavailable,
+.structured-product-card.is-unavailable {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.daily-menu-item strong,
+.daily-menu-item span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.daily-menu-item span {
+  margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.structured-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.structured-product-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.structured-product-card__top,
+.structured-product-card__title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.structured-product-card__top strong {
+  color: var(--color-text);
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.structured-product-card__title {
+  align-items: center;
+}
+
+.structured-product-card h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+}
+
+.structured-product-card p {
+  margin: 0;
+}
+
+.structured-product-rules {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.structured-product-rules li {
+  position: relative;
+  padding-left: 14px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.structured-product-rules li::before {
+  content: "";
+  position: absolute;
+  top: 0.66em;
+  left: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-brand);
+}
+
+.menu-skeleton {
+  display: grid;
+  gap: 12px;
+}
+
+.menu-skeleton div {
+  min-height: 132px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+  background-size: 200% 100%;
+  animation: dashboardSkeleton 1.35s ease-in-out infinite;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .product-grid,
@@ -4440,6 +4629,7 @@ button.dashboard-chart__legend-row:active {
   .dashboard-grid,
   .dashboard-ops-grid,
   .finance-dashboard-grid,
+  .daily-menu-grid,
   .availability-groups {
     grid-template-columns: 1fr;
   }
@@ -4456,6 +4646,7 @@ button.dashboard-chart__legend-row:active {
   .order-kpis,
   .stats-grid,
   .product-grid,
+  .structured-product-grid,
   .settings-grid,
   .customer-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4591,6 +4782,7 @@ button.dashboard-chart__legend-row:active {
   .stats-grid,
   .order-kpis,
   .product-grid,
+  .structured-product-grid,
   .settings-grid,
   .customer-grid,
   .state-grid,
@@ -4635,6 +4827,23 @@ button.dashboard-chart__legend-row:active {
 
   .dashboard-alert {
     display: grid;
+  }
+
+  .menu-header-actions,
+  .menu-date-card,
+  .daily-menu-item,
+  .structured-product-card__top,
+  .structured-product-card__title {
+    display: grid;
+    justify-items: start;
+  }
+
+  .menu-header-actions {
+    width: 100%;
+  }
+
+  .menu-header-actions .button {
+    width: 100%;
   }
 
   .availability-row {

@@ -10,7 +10,17 @@ import {
   paymentMethodSummaryMock,
 } from '../mocks/operacional.mock'
 import { ordersMock } from '../mocks/pedidos.mock'
-import type { AuthUser, MenuOption, OperationalSnapshot, PrintPreviewResult, Product, SnapshotSource } from '../types/crm'
+import type {
+  AuthUser,
+  DailyStructuredMenu,
+  MenuOption,
+  OperationalSnapshot,
+  PrintPreviewResult,
+  Product,
+  SnapshotSource,
+  StructuredMenuCatalogResponse,
+  StructuredMenuProduct,
+} from '../types/crm'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const MOCK_FALLBACK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
@@ -263,6 +273,28 @@ export async function updateMenuOptionAvailability(optionId: string, payload: Up
   })
 }
 
+export async function getStructuredMenuCatalog(date?: string): Promise<StructuredMenuCatalogResponse> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuCatalogResponse>>(
+    `/api/app/menu/catalog${dateQuery(date)}`,
+  )
+
+  return response.data
+}
+
+export async function getDailyStructuredMenu(date?: string): Promise<DailyStructuredMenu> {
+  const response = await requestJson<ApiEnvelope<DailyStructuredMenu>>(`/api/app/menu/day${dateQuery(date)}`)
+
+  return response.data
+}
+
+export async function getStructuredProductConfiguration(productId: number | string, date?: string): Promise<StructuredMenuProduct> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(
+    `/api/app/menu/products/${productId}/configuration${dateQuery(date)}`,
+  )
+
+  return response.data
+}
+
 async function getAvailableMenu(companySlug: string, fallbackProducts: Product[]): Promise<Product[]> {
   try {
     const response = await requestJson<ApiEnvelope<BackendProduct[]>>(`/api/restaurants/${companySlug}/menu/available`)
@@ -318,6 +350,10 @@ function groupLabel(groupCode?: string | null): string {
     default:
       return 'Componentes'
   }
+}
+
+function dateQuery(date?: string): string {
+  return date ? `?date=${encodeURIComponent(date)}` : ''
 }
 
 async function requestJson<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {

@@ -136,6 +136,164 @@ export type Product = {
   options: MenuOption[]
 }
 
+export type EffectiveAvailabilityStatus = 'available' | 'unavailable' | 'sold_out'
+
+export type EffectiveAvailabilitySource =
+  | 'product_override'
+  | 'global_availability'
+  | 'component_default'
+  | 'product_default'
+  | 'daily_menu_override'
+
+export type EffectiveAvailability = {
+  status: EffectiveAvailabilityStatus
+  available: boolean
+  source: EffectiveAvailabilitySource
+  reason: string | null
+  availability_date: string
+  replacement?: StructuredMenuComponentSummary | null
+}
+
+export type StructuredMenuCategorySummary = {
+  id: number
+  slug: string
+  name: string
+  category_type: string
+}
+
+export type StructuredMenuComponentSummary = {
+  id: number
+  slug: string
+  name: string
+  component_type: string
+}
+
+export type StructuredMenuProductSummary = {
+  id: number
+  slug: string
+  name: string
+  product_type: string
+  base_price_cents: number
+  currency: string
+  is_active: boolean
+  is_available_by_default: boolean
+  availability: EffectiveAvailability
+  category: StructuredMenuCategorySummary | null
+}
+
+export type ProductSelectionMode = 'fixed' | 'single' | 'multiple' | 'addon' | 'variation' | 'included_choice'
+
+export type ProductSelectionActor = 'system' | 'house' | 'customer'
+
+export type StructuredComponentOption = {
+  id: number
+  component_id: number
+  slug: string
+  name: string
+  component_type: string
+  price_delta_cents: number
+  final_price_cents: number | null
+  included_quantity: number | null
+  is_default: boolean
+  requires_confirmation: boolean
+  link_active: boolean
+  available: boolean
+  availability: EffectiveAvailability
+  display_order: number
+}
+
+export type StructuredProductOption = {
+  id: number
+  selectable_product: StructuredMenuProductSummary
+  price_delta_cents: number
+  final_price_cents: number | null
+  included_quantity: number | null
+  is_default: boolean
+  requires_confirmation: boolean
+  link_active: boolean
+  available: boolean
+  availability: EffectiveAvailability
+  display_order: number
+}
+
+export type StructuredProductOptionGroup = {
+  id: number
+  code: string
+  label: string
+  selection_mode: ProductSelectionMode
+  selection_actor: ProductSelectionActor
+  required: boolean
+  min_choices: number | null
+  max_choices: number | null
+  min_quantity: number | null
+  max_quantity: number | null
+  same_component_only: boolean
+  included_in_base_price: boolean
+  component_options: StructuredComponentOption[]
+  product_options: StructuredProductOption[]
+  display_order: number
+}
+
+export type StructuredComboItem = {
+  id: number
+  included_product: StructuredMenuProductSummary
+  quantity: number
+  price_behavior: 'included' | 'extra'
+  price_delta_cents: number
+  print_mode: 'child_line' | 'note'
+  display_order: number
+}
+
+export type StructuredMenuProduct = StructuredMenuProductSummary & {
+  description: string | null
+  menu_rule_code: string | null
+  uses_weekly_menu: boolean
+  allows_item_notes: boolean
+  notes_hint: string | null
+  configuration_pending: boolean
+  groups: StructuredProductOptionGroup[]
+  combo_items: StructuredComboItem[]
+}
+
+export type StructuredMenuCategory = StructuredMenuCategorySummary & {
+  products: StructuredMenuProduct[]
+  display_order: number
+}
+
+export type StructuredMenuCatalogResponse = {
+  date: string
+  categories: StructuredMenuCategory[]
+}
+
+export type DailyMenuSectionKey = 'hot' | 'salad' | 'meat' | 'extra'
+
+export type DailyMenuComponent = {
+  id: number
+  section: DailyMenuSectionKey
+  display_order: number
+  notes: string | null
+  component: StructuredMenuComponentSummary
+  availability: EffectiveAvailability
+  available: boolean
+}
+
+export type DailyStructuredMenu = {
+  date: string
+  service_day: 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | null
+  is_service_day: boolean
+  timezone: string
+  weekly_menu: {
+    id: number
+    slug: string
+    name: string
+    starts_on: string | null
+    ends_on: string | null
+  } | null
+  sections: Record<DailyMenuSectionKey, DailyMenuComponent[]>
+  traditional_products: StructuredMenuProductSummary[]
+  catalog: StructuredMenuCatalogResponse
+}
+
 export type CompanySummary = {
   id: string
   name: string
