@@ -21,17 +21,21 @@ class OrderWorkflowService
      */
     public function createDraft(Company $company, array $attributes = []): Order
     {
-        $orderDate = $this->resolveDate($attributes['order_date'] ?? null);
+        $orderDate = $this->resolveDate($attributes['order_date'] ?? null, $company);
 
         return DB::transaction(function () use ($company, $attributes, $orderDate): Order {
+            $lockedCompany = Company::query()
+                ->whereKey($company->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
             $dailySequence = ((int) Order::query()
                 ->where('company_id', $company->id)
                 ->whereDate('order_date', $orderDate->toDateString())
-                ->lockForUpdate()
                 ->max('daily_sequence')) + 1;
 
             $order = Order::query()->create([
-                'company_id' => $company->id,
+                'company_id' => $lockedCompany->id,
                 'payer_customer_id' => $attributes['payer_customer_id'] ?? null,
                 'conversation_id' => $attributes['conversation_id'] ?? null,
                 'created_by_user_id' => $attributes['created_by_user_id'] ?? null,
@@ -265,13 +269,17 @@ class OrderWorkflowService
         };
     }
 
-    private function resolveDate(mixed $date): CarbonInterface
+    private function resolveDate(mixed $date, Company $company): CarbonInterface
     {
+        $timezone = $company->setting?->timezone ?: config('app.timezone');
+
         if ($date instanceof CarbonInterface) {
-            return $date;
+            return CarbonImmutable::parse($date->toDateString(), $timezone);
         }
 
-        return $date ? CarbonImmutable::parse((string) $date) : CarbonImmutable::now();
+        return $date
+            ? CarbonImmutable::parse((string) $date, $timezone)
+            : CarbonImmutable::now($timezone);
     }
 
     /**
