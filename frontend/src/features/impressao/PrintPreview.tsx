@@ -7,9 +7,10 @@ import { formatCurrency } from '../../utils/formatters'
 type PrintPreviewProps = {
   order: Order
   onPreviewTicket: (orderId: string) => void
+  onPrintTicket: (orderId: string) => void
 }
 
-export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
+export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPreviewProps) {
   return (
     <Card className="print-panel">
       <SectionTitle
@@ -113,10 +114,13 @@ export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
             </div>
           </div>
           <div className="print-actions">
-            <Button icon="printer" onClick={() => onPreviewTicket(order.id)} variant="primary">
+            <Button icon="printer" onClick={() => onPrintTicket(order.id)} variant="primary">
+              Imprimir comanda
+            </Button>
+            <Button icon="printer" onClick={() => onPreviewTicket(order.id)} variant="secondary">
               Gerar previa HTML
             </Button>
-            <Button icon="arrow" onClick={() => onPreviewTicket(order.id)} variant="secondary">
+            <Button icon="arrow" onClick={() => onPreviewTicket(order.id)} variant="ghost">
               Regerar previa
             </Button>
           </div>

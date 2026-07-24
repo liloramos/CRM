@@ -17,6 +17,7 @@ type OrdersPageProps = {
   onNewOrder: () => void
   onOpenModal: (modal: AppModal) => void
   onPreviewTicket: (orderId: string) => void
+  onPrintTicket: (orderId: string) => void
   onSelectOrder: (orderId: string) => void
 }
 
@@ -42,6 +43,7 @@ export function OrdersPage({
   onNewOrder,
   onOpenModal,
   onPreviewTicket,
+  onPrintTicket,
   onSelectOrder,
   orders,
   selectedOrder,
@@ -54,7 +56,10 @@ export function OrdersPage({
             <Button icon="plus" onClick={selectedOrder ? () => onOpenModal('add-product') : onNewOrder} variant="secondary">
               {selectedOrder ? 'Novo item' : 'Criar rascunho'}
             </Button>
-            <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="primary">
+            <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPrintTicket(selectedOrder.id)} variant="primary">
+              Imprimir comanda
+            </Button>
+            <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="secondary">
               Previa da comanda
             </Button>
           </>
@@ -166,7 +171,7 @@ export function OrdersPage({
                 </Card>
               </div>
 
-              <PrintPreview onPreviewTicket={onPreviewTicket} order={selectedOrder} />
+              <PrintPreview onPreviewTicket={onPreviewTicket} onPrintTicket={onPrintTicket} order={selectedOrder} />
             </>
           ) : (
             <EmptyState

@@ -20,10 +20,11 @@ import {
   addOrderItem,
   createDraftOrder,
   generateTicketPreview,
+  getOrderTicketPreviewUrl,
   getOperationalSnapshot,
   setConversationAutomationMode,
 } from './services/crm.service'
-import type { AppModal, AuthUser, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
+import type { AddItemContext, AppModal, AuthUser, OperationalSnapshot, PrintPreviewResult, Product, RouteKey, SnapshotSource } from './types/crm'
 
 function App() {
   const { logout, status: authStatus, user } = useAuth()
@@ -45,6 +46,7 @@ function App() {
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
   const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
   const [automationMode, setAutomationMode] = useState<AutomationModeSelection>('assisted')
+  const [addItemContext, setAddItemContext] = useState<AddItemContext | null>(null)
 
   const loadSnapshot = useCallback(async () => {
     setIsLoadingSnapshot(true)
@@ -134,8 +136,13 @@ function App() {
   }
 
   async function handleAddItem() {
-    if (!selectedOrder || !selectedProductId) {
-      setActionError('Selecione um pedido e um produto antes de adicionar item.')
+    if (!addItemContext || addItemContext.source !== 'api' || !isPersistedBackendId(addItemContext.orderId)) {
+      setActionError('O pedido nao possui um ID valido.')
+      return
+    }
+
+    if (!isPersistedBackendId(addItemContext.product.id)) {
+      setActionError('O produto nao possui um ID valido.')
       return
     }
 
@@ -143,11 +150,11 @@ function App() {
     setActionError(null)
 
     try {
-      const response = await addOrderItem(selectedOrder.id, {
-        product_id: selectedProductId,
+      const response = await addOrderItem(addItemContext.orderId, {
+        product_id: addItemContext.product.id,
         quantity: itemQuantity,
         item_notes: itemNotes,
-        beneficiary_name: beneficiaryName.trim() || selectedOrder.pickupPerson || selectedOrder.customer.name,
+        beneficiary_name: beneficiaryName.trim() || addItemContext.defaultBeneficiaryName,
         options: selectedOptionIds.map((optionId) => ({
           product_option_id: optionId,
           quantity: 1,
@@ -155,7 +162,22 @@ function App() {
       })
 
       setSelectedOrderId(response.data.id)
+      setSnapshot((current) => {
+        if (!current) {
+          return current
+        }
+
+        const exists = current.orders.some((order) => order.id === response.data.id)
+
+        return {
+          ...current,
+          orders: exists
+            ? current.orders.map((order) => (order.id === response.data.id ? response.data : order))
+            : [response.data, ...current.orders],
+        }
+      })
       setActiveModal(null)
+      setAddItemContext(null)
       setItemNotes('')
       setItemQuantity(1)
       setBeneficiaryName('')
@@ -171,6 +193,20 @@ function App() {
   function handleProductChange(productId: string) {
     setSelectedProductId(productId)
     setSelectedOptionIds([])
+
+    if (activeModal !== 'add-product') {
+      return
+    }
+
+    const product = snapshot?.products.find((candidate) => candidate.id === productId)
+
+    if (!product || !isPersistedBackendId(product.id)) {
+      setActionError('O produto nao possui um ID valido.')
+      return
+    }
+
+    setActionError(null)
+    setAddItemContext((current) => (current ? { ...current, product } : current))
   }
 
   async function handleTicketPreview(orderId: string) {
@@ -189,6 +225,31 @@ function App() {
     } finally {
       setIsActionBusy(false)
     }
+  }
+
+  function handlePrintTicket(orderId: string) {
+    setActionError(null)
+
+    if (!orderId.trim() || snapshotSource !== 'api') {
+      setActionError('Selecione um pedido real ja salvo no backend antes de imprimir a comanda.')
+      setActiveModal('print-error')
+      return
+    }
+
+    const ticketWindow = window.open(
+      getOrderTicketPreviewUrl(orderId, true),
+      '_blank',
+      'popup=yes,width=420,height=720',
+    )
+
+    if (!ticketWindow) {
+      setActionError('O navegador bloqueou a janela de impressao. Libere pop-ups para este sistema e tente novamente.')
+      setActiveModal('print-error')
+      return
+    }
+
+    ticketWindow.opener = null
+    ticketWindow.focus()
   }
 
   async function handleToggleAutomationMode() {
@@ -220,13 +281,55 @@ function App() {
   function openModal(modal: AppModal) {
     setActionError(null)
     if (modal === 'add-product') {
-      setBeneficiaryName('')
-      setSelectedOptionIds([])
+      openAddProductModal()
+      return
     }
     if (modal === 'toggle-ai') {
       setAutomationMode(selectedConversation?.mode === 'manual' || selectedConversation?.mode === 'atencao' ? 'manual' : 'assisted')
     }
     setActiveModal(modal)
+  }
+
+  function openAddProductModal() {
+    setBeneficiaryName('')
+    setItemNotes('')
+    setItemQuantity(1)
+    setSelectedOptionIds([])
+
+    const product = selectedProductForAddItem(snapshot?.products ?? [], selectedProductId)
+
+    if (!selectedOrder || snapshotSource !== 'api' || !isPersistedBackendId(selectedOrder.id)) {
+      setAddItemContext(null)
+      setActionError('O pedido nao possui um ID valido.')
+      setActiveModal('add-product')
+      return
+    }
+
+    if (!product || !isPersistedBackendId(product.id)) {
+      setAddItemContext(null)
+      setSelectedProductId('')
+      setActionError('O produto nao possui um ID valido.')
+      setActiveModal('add-product')
+      return
+    }
+
+    setSelectedProductId(product.id)
+    setAddItemContext({
+      orderId: selectedOrder.id,
+      orderCode: selectedOrder.code,
+      defaultBeneficiaryName: selectedOrder.pickupPerson || selectedOrder.customer.name,
+      product,
+      source: snapshotSource,
+    })
+    setActiveModal('add-product')
+  }
+
+  function closeModal() {
+    if (activeModal === 'add-product') {
+      setAddItemContext(null)
+    }
+
+    setActiveModal(null)
   }
 
   function renderPage() {
@@ -271,6 +374,7 @@ function App() {
             onNewOrder={handleNewOrder}
             onOpenModal={openModal}
             onPreviewTicket={handleTicketPreview}
+            onPrintTicket={handlePrintTicket}
             onSelectOrder={setSelectedOrderId}
             orders={snapshot.orders}
             selectedOrder={selectedOrder}
@@ -364,15 +468,16 @@ function App() {
         closeDisabled={isActionBusy}
         danger={activeModal === 'cancel-order' || activeModal === 'print-error' || activeModal === 'whatsapp-error'}
         description={modalDescription(activeModal)}
-        onClose={() => setActiveModal(null)}
+        onClose={closeModal}
         onPrimary={() => void handleModalPrimary()}
         open={activeModal !== null}
-        primaryDisabled={isActionBusy || (activeModal === 'toggle-ai' && !selectedConversation)}
+        primaryDisabled={isActionBusy || (activeModal === 'toggle-ai' && !selectedConversation) || (activeModal === 'add-product' && !addItemContext)}
         primaryLabel={primaryLabelForModal(activeModal)}
         size={activeModal === 'add-product' || activeModal === 'print-preview' ? 'lg' : 'md'}
         title={modalTitle(activeModal)}
       >
         <OperationalModalContent
+          addItemContext={addItemContext}
           actionError={actionError}
           automationMode={automationMode}
           beneficiaryName={beneficiaryName}
@@ -396,6 +501,18 @@ function App() {
       </Modal>
     </AppShell>
   )
+}
+
+function selectedProductForAddItem(products: Product[], selectedProductId: string): Product | undefined {
+  return (
+    products.find((product) => product.id === selectedProductId && isPersistedBackendId(product.id)) ??
+    products.find((product) => product.available && isPersistedBackendId(product.id)) ??
+    products.find((product) => isPersistedBackendId(product.id))
+  )
+}
+
+function isPersistedBackendId(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^[1-9]\d*$/.test(value.trim())
 }
 
 function primaryLabelForModal(modal: AppModal): string {

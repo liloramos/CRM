@@ -487,6 +487,14 @@ export type OperationalSnapshot = {
 
 export type SnapshotSource = 'api' | 'mock'
 
+export type AddItemContext = {
+  orderId: string
+  orderCode: string
+  defaultBeneficiaryName: string
+  product: Product
+  source: SnapshotSource
+}
+
 export type PrintPreviewResult = {
   id: string
   status: string

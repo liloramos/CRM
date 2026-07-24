@@ -318,6 +318,13 @@ export async function generateTicketPreview(orderId: string) {
   })
 }
 
+export function getOrderTicketPreviewUrl(orderId: string, autoprint = false): string {
+  const path = `/orders/${encodeURIComponent(orderId.trim())}/ticket/preview`
+  const query = autoprint ? '?autoprint=1' : ''
+
+  return `${API_BASE_URL}${path}${query}`
+}
+
 export async function setConversationAutomationMode(conversationId: string, payload: AutomationModePayload) {
   return requestJson<{
     id: string | number

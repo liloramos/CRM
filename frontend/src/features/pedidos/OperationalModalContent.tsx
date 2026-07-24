@@ -1,11 +1,12 @@
 import { EmptyState, LoadingState } from '../../components/ui/States'
 import { Icon } from '../../components/ui/Icon'
-import type { AppModal, Conversation, MenuOption, Order, PrintPreviewResult, Product } from '../../types/crm'
+import type { AddItemContext, AppModal, Conversation, MenuOption, Order, PrintPreviewResult, Product } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
 
 export type AutomationModeSelection = 'assisted' | 'manual'
 
 type OperationalModalContentProps = {
+  addItemContext: AddItemContext | null
   actionError: string | null
   automationMode: AutomationModeSelection
   beneficiaryName: string
@@ -28,6 +29,7 @@ type OperationalModalContentProps = {
 }
 
 export function OperationalModalContent({
+  addItemContext,
   actionError,
   automationMode,
   beneficiaryName,
@@ -49,22 +51,25 @@ export function OperationalModalContent({
   selectedProductId,
 }: OperationalModalContentProps) {
   if (modal === 'add-product') {
-    const selectedProduct = products.find((product) => product.id === selectedProductId) ?? products[0]
+    const selectedProduct = addItemContext?.product ?? products.find((product) => product.id === selectedProductId)
     const optionGroups = groupOptions(selectedProduct?.options ?? [])
 
     return (
       <div className="modal-fields">
-        {selectedOrder ? (
+        {addItemContext ? (
           <p>
-            Pedido <strong>{selectedOrder.code}</strong>. O item sera adicionado como edicao operacional enquanto o pedido ainda
+            Pedido <strong>{addItemContext.orderCode}</strong>. O item sera adicionado como edicao operacional enquanto o pedido ainda
             estiver aberto.
           </p>
+        ) : selectedOrder ? (
+          <p>O pedido selecionado nao esta pronto para receber itens reais.</p>
         ) : (
           <p>Crie ou selecione um pedido antes de adicionar itens.</p>
         )}
         <label>
           Produto
-          <select onChange={(event) => onProductChange(event.target.value)} value={selectedProductId}>
+          <select disabled={!addItemContext || products.length === 0} onChange={(event) => onProductChange(event.target.value)} value={selectedProduct?.id ?? ''}>
+            {products.length === 0 ? <option value="">Nenhum produto carregado</option> : null}
             {products.map((product) => (
               <option key={product.id} value={product.id}>
                 {product.name} - {formatCurrency(product.price)}
