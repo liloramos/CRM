@@ -153,6 +153,8 @@ class Order extends Model
     protected $fillable = [
         'company_id',
         'payer_customer_id',
+        'customer_name_snapshot',
+        'customer_phone_snapshot',
         'conversation_id',
         'created_by_user_id',
         'recurring_order_reference_id',

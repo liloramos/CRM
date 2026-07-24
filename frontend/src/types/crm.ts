@@ -46,6 +46,23 @@ export type PrintStatus = 'aguardando' | 'imprimindo' | 'impresso' | 'reimpressa
 export type PaymentMethod = 'pix' | 'dinheiro' | 'cartao' | 'credito_cliente' | 'misto' | 'a_confirmar'
 export type FulfillmentApiType = 'pickup' | 'delivery' | 'counter'
 
+export type BackendOrderStatus =
+  | 'draft'
+  | 'awaiting_customer_confirmation'
+  | 'confirmed'
+  | 'awaiting_payment'
+  | 'awaiting_payment_proof'
+  | 'payment_proof_received'
+  | 'payment_confirmed'
+  | 'payment_rejected'
+  | 'ready_to_print'
+  | 'printed'
+  | 'in_preparation'
+  | 'ready_for_pickup'
+  | 'out_for_delivery'
+  | 'finished'
+  | 'cancelled'
+
 export type MenuOption = {
   id: string
   name: string
@@ -74,7 +91,7 @@ export type OrderItem = {
   quantity: number
   unitPrice: number
   notes: string
-  beneficiary: string
+  beneficiary: string | null
   additions: string[]
   unavailable?: boolean
 }
@@ -82,6 +99,7 @@ export type OrderItem = {
 export type Order = {
   id: string
   code: string
+  backendStatus?: BackendOrderStatus
   customer: CustomerSummary
   status: OrderStatus
   paymentStatus: PaymentStatus
@@ -89,6 +107,10 @@ export type Order = {
   printStatus: PrintStatus
   channel: 'WhatsApp' | 'Manual' | 'Balcao'
   createdLabel: string
+  availableTransitions: Array<{
+    status: BackendOrderStatus
+    label: string
+  }>
   pickupPerson?: string
   deliveryLabel?: string
   generalNotes: string
@@ -127,6 +149,7 @@ export type Conversation = {
 
 export type Product = {
   id: string
+  slug?: string
   category: string
   name: string
   description: string
@@ -134,6 +157,11 @@ export type Product = {
   available: boolean
   tags: string[]
   options: MenuOption[]
+  structuredGroups?: StructuredProductOptionGroup[]
+  comboItems?: StructuredComboItem[]
+  usesWeeklyMenu?: boolean
+  configurationPending?: boolean
+  serviceDays?: ProductServiceDayKey[]
 }
 
 export type EffectiveAvailabilityStatus = 'available' | 'unavailable' | 'sold_out'
@@ -473,6 +501,11 @@ export type AuthUser = {
 
 export type OperationalSnapshot = {
   company?: CompanySummary
+  capabilities: {
+    can_permanently_delete_orders: boolean
+    can_run_destructive_test_cleanup: boolean
+    destructive_cleanup_environment: string
+  }
   orders: Order[]
   conversations: Conversation[]
   customers: CustomerSummary[]
@@ -504,6 +537,11 @@ export type PrintPreviewResult = {
 }
 
 export type AppModal =
+  | 'new-order'
+  | 'delete-draft'
+  | 'delete-order-permanent'
+  | 'delete-orders-bulk'
+  | 'cleanup-test-orders'
   | 'confirm-payment'
   | 'cancel-order'
   | 'change-status'

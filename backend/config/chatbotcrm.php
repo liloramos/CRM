@@ -7,6 +7,10 @@ return [
         'printing' => env('PRINTING_PROVIDER', 'browser'),
     ],
 
+    'orders' => [
+        'allow_destructive_test_cleanup' => env('ALLOW_DESTRUCTIVE_TEST_CLEANUP', false),
+    ],
+
     'whatsapp' => [
         'provider' => env('WHATSAPP_PROVIDER', 'fake'),
 

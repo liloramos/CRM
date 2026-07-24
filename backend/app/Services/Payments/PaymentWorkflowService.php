@@ -150,6 +150,77 @@ class PaymentWorkflowService
         });
     }
 
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    public function confirmOrderPayment(Order $order, ?User $user = null, array $attributes = []): Payment
+    {
+        return DB::transaction(function () use ($order, $user, $attributes): Payment {
+            $order = Order::query()
+                ->with('payments')
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $order = $this->recalculateOrderPaymentSummary($order);
+
+            $latestConfirmedPayment = $order->payments()
+                ->where('status', Payment::STATUS_CONFIRMED)
+                ->latest('id')
+                ->first();
+
+            if ((int) $order->amount_due_cents <= 0 && $latestConfirmedPayment instanceof Payment) {
+                return $latestConfirmedPayment->refresh();
+            }
+
+            $method = (string) ($attributes['method'] ?? Payment::METHOD_PIX);
+            $this->assertPaymentMethod($method);
+
+            $amountCents = $this->positiveOrDefault(
+                $attributes['amount_cents'] ?? null,
+                $this->defaultAmountFor($order),
+            );
+
+            $payment = Payment::query()->create([
+                'company_id' => $order->company_id,
+                'order_id' => $order->id,
+                'customer_id' => $attributes['customer_id'] ?? $order->payer_customer_id,
+                'created_by_user_id' => $user?->id,
+                'confirmed_by_user_id' => $user?->id,
+                'method' => $method,
+                'provider' => Payment::PROVIDER_MANUAL,
+                'status' => Payment::STATUS_CONFIRMED,
+                'amount_cents' => $amountCents,
+                'confirmed_amount_cents' => $amountCents,
+                'amount_due_after_payment_cents' => max((int) $order->amount_due_cents - $amountCents, 0),
+                'currency' => $attributes['currency'] ?? $order->currency,
+                'overpayment_action' => $attributes['overpayment_action'] ?? Payment::OVERPAYMENT_PENDING_REVIEW,
+                'paid_at' => $attributes['paid_at'] ?? now(),
+                'confirmed_at' => $attributes['confirmed_at'] ?? now(),
+                'notes' => $attributes['notes'] ?? null,
+                'metadata' => $attributes['metadata'] ?? null,
+            ]);
+
+            $order = $this->recalculateOrderPaymentSummary($order);
+            $this->handleOverpayment(
+                $order,
+                $payment,
+                $user,
+                (string) ($payment->overpayment_action ?? Payment::OVERPAYMENT_PENDING_REVIEW),
+                $attributes['credit_notes'] ?? null,
+            );
+            $order = $this->recalculateOrderPaymentSummary($order);
+
+            $payment->forceFill([
+                'amount_due_after_payment_cents' => (int) $order->amount_due_cents,
+            ])->save();
+
+            $this->transitionOrderAfterSummary($order, $user, 'manual_payment_confirmed', ['payment_id' => $payment->id]);
+
+            return $payment->refresh();
+        });
+    }
+
     public function rejectPayment(Payment $payment, ?User $user = null, ?string $reason = null, ?string $notes = null): Payment
     {
         return DB::transaction(function () use ($payment, $user, $reason, $notes): Payment {

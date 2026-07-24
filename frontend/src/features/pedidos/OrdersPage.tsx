@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -5,10 +6,13 @@ import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { EmptyState, LoadingState } from '../../components/ui/States'
-import { StatusBadge } from '../../components/ui/StatusBadge'
-import { PrintPreview } from '../impressao/PrintPreview'
 import type { AppModal, Order, OrderItem } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
+import {
+  getOrderOperationalState,
+  orderMatchesQueueFilter,
+  type OrderQueueFilter,
+} from './orderOperationalState'
 
 type OrdersPageProps = {
   isLoading: boolean
@@ -18,51 +22,70 @@ type OrdersPageProps = {
   onOpenModal: (modal: AppModal) => void
   onPreviewTicket: (orderId: string) => void
   onPrintTicket: (orderId: string) => void
+  onRequestBulkDelete: (orderIds: string[]) => void
+  onRequestCleanupTestOrders: (orderIds: string[]) => void
+  onRequestPermanentDelete: (orderId: string) => void
   onSelectOrder: (orderId: string) => void
+  canManageOrders: boolean
+  canPermanentlyDeleteOrders: boolean
+  canRunDestructiveTestCleanup: boolean
 }
 
-const itemColumns: DataTableColumn<OrderItem>[] = [
-  {
-    key: 'item',
-    header: 'Item',
-    render: (item) => (
-      <div className="table-main">
-        <strong>{item.name}</strong>
-        {item.additions.length > 0 ? <small>{item.additions.join(', ')}</small> : null}
-        <span>{item.notes}</span>
-      </div>
-    ),
-  },
-  { key: 'beneficiary', header: 'Para', render: (item) => item.beneficiary },
-  { key: 'quantity', header: 'Qtd.', render: (item) => `${item.quantity}x`, align: 'right' },
-  { key: 'total', header: 'Subtotal', render: (item) => formatCurrency(item.quantity * item.unitPrice), align: 'right' },
+const QUEUE_FILTERS: Array<{ key: OrderQueueFilter; label: string }> = [
+  { key: 'active', label: 'Ativos' },
+  { key: 'finished', label: 'Concluidos' },
+  { key: 'cancelled', label: 'Cancelados' },
+  { key: 'all', label: 'Todos' },
 ]
 
 export function OrdersPage({
+  canManageOrders,
   isLoading,
   onNewOrder,
   onOpenModal,
   onPreviewTicket,
   onPrintTicket,
+  onRequestBulkDelete,
+  onRequestCleanupTestOrders,
+  onRequestPermanentDelete,
   onSelectOrder,
   orders,
   selectedOrder,
+  canPermanentlyDeleteOrders,
+  canRunDestructiveTestCleanup,
 }: OrdersPageProps) {
+  const [queueFilter, setQueueFilter] = useState<OrderQueueFilter>('active')
+  const [bulkSelection, setBulkSelection] = useState<string[]>([])
+  const selectedOrderState = selectedOrder ? getOrderOperationalState(selectedOrder) : null
+  const filteredOrders = orders.filter((order) => orderMatchesQueueFilter(order, queueFilter))
+  const canSelectForCleanup = canPermanentlyDeleteOrders && queueFilter !== 'active'
+  const visibleOrderIds = filteredOrders.map((order) => order.id)
+  const selectedVisibleIds = bulkSelection.filter((orderId) => visibleOrderIds.includes(orderId))
+  const showBeneficiaryColumn = selectedOrder?.items.some((item) => item.beneficiary) ?? false
+  const itemColumns = orderItemColumns(showBeneficiaryColumn)
+
   return (
     <PageContainer density="wide">
       <PageHeader
         actions={
-          <>
-            <Button icon="plus" onClick={selectedOrder ? () => onOpenModal('add-product') : onNewOrder} variant="secondary">
-              {selectedOrder ? 'Novo item' : 'Criar rascunho'}
-            </Button>
-            <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPrintTicket(selectedOrder.id)} variant="primary">
-              Imprimir comanda
-            </Button>
-            <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="secondary">
-              Previa da comanda
-            </Button>
-          </>
+          <div className="orders-header-actions">
+            <div className="orders-header-actions__primary">
+              <Button icon="plus" onClick={onNewOrder} variant="primary">
+                Novo pedido
+              </Button>
+              <Button disabled={!selectedOrderState?.canReceiveItems} icon="plus" onClick={() => onOpenModal('add-product')} variant="secondary">
+                Adicionar item
+              </Button>
+            </div>
+            <div className="orders-header-actions__secondary">
+              <Button disabled={!selectedOrderState?.canPrint} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="ghost">
+                Visualizar comanda
+              </Button>
+              <Button disabled={!selectedOrderState?.canPrint} icon="printer" onClick={() => selectedOrder && onPrintTicket(selectedOrder.id)} variant="secondary">
+                Imprimir
+              </Button>
+            </div>
+          </div>
         }
         description="Fila de pedidos com conferencia humana, pagamento e impressao antes do preparo."
         title="Pedidos"
@@ -70,28 +93,111 @@ export function OrdersPage({
 
       <div className="orders-layout">
         <Card className="orders-list-card">
-          <SectionTitle eyebrow="Fila operacional" title="Pedidos ativos" />
-          <div className="orders-list">
-            {orders.map((order) => (
+          <SectionTitle
+            action={
+              <div className="queue-filter-tabs" role="tablist" aria-label="Filtrar pedidos">
+                {QUEUE_FILTERS.map((filter) => (
+                  <button
+                    aria-selected={queueFilter === filter.key}
+                    className={queueFilter === filter.key ? 'queue-filter-tab is-active' : 'queue-filter-tab'}
+                    key={filter.key}
+                    onClick={() => {
+                      setQueueFilter(filter.key)
+                      setBulkSelection([])
+                    }}
+                    role="tab"
+                    type="button"
+                  >
+                    {filter.label}
+                  </button>
+                ))}
+              </div>
+            }
+            eyebrow="Fila operacional"
+            title={queueFilter === 'active' ? 'Pedidos ativos' : 'Pedidos'}
+          />
+          {canSelectForCleanup && filteredOrders.length > 0 ? (
+            <div className="bulk-cleanup-bar">
+              <span>{selectedVisibleIds.length} selecionado(s)</span>
               <button
-                className={selectedOrder?.id === order.id ? 'order-list-item is-active' : 'order-list-item'}
-                key={order.id}
-                onClick={() => onSelectOrder(order.id)}
+                className="text-button"
+                onClick={() => setBulkSelection(selectedVisibleIds.length === filteredOrders.length ? [] : visibleOrderIds)}
                 type="button"
               >
-                <div>
-                  <strong>{order.code}</strong>
-                  <span>{order.customer.name}</span>
-                </div>
-                <StatusBadge status={order.status} type="order" />
+                {selectedVisibleIds.length === filteredOrders.length ? 'Limpar selecao' : 'Selecionar lista'}
               </button>
-            ))}
-            {orders.length === 0 ? (
+              <Button
+                disabled={selectedVisibleIds.length === 0}
+                icon="close"
+                onClick={() => onRequestBulkDelete(selectedVisibleIds)}
+                variant="danger"
+              >
+                Excluir selecionados
+              </Button>
+              {canRunDestructiveTestCleanup ? (
+                <Button
+                  disabled={selectedVisibleIds.length === 0}
+                  icon="close"
+                  onClick={() => onRequestCleanupTestOrders(selectedVisibleIds)}
+                  variant="ghost"
+                >
+                  Limpar pedidos de teste
+                </Button>
+              ) : canManageOrders ? (
+                <small className="muted-text">Limpeza ampla de teste desativada neste ambiente.</small>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="orders-list">
+            {filteredOrders.map((order) => {
+              const orderState = getOrderOperationalState(order)
+
+              return (
+                <div
+                  className={[
+                    selectedOrder?.id === order.id ? 'order-list-item is-active' : 'order-list-item',
+                    orderState.isCancelled ? 'is-cancelled' : '',
+                  ].filter(Boolean).join(' ')}
+                  key={order.id}
+                >
+                  {canSelectForCleanup ? (
+                    <label className="order-list-item__select" aria-label={`Selecionar pedido ${order.code}`}>
+                      <input
+                        checked={bulkSelection.includes(order.id)}
+                        onChange={(event) => {
+                          setBulkSelection((current) => (
+                            event.target.checked
+                              ? [...new Set([...current, order.id])]
+                              : current.filter((candidate) => candidate !== order.id)
+                          ))
+                        }}
+                        type="checkbox"
+                      />
+                    </label>
+                  ) : null}
+                  <button className="order-list-item__content" onClick={() => onSelectOrder(order.id)} type="button">
+                    <div className="order-list-item__row order-list-item__row--top">
+                      <strong title={`Pedido ${order.code}`}>Pedido {order.code}</strong>
+                      <Badge tone={orderState.statusBadge.tone} size="sm">{orderState.statusBadge.label}</Badge>
+                    </div>
+                    <div className="order-list-item__customer" title={order.customer.name}>
+                      {order.customer.name}
+                    </div>
+                    <div className="order-list-item__row order-list-item__row--meta">
+                      <small>{order.createdLabel}</small>
+                      <small>{formatCurrency(order.total)}</small>
+                      {orderState.isCancelled ? null : <Badge tone={orderState.paymentBadge.tone} size="sm">{orderState.paymentBadge.label}</Badge>}
+                    </div>
+                  </button>
+                </div>
+              )
+            })}
+            {filteredOrders.length === 0 ? (
               <EmptyState
-                actionLabel="Criar rascunho"
-                description="Nenhum pedido veio da API ainda. Crie um rascunho manual para iniciar a fila local."
-                onAction={onNewOrder}
-                title="Fila vazia"
+                actionLabel={queueFilter === 'active' ? 'Novo pedido' : undefined}
+                description={emptyQueueDescription(queueFilter)}
+                onAction={queueFilter === 'active' ? onNewOrder : undefined}
+                title={emptyQueueTitle(queueFilter)}
               />
             ) : null}
           </div>
@@ -100,16 +206,24 @@ export function OrdersPage({
         <div className="orders-main">
           {isLoading ? <LoadingState description="Atualizando fila pelo backend..." title="Sincronizando pedidos" /> : null}
 
-          {selectedOrder ? (
+          {selectedOrder && selectedOrderState ? (
             <>
+              {selectedOrderState.isCancelled ? (
+                <div className="order-cancelled-notice" role="status">
+                  <Badge tone="danger">Cancelado</Badge>
+                  <p>Este pedido esta preservado no historico, mas saiu da fila operacional e nao aceita novas acoes de preparo.</p>
+                </div>
+              ) : null}
+
               <div className="order-kpis">
                 <Card>
                   <span className="mini-label">Status atual</span>
-                  <StatusBadge status={selectedOrder.status} type="order" />
+                  <Badge tone={selectedOrderState.statusBadge.tone}>{selectedOrderState.statusBadge.label}</Badge>
                 </Card>
                 <Card>
                   <span className="mini-label">Pagamento</span>
-                  <strong>{formatCurrency(selectedOrder.paid)} recebido</strong>
+                  <strong>{selectedOrderState.paymentBadge.label}</strong>
+                  <small>{formatCurrency(selectedOrder.paid)} recebido</small>
                 </Card>
                 <Card>
                   <span className="mini-label">Total</span>
@@ -117,14 +231,14 @@ export function OrdersPage({
                 </Card>
                 <Card>
                   <span className="mini-label">Comanda</span>
-                  <StatusBadge status={selectedOrder.printStatus} type="print" />
+                  <Badge tone={selectedOrderState.printBadge.tone}>{selectedOrderState.printBadge.label}</Badge>
                 </Card>
               </div>
 
               <Card>
                 <SectionTitle
                   action={
-                    <Button icon="plus" onClick={() => onOpenModal('add-product')} variant="ghost">
+                    <Button disabled={!selectedOrderState.canReceiveItems} icon="plus" onClick={() => onOpenModal('add-product')} variant="ghost">
                       Adicionar item
                     </Button>
                   }
@@ -135,7 +249,7 @@ export function OrdersPage({
                   <EmptyState
                     actionLabel="Adicionar item"
                     description="Rascunho criado. Escolha um produto do cardapio para montar o pedido."
-                    onAction={() => onOpenModal('add-product')}
+                    onAction={selectedOrderState.canReceiveItems ? () => onOpenModal('add-product') : undefined}
                     title="Pedido sem itens"
                   />
                 ) : null}
@@ -171,12 +285,11 @@ export function OrdersPage({
                 </Card>
               </div>
 
-              <PrintPreview onPreviewTicket={onPreviewTicket} onPrintTicket={onPrintTicket} order={selectedOrder} />
             </>
           ) : (
             <EmptyState
-              actionLabel="Criar primeiro rascunho"
-              description="A tela esta conectada ao backend. Crie um rascunho para iniciar um pedido manual seguro."
+              actionLabel="Novo pedido"
+              description="A tela esta conectada ao backend. Crie um pedido para iniciar um atendimento manual seguro."
               onAction={onNewOrder}
               title="Nenhum pedido selecionado"
             />
@@ -186,15 +299,23 @@ export function OrdersPage({
         <Card className="order-side-panel">
           <SectionTitle title="Acoes criticas" />
           <div className="side-actions">
-            <Button disabled={!selectedOrder} icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
+            <Button disabled={!selectedOrderState?.canConfirmPayment} icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
               Confirmar pagamento
             </Button>
-            <Button disabled={!selectedOrder} icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
+            <Button disabled={!selectedOrderState?.canChangeStatus} icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
               Alterar status
             </Button>
-            <Button disabled={!selectedOrder} icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
+            <Button disabled={!selectedOrderState?.canCancel} icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
               Cancelar pedido
             </Button>
+            <Button disabled={!selectedOrderState?.canDeleteDraft} icon="close" onClick={() => onOpenModal('delete-draft')} variant="ghost">
+              Excluir rascunho
+            </Button>
+            {canPermanentlyDeleteOrders && selectedOrder ? (
+              <Button icon="close" onClick={() => onRequestPermanentDelete(selectedOrder.id)} variant="ghost">
+                Excluir permanentemente
+              </Button>
+            ) : null}
           </div>
           <div className="attention-box">
             <Badge tone="manual">Confirmacao humana</Badge>
@@ -204,4 +325,61 @@ export function OrdersPage({
       </div>
     </PageContainer>
   )
+}
+
+function orderItemColumns(showBeneficiary: boolean): DataTableColumn<OrderItem>[] {
+  const columns: DataTableColumn<OrderItem>[] = [
+    {
+      key: 'item',
+      header: 'Item',
+      render: (item) => (
+        <div className="table-main">
+          <strong>{item.name}</strong>
+          {item.additions.length > 0 ? <small>{item.additions.join(', ')}</small> : null}
+          <span>{item.notes}</span>
+        </div>
+      ),
+    },
+  ]
+
+  if (showBeneficiary) {
+    columns.push({
+      key: 'beneficiary',
+      header: 'Para',
+      render: (item) => item.beneficiary ?? '',
+    })
+  }
+
+  columns.push(
+    { key: 'quantity', header: 'Qtd.', render: (item) => `${item.quantity}x`, align: 'right' },
+    { key: 'total', header: 'Subtotal', render: (item) => formatCurrency(item.quantity * item.unitPrice), align: 'right' },
+  )
+
+  return columns
+}
+
+function emptyQueueTitle(filter: OrderQueueFilter): string {
+  switch (filter) {
+    case 'cancelled':
+      return 'Nenhum pedido cancelado'
+    case 'finished':
+      return 'Nenhum pedido concluido'
+    case 'all':
+      return 'Nenhum pedido encontrado'
+    case 'active':
+      return 'Fila vazia'
+  }
+}
+
+function emptyQueueDescription(filter: OrderQueueFilter): string {
+  switch (filter) {
+    case 'cancelled':
+      return 'Pedidos cancelados ficam preservados no historico, fora da fila ativa.'
+    case 'finished':
+      return 'Pedidos finalizados saem da operacao ativa.'
+    case 'all':
+      return 'Nenhum pedido veio da API para esta consulta.'
+    case 'active':
+      return 'Nenhum pedido ativo veio da API ainda. Crie um pedido manual para iniciar a fila local.'
+  }
 }

@@ -405,8 +405,8 @@ class PrintWorkflowService
                 'is_fragmented' => (bool) $order->is_fragmented,
             ],
             'customer' => [
-                'payer_name' => $order->payerCustomer?->name,
-                'payer_phone' => $order->payerCustomer?->phone,
+                'payer_name' => $this->orderCustomerName($order),
+                'payer_phone' => $this->orderCustomerPhone($order),
                 'pickup_person_name' => $order->pickup_person_name,
                 'pickup_person_phone' => $order->pickup_person_phone,
                 'pickup_authorized_by' => $order->pickup_authorized_by,
@@ -506,6 +506,28 @@ class PrintWorkflowService
         $lines[] = 'Falta: '.$ticket['payment']['amount_due'];
 
         return implode(PHP_EOL, $lines);
+    }
+
+    private function orderCustomerName(Order $order): string
+    {
+        $snapshot = trim((string) $order->customer_name_snapshot);
+
+        if ($snapshot !== '') {
+            return $snapshot;
+        }
+
+        return $order->payerCustomer?->name ?: 'Cliente avulso';
+    }
+
+    private function orderCustomerPhone(Order $order): ?string
+    {
+        $snapshot = trim((string) $order->customer_phone_snapshot);
+
+        if ($snapshot !== '') {
+            return $snapshot;
+        }
+
+        return $order->payerCustomer?->phone;
     }
 
     /**

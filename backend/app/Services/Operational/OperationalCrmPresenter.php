@@ -9,17 +9,24 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductOption;
+use App\Models\User;
 use App\Services\Menu\MenuAvailabilityService;
+use App\Services\Orders\OrderCleanupService;
+use App\Services\Orders\OrderWorkflowService;
 use Illuminate\Support\Collection;
 
 class OperationalCrmPresenter
 {
-    public function __construct(private readonly MenuAvailabilityService $menuAvailability) {}
+    public function __construct(
+        private readonly MenuAvailabilityService $menuAvailability,
+        private readonly OrderWorkflowService $orders,
+        private readonly OrderCleanupService $orderCleanup,
+    ) {}
 
     /**
      * @return array<string, mixed>
      */
-    public function snapshot(Company $company): array
+    public function snapshot(Company $company, ?User $user = null): array
     {
         $orders = Order::query()
             ->with([
@@ -74,6 +81,7 @@ class OperationalCrmPresenter
             'expenses' => [],
             'paymentMethods' => $this->paymentMethods($orders),
             'integrations' => $this->integrations(),
+            'capabilities' => $this->orderCleanup->capabilities($user),
         ];
     }
 
@@ -82,18 +90,24 @@ class OperationalCrmPresenter
      */
     public function order(Order $order): array
     {
-        $customer = $order->payerCustomer;
-
         return [
             'id' => (string) $order->id,
             'code' => $order->code,
-            'customer' => $this->customer($customer),
+            'backendStatus' => $order->status,
+            'customer' => $this->orderCustomer($order),
             'status' => $this->mapOrderStatus((string) $order->status),
             'paymentStatus' => $this->mapPaymentStatus((string) $order->payment_status),
             'fulfillmentType' => $this->mapFulfillmentType((string) ($order->fulfillment_type ?: Order::FULFILLMENT_PICKUP)),
             'printStatus' => $this->mapPrintStatus((string) $order->print_status),
             'channel' => $this->mapChannel((string) $order->origin_channel),
             'createdLabel' => $order->created_at?->format('d/m H:i') ?? 'Agora',
+            'availableTransitions' => collect($this->orders->validTransitions($order))
+                ->map(fn (string $status): array => [
+                    'status' => $status,
+                    'label' => $this->statusLabel($status),
+                ])
+                ->values()
+                ->all(),
             'pickupPerson' => $order->pickup_person_name,
             'deliveryLabel' => $order->delivery_reference ?: $order->delivery_recipient_name,
             'generalNotes' => $order->general_notes ?: 'Sem observacoes gerais.',
@@ -111,7 +125,7 @@ class OperationalCrmPresenter
                     'quantity' => (int) $item->quantity,
                     'unitPrice' => $this->cents((int) $item->unit_price_cents),
                     'notes' => $item->item_notes ?: 'Sem observacao por item.',
-                    'beneficiary' => $item->beneficiary_name ?: $customer?->name ?: 'A confirmar',
+                    'beneficiary' => $item->beneficiary_name ?: null,
                     'additions' => $item->options->pluck('name')->values()->all(),
                     'unavailable' => false,
                 ])
@@ -207,6 +221,52 @@ class OperationalCrmPresenter
     /**
      * @return array<string, mixed>
      */
+    private function orderCustomer(Order $order): array
+    {
+        $customer = $order->payerCustomer;
+        $name = $this->orderCustomerName($order);
+        $phone = $this->orderCustomerPhone($order);
+
+        return [
+            'id' => $customer ? (string) $customer->id : 'order-customer-'.$order->id,
+            'name' => $name,
+            'phoneLabel' => $phone ?: 'Sem telefone cadastrado',
+            'tags' => [$customer ? 'Cadastrado' : 'Avulso'],
+            'creditBalance' => $this->cents((int) ($customer?->credit_balance_cents ?? 0)),
+            'notes' => $customer?->notes ? [$customer->notes] : [],
+            'preferences' => [],
+        ];
+    }
+
+    private function orderCustomerName(Order $order): string
+    {
+        $snapshot = trim((string) $order->customer_name_snapshot);
+
+        if ($snapshot !== '') {
+            return $snapshot;
+        }
+
+        if ($order->payerCustomer?->name) {
+            return $order->payerCustomer->name;
+        }
+
+        return 'Cliente avulso';
+    }
+
+    private function orderCustomerPhone(Order $order): ?string
+    {
+        $snapshot = trim((string) $order->customer_phone_snapshot);
+
+        if ($snapshot !== '') {
+            return $snapshot;
+        }
+
+        return $order->payerCustomer?->phone;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private function deliveryTask(Order $order): array
     {
         return [
@@ -214,7 +274,7 @@ class OperationalCrmPresenter
             'orderCode' => $order->code,
             'type' => $this->mapFulfillmentType((string) ($order->fulfillment_type ?: Order::FULFILLMENT_PICKUP)),
             'status' => $order->fulfillment_status ?: 'pending',
-            'recipient' => $order->delivery_recipient_name ?: $order->pickup_person_name ?: $order->payerCustomer?->name ?: 'A confirmar',
+            'recipient' => $order->delivery_recipient_name ?: $order->pickup_person_name ?: $this->orderCustomerName($order),
             'routeLabel' => $order->delivery_reference ?: $order->pickup_notes ?: 'Sem rota externa integrada.',
         ];
     }
@@ -437,9 +497,19 @@ class OperationalCrmPresenter
     private function statusLabel(string $status): string
     {
         return match ($status) {
+            Order::STATUS_DRAFT => 'Rascunho',
+            Order::STATUS_AWAITING_CUSTOMER_CONFIRMATION => 'Aguardando cliente',
+            Order::STATUS_CONFIRMED => 'Confirmado',
+            Order::STATUS_AWAITING_PAYMENT => 'Aguardando pagamento',
+            Order::STATUS_AWAITING_PAYMENT_PROOF => 'Aguardando comprovante',
+            Order::STATUS_PAYMENT_PROOF_RECEIVED => 'Comprovante recebido',
+            Order::STATUS_PAYMENT_CONFIRMED => 'Pagamento confirmado',
+            Order::STATUS_PAYMENT_REJECTED => 'Pagamento rejeitado',
             Order::STATUS_READY_TO_PRINT => 'Pronto para imprimir',
             Order::STATUS_PRINTED => 'Comanda impressa',
             Order::STATUS_IN_PREPARATION => 'Em preparo',
+            Order::STATUS_READY_FOR_PICKUP => 'Pronto para retirada',
+            Order::STATUS_OUT_FOR_DELIVERY => 'Saiu para entrega',
             Order::STATUS_FINISHED => 'Finalizado',
             Order::STATUS_CANCELLED => 'Cancelado',
             default => 'Status atualizado',

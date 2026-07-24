@@ -17,7 +17,7 @@ class OperationalSnapshotController extends Controller
         $company = $this->resolveCompany($request);
 
         return response()->json([
-            'data' => $presenter->snapshot($company),
+            'data' => $presenter->snapshot($company, $request->user()),
             'meta' => [
                 'source' => 'database',
                 'generated_at' => now()->toIso8601String(),

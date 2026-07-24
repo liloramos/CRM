@@ -2,8 +2,18 @@ import type { AppModal } from '../types/crm'
 
 export function modalTitle(modal: AppModal): string {
   switch (modal) {
+    case 'new-order':
+      return 'Novo pedido'
+    case 'delete-draft':
+      return 'Excluir rascunho'
+    case 'delete-order-permanent':
+      return 'Excluir pedido de teste'
+    case 'delete-orders-bulk':
+      return 'Excluir pedidos selecionados'
+    case 'cleanup-test-orders':
+      return 'Limpar pedidos de teste'
     case 'confirm-payment':
-      return 'Confirmar pagamento Pix'
+      return 'Confirmar pagamento'
     case 'cancel-order':
       return 'Cancelar pedido'
     case 'change-status':
@@ -31,10 +41,19 @@ export function modalTitle(modal: AppModal): string {
 
 export function modalDescription(modal: AppModal): string {
   switch (modal) {
+    case 'new-order':
+      return 'Selecione um cliente cadastrado, digite um cliente avulso ou cadastre um novo.'
     case 'confirm-payment':
       return 'Comprovantes e credito precisam de conferencia humana antes de liberar o pedido.'
     case 'cancel-order':
       return 'Esta acao altera o fluxo operacional e deve registrar motivo.'
+    case 'delete-draft':
+      return 'Somente rascunho vazio, sem pagamento, itens ou impressao, pode ser apagado.'
+    case 'delete-order-permanent':
+    case 'delete-orders-bulk':
+      return 'Exclusao permanente somente para pedidos operacionalmente elegiveis.'
+    case 'cleanup-test-orders':
+      return 'Limpeza ampla de desenvolvimento, protegida por permissao, ambiente, flag e confirmacao.'
     case 'toggle-ai':
       return 'Escolha como esta conversa deve seguir. A confirmacao humana continua obrigatoria em decisoes sensiveis.'
     case 'print-preview':

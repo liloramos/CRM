@@ -4,6 +4,7 @@ use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AdminMenuReadController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\CustomerOperationsController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
 use App\Http\Controllers\Api\MenuComponentAdminController;
@@ -86,10 +87,24 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::patch('menu/options/{productOption}/availability', [MenuOptionAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.options.availability.update');
+        Route::get('customers', [CustomerOperationsController::class, 'index'])->name('customers.index');
+        Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
         Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
         Route::post('orders/drafts', [OrderOperationsController::class, 'storeDraft'])->name('orders.drafts.store');
         Route::get('orders/{order}', [OrderOperationsController::class, 'show'])->name('orders.show');
+        Route::delete('orders/{order}', [OrderOperationsController::class, 'destroyDraft'])->name('orders.destroy');
+        Route::delete('orders/{order}/permanent', [OrderOperationsController::class, 'destroyPermanently'])
+            ->middleware('permission:orders.manage')
+            ->name('orders.permanent-destroy');
+        Route::post('orders/permanent-deletion', [OrderOperationsController::class, 'destroyManyPermanently'])
+            ->middleware('permission:orders.manage')
+            ->name('orders.permanent-deletion');
+        Route::post('orders/test-cleanup', [OrderOperationsController::class, 'destroyManyForTesting'])
+            ->middleware('permission:orders.manage')
+            ->name('orders.test-cleanup');
         Route::post('orders/{order}/items', [OrderOperationsController::class, 'addItem'])->name('orders.items.store');
+        Route::post('orders/{order}/cancel', [OrderOperationsController::class, 'cancel'])->name('orders.cancel');
+        Route::post('orders/{order}/payments/confirm', [OrderOperationsController::class, 'confirmPayment'])->name('orders.payments.confirm');
         Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
     });

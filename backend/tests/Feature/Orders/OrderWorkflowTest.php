@@ -2,17 +2,28 @@
 
 namespace Tests\Feature\Orders;
 
+use App\Enums\MenuAvailabilityStatus;
 use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\Customer;
+use App\Models\DailyComponentAvailability;
+use App\Models\MenuComponent;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
+use App\Models\ProductGroupComponent;
 use App\Models\ProductOption;
+use App\Models\ProductOptionGroup;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\Printing\PrintWorkflowService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\CompanySeeder;
 use Database\Seeders\MenuSeeder;
+use Database\Seeders\PrintingSeeder;
+use Database\Seeders\RoleAndPermissionSeeder;
+use Database\Seeders\SolRestaurantStructuredMenuSeeder;
 use DomainException;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -130,6 +141,32 @@ class OrderWorkflowTest extends TestCase
         $this->assertSame([], array_values($aggregateLocks));
     }
 
+    public function test_manual_draft_endpoint_accepts_walk_in_customer_snapshot_without_registered_customer(): void
+    {
+        $this->seed(CompanySeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        $data = $this->actingAs($user)
+            ->postJson('/api/app/orders/drafts', [
+                'customer_name_snapshot' => 'Cliente Avulso Balcao',
+                'customer_phone_snapshot' => '(62) 99999-0101',
+                'fulfillment_type' => Order::FULFILLMENT_COUNTER,
+            ])
+            ->assertCreated()
+            ->json('data');
+
+        $this->assertSame('Cliente Avulso Balcao', $data['customer']['name']);
+        $this->assertSame('(62) 99999-0101', $data['customer']['phoneLabel']);
+        $this->assertDatabaseHas('orders', [
+            'id' => $data['id'],
+            'payer_customer_id' => null,
+            'customer_name_snapshot' => 'Cliente Avulso Balcao',
+            'customer_phone_snapshot' => '(62) 99999-0101',
+        ]);
+    }
+
     public function test_order_item_keeps_item_notes_beneficiary_options_and_totals(): void
     {
         $this->seed([CompanySeeder::class, MenuSeeder::class]);
@@ -224,6 +261,672 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_order_item_without_special_recipient_serializes_beneficiary_as_null(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente Principal']);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'payer_customer_id' => $customer->id,
+        ]);
+
+        $data = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => (string) $product->id,
+                'quantity' => 1,
+                'beneficiary_name' => null,
+            ])
+            ->assertOk()
+            ->json('data');
+
+        $this->assertNull($data['items'][0]['beneficiary']);
+        $this->assertDatabaseHas('order_items', [
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+            'beneficiary_name' => null,
+        ]);
+    }
+
+    public function test_structured_order_item_endpoint_persists_only_selected_configuration_options(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Murilo']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'payer_customer_id' => $customer->id,
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+
+        $payload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'beneficiary_name' => 'Murilo',
+            'structured_options' => $this->componentChoiceRows($product, [
+                'salada_casa' => ['beterraba'],
+                'carne' => ['porco'],
+            ]),
+        ];
+
+        $data = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", $payload)
+            ->assertOk()
+            ->json('data');
+
+        $this->assertSame((string) $order->id, $data['id']);
+        $this->assertCount(6, $data['items'][0]['additions']);
+        $this->assertContains('Arroz', $data['items'][0]['additions']);
+        $this->assertContains('Mandioca', $data['items'][0]['additions']);
+        $this->assertContains('Beterraba', $data['items'][0]['additions']);
+        $this->assertContains('Porco', $data['items'][0]['additions']);
+        $this->assertNotContains('Repolho com tomate', $data['items'][0]['additions']);
+        $this->assertNotContains('Vinagrete', $data['items'][0]['additions']);
+        $this->assertSame(6, $order->refresh()->items()->firstOrFail()->options()->count());
+        $this->assertDatabaseHas('order_item_options', [
+            'name' => 'Porco',
+            'group_code' => 'carne',
+            'quantity' => 1,
+        ]);
+    }
+
+    public function test_structured_order_item_endpoint_rejects_missing_required_and_excess_choices(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n8-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'structured_options' => $this->componentChoiceRows($product, [
+                    'salada' => ['beterraba'],
+                ]),
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Escolha obrigatoria ausente em Carne.');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'structured_options' => $this->componentChoiceRows($product, [
+                    'salada' => ['beterraba', 'cenoura'],
+                    'carne' => ['porco'],
+                ]),
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Escolhas acima do limite em Escolha uma salada.');
+    }
+
+    public function test_structured_order_item_endpoint_rejects_unavailable_component_and_option_from_other_product(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $n5 = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $suco = Product::query()->where('company_id', $company->id)->where('slug', 'suco')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $beterraba = MenuComponent::query()->where('company_id', $company->id)->where('slug', 'beterraba')->firstOrFail();
+
+        DailyComponentAvailability::query()->create([
+            'company_id' => $company->id,
+            'menu_component_id' => $beterraba->id,
+            'availability_date' => '2026-07-06',
+            'status' => MenuAvailabilityStatus::SoldOut,
+            'reason' => 'Acabou no almoco.',
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $n5->id,
+                'quantity' => 1,
+                'structured_options' => $this->componentChoiceRows($n5, [
+                    'salada_casa' => ['beterraba'],
+                    'carne' => ['porco'],
+                ]),
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Beterraba esta indisponivel hoje.');
+
+        $sucoFlavorLink = $this->componentChoiceRows($suco, ['sabor' => ['goiaba']])[0];
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $n5->id,
+                'quantity' => 1,
+                'structured_options' => [$sucoFlavorLink],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Uma ou mais escolhas nao pertencem ao produto selecionado.');
+    }
+
+    public function test_n8_structured_meat_selection_persists_two_pieces_of_the_same_meat(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n8-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'structured_options' => $this->componentChoiceRows($product, [
+                    'salada' => ['vinagrete'],
+                    'carne' => ['frango-ao-molho'],
+                ]),
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('order_item_options', [
+            'order_item_id' => $order->refresh()->items()->firstOrFail()->id,
+            'name' => 'Frango ao molho',
+            'group_code' => 'carne',
+            'quantity' => 2,
+        ]);
+    }
+
+    public function test_manual_orders_keep_customer_beneficiary_items_and_printing_separate(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $murilo = Customer::query()->create(['company_id' => $company->id, 'name' => 'Murilo']);
+        $larissa = Customer::query()->create(['company_id' => $company->id, 'name' => 'Larissa']);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+
+        $muriloOrder = $orders->createDraft($company, ['payer_customer_id' => $murilo->id]);
+        $larissaOrder = $orders->createDraft($company, ['payer_customer_id' => $larissa->id]);
+        $sameCustomerSecondOrder = $orders->createDraft($company, ['payer_customer_id' => $murilo->id]);
+
+        $orders->addItem($muriloOrder, $product, ['beneficiary_name' => 'Murilo', 'item_notes' => 'Sem cebola.']);
+        $orders->addItem($larissaOrder, $product, ['beneficiary_name' => 'Larissa', 'item_notes' => 'Com vinagrete.']);
+        $orders->addItem($sameCustomerSecondOrder, $product, ['beneficiary_name' => 'Murilo segundo pedido']);
+
+        $muriloHtml = app(PrintWorkflowService::class)->generateTicket($muriloOrder->refresh())->html_content;
+        $larissaHtml = app(PrintWorkflowService::class)->generateTicket($larissaOrder->refresh())->html_content;
+
+        $this->assertNotSame($muriloOrder->id, $larissaOrder->id);
+        $this->assertNotSame($muriloOrder->id, $sameCustomerSecondOrder->id);
+        $this->assertSame(1, $muriloOrder->items()->count());
+        $this->assertSame(1, $larissaOrder->items()->count());
+        $this->assertStringContainsString('Murilo', $muriloHtml);
+        $this->assertStringContainsString('Sem cebola.', $muriloHtml);
+        $this->assertStringNotContainsString('Com vinagrete.', $muriloHtml);
+        $this->assertStringContainsString('Larissa', $larissaHtml);
+        $this->assertStringContainsString('Com vinagrete.', $larissaHtml);
+        $this->assertStringNotContainsString('Sem cebola.', $larissaHtml);
+    }
+
+    public function test_order_status_cancel_and_payment_endpoints_persist_real_state(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $orders->addItem($order, $product);
+
+        $this->actingAs($user)
+            ->patchJson("/api/app/orders/{$order->id}/status", [
+                'status' => Order::STATUS_CONFIRMED,
+                'reason' => 'cliente_confirmou',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'aguardando_pagamento');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                'method' => Payment::METHOD_PIX,
+                'amount_cents' => 800,
+                'notes' => 'Pagamento conferido no caixa.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.paymentStatus', 'pago');
+
+        $order->refresh();
+        $this->assertSame(Order::STATUS_PAYMENT_CONFIRMED, $order->status);
+        $this->assertSame(Payment::ORDER_STATUS_PAID, $order->payment_status);
+        $this->assertSame(800, $order->amount_paid_cents);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/cancel", [
+                'reason' => 'cliente_desistiu',
+                'notes' => 'Cancelado pela interface operacional.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'cancelado');
+
+        $this->assertSame(Order::STATUS_CANCELLED, $order->refresh()->status);
+        $this->assertNotNull($order->cancelled_at);
+        $this->assertSame(1, $order->items()->count());
+    }
+
+    public function test_order_status_endpoint_rejects_invalid_transition_and_payment_confirmation_is_idempotent(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $orders->addItem($order, $product);
+
+        $this->actingAs($user)
+            ->patchJson("/api/app/orders/{$order->id}/status", [
+                'status' => Order::STATUS_FINISHED,
+            ])
+            ->assertStatus(422);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                'method' => Payment::METHOD_CASH,
+                'amount_cents' => 800,
+            ])
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                'method' => Payment::METHOD_CASH,
+                'amount_cents' => 800,
+            ])
+            ->assertOk();
+
+        $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
+        $this->assertSame(800, $order->refresh()->amount_paid_cents);
+    }
+
+    public function test_empty_draft_order_can_be_deleted_safely(): void
+    {
+        $this->seed(CompanySeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $order = app(OrderWorkflowService::class)->createDraft($company);
+
+        $this->actingAs($user)
+            ->deleteJson("/api/app/orders/{$order->id}")
+            ->assertOk()
+            ->assertJsonPath('data.deleted', true)
+            ->assertJsonPath('data.id', (string) $order->id);
+
+        $this->assertDatabaseMissing('orders', ['id' => $order->id]);
+        $this->assertDatabaseMissing('order_status_histories', ['order_id' => $order->id]);
+    }
+
+    public function test_cleanup_capabilities_default_to_safe_values_and_use_config(): void
+    {
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => false]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+
+        $data = $this->actingAs($manager)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.capabilities');
+
+        $this->assertFalse(config('chatbotcrm.orders.allow_destructive_test_cleanup'));
+        $this->assertTrue($data['can_permanently_delete_orders']);
+        $this->assertFalse($data['can_run_destructive_test_cleanup']);
+
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => true]);
+
+        $data = $this->actingAs($manager)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.capabilities');
+
+        $this->assertTrue($data['can_run_destructive_test_cleanup']);
+    }
+
+    public function test_operational_permanent_delete_requires_permission_and_confirmation_but_not_test_flag(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $userWithoutPermission = User::factory()->create(['company_id' => $company->id]);
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $unauthorizedOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Sem permissao']);
+        $wrongConfirmationOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Confirmacao errada']);
+        $eligibleOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Elegivel']);
+
+        $this->actingAs($userWithoutPermission)
+            ->deleteJson("/api/app/orders/{$unauthorizedOrder->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertForbidden();
+
+        $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$wrongConfirmationOrder->id}/permanent", [
+                'confirmation' => 'ERRADO',
+            ])
+            ->assertStatus(422);
+
+        $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$eligibleOrder->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', 1);
+
+        $this->assertDatabaseHas('orders', ['id' => $unauthorizedOrder->id]);
+        $this->assertDatabaseHas('orders', ['id' => $wrongConfirmationOrder->id]);
+        $this->assertDatabaseMissing('orders', ['id' => $eligibleOrder->id]);
+    }
+
+    public function test_destructive_test_cleanup_is_blocked_when_flag_is_false(): void
+    {
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => false]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Teste bloqueado']);
+
+        $this->actingAs($manager)
+            ->postJson('/api/app/orders/test-cleanup', [
+                'order_ids' => [$order->id],
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'A limpeza ampla de registros de teste esta desativada neste ambiente.');
+
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+    }
+
+    public function test_destructive_test_cleanup_is_blocked_in_production_even_when_flag_is_true(): void
+    {
+        config(['app.env' => 'production']);
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => true]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Teste producao']);
+
+        $this->actingAs($manager)
+            ->postJson('/api/app/orders/test-cleanup', [
+                'order_ids' => [$order->id],
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'A limpeza ampla de registros de teste nao esta disponivel neste ambiente.');
+
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+    }
+
+    public function test_cancelled_order_without_operational_links_can_be_deleted_permanently(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Cancelado elegivel']);
+
+        app(OrderWorkflowService::class)->transitionTo($order, Order::STATUS_CANCELLED, $manager, 'teste_cancelado');
+
+        $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', 1);
+
+        $this->assertDatabaseMissing('orders', ['id' => $order->id]);
+    }
+
+    public function test_destructive_test_cleanup_deletes_selected_orders_without_clients_or_other_companies(): void
+    {
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => true]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $otherCompany = Company::query()->create(['name' => 'Outro Restaurante', 'slug' => 'outro-restaurante']);
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente Preservado']);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $firstOrder = $orders->createDraft($company, ['payer_customer_id' => $customer->id]);
+        $secondOrder = $orders->createDraft($company, ['customer_name_snapshot' => 'Avulso limpeza']);
+        $otherOrder = $orders->createDraft($otherCompany, ['customer_name_snapshot' => 'Outra empresa']);
+
+        $orders->addItem($firstOrder, $product);
+        app(PrintWorkflowService::class)->generateTicket($firstOrder->refresh(), $manager);
+
+        $this->actingAs($manager)
+            ->postJson('/api/app/orders/test-cleanup', [
+                'order_ids' => [$firstOrder->id, $secondOrder->id],
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', 2);
+
+        $this->assertDatabaseMissing('orders', ['id' => $firstOrder->id]);
+        $this->assertDatabaseMissing('orders', ['id' => $secondOrder->id]);
+        $this->assertDatabaseMissing('order_items', ['order_id' => $firstOrder->id]);
+        $this->assertDatabaseMissing('print_jobs', ['order_id' => $firstOrder->id]);
+        $this->assertDatabaseHas('orders', ['id' => $otherOrder->id]);
+        $this->assertDatabaseHas('customers', ['id' => $customer->id]);
+    }
+
+    public function test_destructive_test_cleanup_rolls_back_when_selection_crosses_company(): void
+    {
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => true]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $otherCompany = Company::query()->create(['name' => 'Outro Restaurante', 'slug' => 'outro-restaurante']);
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $ownOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Pedido proprio']);
+        $otherOrder = app(OrderWorkflowService::class)->createDraft($otherCompany, ['customer_name_snapshot' => 'Pedido externo']);
+
+        $this->actingAs($manager)
+            ->postJson('/api/app/orders/test-cleanup', [
+                'order_ids' => [$ownOrder->id, $otherOrder->id],
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422);
+
+        $this->assertDatabaseHas('orders', ['id' => $ownOrder->id]);
+        $this->assertDatabaseHas('orders', ['id' => $otherOrder->id]);
+    }
+
+    public function test_paid_order_cannot_be_deleted_permanently_and_returns_structured_reasons(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Pago bloqueado']);
+        app(OrderWorkflowService::class)->addItem($order, $product);
+
+        $this->actingAs($manager)
+            ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                'method' => Payment::METHOD_PIX,
+                'amount_cents' => 800,
+            ])
+            ->assertOk();
+
+        $response = $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'order_not_eligible_for_permanent_deletion')
+            ->assertJsonPath('message', 'Este pedido possui registros operacionais e nao pode ser excluido.')
+            ->json();
+
+        $this->assertContains('payment_confirmed', $response['reasons']);
+        $this->assertContains('payment_record_exists', $response['reasons']);
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+    }
+
+    public function test_printed_order_cannot_be_deleted_permanently(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, PrintingSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Impresso bloqueado']);
+        app(OrderWorkflowService::class)->addItem($order, $product);
+        $printJob = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $manager);
+        app(PrintWorkflowService::class)->markPrinted($printJob, $manager);
+
+        $response = $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->json();
+
+        $this->assertContains('print_confirmed', $response['reasons']);
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+        $this->assertDatabaseHas('print_jobs', ['order_id' => $order->id]);
+    }
+
+    public function test_order_in_preparation_cannot_be_deleted_permanently(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, PrintingSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, ['customer_name_snapshot' => 'Preparo bloqueado']);
+        $orders->addItem($order, $product);
+        $printJob = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $manager);
+        app(PrintWorkflowService::class)->markPrinted($printJob, $manager);
+        $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, $manager, 'preparo_iniciado');
+
+        $response = $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->json();
+
+        $this->assertContains('status_not_eligible', $response['reasons']);
+        $this->assertContains('preparation_started', $response['reasons']);
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+    }
+
+    public function test_permanent_delete_blocks_other_company_order_without_leaking_data(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $otherCompany = Company::query()->create(['name' => 'Outro Restaurante', 'slug' => 'outro-restaurante-delete']);
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $otherOrder = app(OrderWorkflowService::class)->createDraft($otherCompany, ['customer_name_snapshot' => 'Pedido externo']);
+
+        $this->actingAs($manager)
+            ->deleteJson("/api/app/orders/{$otherOrder->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('orders', ['id' => $otherOrder->id]);
+    }
+
+    public function test_bulk_permanent_delete_reports_eligible_and_blocked_orders_without_partial_delete(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $manager = User::factory()->create(['company_id' => $company->id]);
+        $manager->assignRole(Role::ATENDENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $eligibleOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Elegivel lote']);
+        $blockedOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Bloqueado lote']);
+
+        app(OrderWorkflowService::class)->addItem($blockedOrder, $product);
+        $this->actingAs($manager)
+            ->postJson("/api/app/orders/{$blockedOrder->id}/payments/confirm", [
+                'method' => Payment::METHOD_PIX,
+                'amount_cents' => 800,
+            ])
+            ->assertOk();
+
+        $data = $this->actingAs($manager)
+            ->postJson('/api/app/orders/permanent-deletion', [
+                'order_ids' => [$eligibleOrder->id, $blockedOrder->id],
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'orders_not_eligible_for_permanent_deletion')
+            ->json();
+
+        $this->assertSame((string) $eligibleOrder->id, $data['eligible'][0]['order_id']);
+        $this->assertSame((string) $blockedOrder->id, $data['blocked'][0]['order_id']);
+        $this->assertContains('payment_confirmed', $data['blocked'][0]['reasons']);
+        $this->assertDatabaseHas('orders', ['id' => $eligibleOrder->id]);
+        $this->assertDatabaseHas('orders', ['id' => $blockedOrder->id]);
+    }
+
+    public function test_non_empty_or_cancelled_order_cannot_be_deleted_physically(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $orderWithItem = $orders->createDraft($company);
+        $cancelledOrder = $orders->createDraft($company);
+
+        $orders->addItem($orderWithItem, $product);
+        $orders->transitionTo($cancelledOrder, Order::STATUS_CANCELLED, $user, 'cliente_desistiu');
+
+        $this->actingAs($user)
+            ->deleteJson("/api/app/orders/{$orderWithItem->id}")
+            ->assertStatus(422);
+
+        $this->actingAs($user)
+            ->deleteJson("/api/app/orders/{$cancelledOrder->id}")
+            ->assertStatus(422);
+
+        $this->assertDatabaseHas('orders', ['id' => $orderWithItem->id]);
+        $this->assertDatabaseHas('orders', ['id' => $cancelledOrder->id, 'status' => Order::STATUS_CANCELLED]);
+        $this->assertSame(1, $orderWithItem->refresh()->items()->count());
+    }
+
     public function test_fragmented_order_can_reference_previous_order_without_copying_items(): void
     {
         $this->seed([CompanySeeder::class, MenuSeeder::class]);
@@ -296,5 +999,37 @@ class OrderWorkflowTest extends TestCase
         $this->expectException(DomainException::class);
 
         $service->addItem($printedOrder, $product);
+    }
+
+    /**
+     * @param  array<string, list<string>>  $choices
+     * @return list<array{component_link_id: int}>
+     */
+    private function componentChoiceRows(Product $product, array $choices): array
+    {
+        $rows = [];
+
+        foreach ($choices as $groupCode => $componentSlugs) {
+            $group = ProductOptionGroup::query()
+                ->where('product_id', $product->id)
+                ->where('code', $groupCode)
+                ->firstOrFail();
+
+            foreach ($componentSlugs as $componentSlug) {
+                $component = MenuComponent::query()
+                    ->where('company_id', $product->company_id)
+                    ->where('slug', $componentSlug)
+                    ->firstOrFail();
+
+                $link = ProductGroupComponent::query()
+                    ->where('product_option_group_id', $group->id)
+                    ->where('menu_component_id', $component->id)
+                    ->firstOrFail();
+
+                $rows[] = ['component_link_id' => (int) $link->id];
+            }
+        }
+
+        return $rows;
     }
 }

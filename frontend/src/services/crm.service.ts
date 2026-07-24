@@ -18,7 +18,9 @@ import type {
   AdminWeeklyMenuItem,
   AdminWeeklyMenuResponse,
   AuthUser,
+  BackendOrderStatus,
   ComponentAvailabilityMutationResponse,
+  CustomerSummary,
   DailyMenuAdjustmentMutationResponse,
   DailyMenuAdjustmentAction,
   DailyMenuSectionKey,
@@ -64,7 +66,9 @@ type LoginPayload = {
 }
 
 type DraftOrderPayload = {
-  payer_customer_id?: string
+  payer_customer_id?: string | null
+  customer_name_snapshot?: string | null
+  customer_phone_snapshot?: string | null
   fulfillment_type?: 'pickup' | 'delivery' | 'counter'
   general_notes?: string
   kitchen_notes?: string
@@ -75,11 +79,47 @@ type AddItemPayload = {
   product_id: string
   quantity: number
   item_notes?: string
-  beneficiary_name?: string
+  beneficiary_name?: string | null
   options?: Array<{
     product_option_id: string
     quantity?: number
   }>
+  structured_options?: Array<{
+    component_link_id?: number
+    product_link_id?: number
+    quantity?: number
+  }>
+}
+
+type CreateCustomerPayload = {
+  name: string
+  phone?: string
+  email?: string
+  notes?: string
+}
+
+type CancelOrderPayload = {
+  reason: string
+  notes?: string
+}
+
+type UpdateOrderStatusPayload = {
+  status: BackendOrderStatus
+  reason?: string
+  notes?: string
+}
+
+type ConfirmOrderPaymentPayload = {
+  method: 'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other'
+  amount_cents?: number
+  notes?: string
+}
+
+export type OrderDeletionResponse = {
+  deleted: number
+  order_ids: string[]
+  eligible?: Array<{ order_id: string; code?: string | null }>
+  blocked?: Array<{ order_id: string; code?: string | null; reasons: string[] }>
 }
 
 type UpdateMenuOptionAvailabilityPayload = {
@@ -143,34 +183,6 @@ export type UpsertDailyMenuAdjustmentPayload = {
   notes?: string | null
 }
 
-type BackendProductOption = {
-  id: number | string
-  name: string
-  option_type?: string | null
-  group_code?: string | null
-  group_label?: string | null
-  price_delta_cents?: number | null
-  is_required?: boolean
-  available_today?: boolean
-  daily_reason?: string | null
-}
-
-type BackendProduct = {
-  id: number | string
-  name: string
-  description?: string | null
-  notes_hint?: string | null
-  base_price_cents?: number | null
-  is_active?: boolean
-  is_available_by_default?: boolean
-  product_type?: string | null
-  menu_rule_code?: string | null
-  category?: {
-    name?: string | null
-  } | null
-  options?: BackendProductOption[]
-}
-
 const EMPTY_FINANCIAL_SUMMARY = {
   dateLabel: 'Hoje',
   ordersCount: 0,
@@ -201,6 +213,11 @@ export class ApiError extends Error {
 
 export function getMockOperationalSnapshot(): OperationalSnapshot {
   return {
+    capabilities: {
+      can_permanently_delete_orders: false,
+      can_run_destructive_test_cleanup: false,
+      destructive_cleanup_environment: 'mock',
+    },
     orders: ordersMock,
     conversations: conversationsMock,
     customers: customersMock,
@@ -249,9 +266,7 @@ export async function getOperationalSnapshot(): Promise<SnapshotResponse> {
     const response = await requestJson<ApiEnvelope<OperationalSnapshot>>('/api/app/operational-snapshot')
     const snapshot = normalizeOperationalSnapshot(response.data)
 
-    if (snapshot.company?.slug) {
-      snapshot.products = await getAvailableMenu(snapshot.company.slug, snapshot.products)
-    }
+    snapshot.products = await getStructuredOperationalProducts()
 
     return {
       snapshot,
@@ -277,6 +292,11 @@ function normalizeOperationalSnapshot(snapshot: OperationalSnapshot | null | und
 
   return {
     ...snapshot,
+    capabilities: {
+      can_permanently_delete_orders: Boolean(snapshot.capabilities?.can_permanently_delete_orders ?? false),
+      can_run_destructive_test_cleanup: Boolean(snapshot.capabilities?.can_run_destructive_test_cleanup ?? false),
+      destructive_cleanup_environment: snapshot.capabilities?.destructive_cleanup_environment ?? 'unknown',
+    },
     orders: Array.isArray(snapshot.orders) ? snapshot.orders : [],
     conversations: Array.isArray(snapshot.conversations) ? snapshot.conversations : [],
     customers: Array.isArray(snapshot.customers) ? snapshot.customers : [],
@@ -302,6 +322,77 @@ export async function createDraftOrder(payload: DraftOrderPayload = {}) {
 
 export async function addOrderItem(orderId: string, payload: AddItemPayload) {
   return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/items`, {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+}
+
+export async function deleteDraftOrder(orderId: string) {
+  return requestJson<ApiEnvelope<{ deleted: boolean; id: string }>>(`/api/app/orders/${orderId}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function deleteOrderPermanently(orderId: string, confirmation: string) {
+  return requestJson<ApiEnvelope<OrderDeletionResponse>>(`/api/app/orders/${orderId}/permanent`, {
+    body: JSON.stringify({ confirmation }),
+    method: 'DELETE',
+  })
+}
+
+export async function deleteOrdersPermanently(orderIds: string[], confirmation: string) {
+  return requestJson<ApiEnvelope<OrderDeletionResponse>>('/api/app/orders/permanent-deletion', {
+    body: JSON.stringify({ order_ids: orderIds, confirmation }),
+    method: 'POST',
+  })
+}
+
+export async function cleanupTestOrders(orderIds: string[], confirmation: string) {
+  return requestJson<ApiEnvelope<OrderDeletionResponse>>('/api/app/orders/test-cleanup', {
+    body: JSON.stringify({ order_ids: orderIds, confirmation }),
+    method: 'POST',
+  })
+}
+
+export async function searchCustomers(search: string, limit = 12): Promise<CustomerSummary[]> {
+  const params = new URLSearchParams()
+
+  if (search.trim()) {
+    params.set('search', search.trim())
+  }
+
+  params.set('limit', String(limit))
+
+  const response = await requestJson<ApiEnvelope<CustomerSummary[]>>(`/api/app/customers?${params.toString()}`)
+
+  return response.data
+}
+
+export async function createCustomer(payload: CreateCustomerPayload): Promise<CustomerSummary> {
+  const response = await requestJson<ApiEnvelope<CustomerSummary>>('/api/app/customers', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function cancelOrder(orderId: string, payload: CancelOrderPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/cancel`, {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+}
+
+export async function updateOrderStatus(orderId: string, payload: UpdateOrderStatusPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/status`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+}
+
+export async function confirmOrderPayment(orderId: string, payload: ConfirmOrderPaymentPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/payments/confirm`, {
     body: JSON.stringify(payload),
     method: 'POST',
   })
@@ -552,60 +643,30 @@ export async function clearDailyMenuAdjustment(
   return response.data
 }
 
-async function getAvailableMenu(companySlug: string, fallbackProducts: Product[]): Promise<Product[]> {
-  try {
-    const response = await requestJson<ApiEnvelope<BackendProduct[]>>(`/api/restaurants/${companySlug}/menu/available`)
+async function getStructuredOperationalProducts(): Promise<Product[]> {
+  const catalog = await getStructuredMenuCatalog()
 
-    return response.data.map(mapBackendProduct)
-  } catch {
-    return fallbackProducts
-  }
+  return catalog.categories
+    .flatMap((category) => category.products.map((product) => mapStructuredProduct(product, category.name)))
+    .filter((product) => product.available)
 }
 
-function mapBackendProduct(product: BackendProduct): Product {
+function mapStructuredProduct(product: StructuredMenuProduct, categoryName: string): Product {
   return {
     id: String(product.id),
-    category: product.category?.name ?? 'Cardapio',
+    slug: product.slug,
+    category: product.category?.name ?? categoryName,
     name: product.name,
-    description: product.description ?? product.notes_hint ?? 'Produto cadastrado no cardapio operacional.',
-    price: (product.base_price_cents ?? 0) / 100,
-    available: Boolean(product.is_active ?? true) && Boolean(product.is_available_by_default ?? true),
-    tags: [product.product_type, product.menu_rule_code, 'api'].filter(Boolean) as string[],
-    options: product.options?.map(mapBackendOption) ?? [],
-  }
-}
-
-function mapBackendOption(option: BackendProductOption): MenuOption {
-  return {
-    id: String(option.id),
-    name: option.name,
-    type: option.option_type ?? 'choice',
-    groupCode: option.group_code ?? 'componentes',
-    groupLabel: option.group_label ?? groupLabel(option.group_code),
-    priceDelta: (option.price_delta_cents ?? 0) / 100,
-    required: Boolean(option.is_required ?? false),
-    availableToday: Boolean(option.available_today ?? true),
-    dailyReason: option.daily_reason ?? null,
-  }
-}
-
-function groupLabel(groupCode?: string | null): string {
-  switch (groupCode) {
-    case 'base':
-    case 'bases':
-    case 'guarnicoes':
-      return 'Bases/guarnicoes'
-    case 'salada':
-      return 'Saladas'
-    case 'carne':
-    case 'bife':
-      return 'Carnes'
-    case 'bebidas':
-      return 'Bebidas'
-    case 'adicionais':
-      return 'Adicionais'
-    default:
-      return 'Componentes'
+    description: product.description ?? product.notes_hint ?? '',
+    price: product.base_price_cents / 100,
+    available: product.availability.available,
+    tags: [],
+    options: [],
+    structuredGroups: product.groups,
+    comboItems: product.combo_items,
+    usesWeeklyMenu: product.uses_weekly_menu,
+    configurationPending: product.configuration_pending,
+    serviceDays: product.service_days,
   }
 }
 

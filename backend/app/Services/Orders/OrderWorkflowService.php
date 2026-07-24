@@ -3,6 +3,7 @@
 namespace App\Services\Orders;
 
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderFragment;
 use App\Models\OrderItem;
@@ -34,9 +35,19 @@ class OrderWorkflowService
                 ->whereDate('order_date', $orderDate->toDateString())
                 ->max('daily_sequence')) + 1;
 
+            $payerCustomer = null;
+            if (! empty($attributes['payer_customer_id'])) {
+                $payerCustomer = Customer::query()
+                    ->where('company_id', $lockedCompany->id)
+                    ->whereKey($attributes['payer_customer_id'])
+                    ->firstOrFail();
+            }
+
             $order = Order::query()->create([
                 'company_id' => $lockedCompany->id,
-                'payer_customer_id' => $attributes['payer_customer_id'] ?? null,
+                'payer_customer_id' => $payerCustomer?->id,
+                'customer_name_snapshot' => $attributes['customer_name_snapshot'] ?? $payerCustomer?->name,
+                'customer_phone_snapshot' => $attributes['customer_phone_snapshot'] ?? $payerCustomer?->phone,
                 'conversation_id' => $attributes['conversation_id'] ?? null,
                 'created_by_user_id' => $attributes['created_by_user_id'] ?? null,
                 'recurring_order_reference_id' => $attributes['recurring_order_reference_id'] ?? null,
@@ -141,6 +152,50 @@ class OrderWorkflowService
         });
     }
 
+    public function deleteEmptyDraft(Order $order): void
+    {
+        DB::transaction(function () use ($order): void {
+            $order = Order::query()
+                ->withCount([
+                    'items',
+                    'payments',
+                    'paymentProofs',
+                    'creditMovements',
+                    'deliveryQuotes',
+                    'fragments',
+                    'printJobs',
+                    'printJobEvents',
+                ])
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($order->status !== Order::STATUS_DRAFT) {
+                throw new DomainException('Only empty draft orders can be deleted.');
+            }
+
+            if (
+                $order->items_count > 0
+                || $order->payments_count > 0
+                || $order->payment_proofs_count > 0
+                || $order->credit_movements_count > 0
+                || $order->delivery_quotes_count > 0
+                || $order->fragments_count > 0
+                || $order->print_jobs_count > 0
+                || $order->print_job_events_count > 0
+                || $order->conversation_id !== null
+                || $order->latest_print_job_id !== null
+                || (int) $order->total_cents !== 0
+                || (int) $order->amount_paid_cents !== 0
+                || (int) $order->credit_used_cents !== 0
+            ) {
+                throw new DomainException('Draft order has operational records and cannot be deleted.');
+            }
+
+            $order->delete();
+        });
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
@@ -187,6 +242,10 @@ class OrderWorkflowService
         return DB::transaction(function () use ($order, $status, $user, $reason, $notes, $metadata): Order {
             $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
 
+            if (! in_array($status, $this->validTransitions($order), true)) {
+                throw new DomainException("Order cannot transition from [{$order->status}] to [{$status}].");
+            }
+
             if ($status === Order::STATUS_IN_PREPARATION) {
                 $this->assertCanAdvanceToPreparation($order);
             }
@@ -217,6 +276,79 @@ class OrderWorkflowService
 
             return $order->refresh();
         });
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function validTransitions(Order $order): array
+    {
+        $transitions = match ($order->status) {
+            Order::STATUS_DRAFT => [
+                Order::STATUS_AWAITING_CUSTOMER_CONFIRMATION,
+                Order::STATUS_CONFIRMED,
+                Order::STATUS_AWAITING_PAYMENT,
+                Order::STATUS_AWAITING_PAYMENT_PROOF,
+                Order::STATUS_PAYMENT_PROOF_RECEIVED,
+                Order::STATUS_PAYMENT_CONFIRMED,
+                Order::STATUS_PAYMENT_REJECTED,
+                Order::STATUS_READY_TO_PRINT,
+                Order::STATUS_PRINTED,
+                Order::STATUS_OUT_FOR_DELIVERY,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_AWAITING_CUSTOMER_CONFIRMATION => [
+                Order::STATUS_CONFIRMED,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_CONFIRMED => [
+                Order::STATUS_AWAITING_PAYMENT,
+                Order::STATUS_PAYMENT_CONFIRMED,
+                Order::STATUS_READY_TO_PRINT,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_AWAITING_PAYMENT,
+            Order::STATUS_AWAITING_PAYMENT_PROOF,
+            Order::STATUS_PAYMENT_PROOF_RECEIVED,
+            Order::STATUS_PAYMENT_REJECTED => [
+                Order::STATUS_AWAITING_PAYMENT,
+                Order::STATUS_AWAITING_PAYMENT_PROOF,
+                Order::STATUS_PAYMENT_PROOF_RECEIVED,
+                Order::STATUS_PAYMENT_CONFIRMED,
+                Order::STATUS_PAYMENT_REJECTED,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_PAYMENT_CONFIRMED => [
+                Order::STATUS_READY_TO_PRINT,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_READY_TO_PRINT => [
+                Order::STATUS_PRINTED,
+                Order::STATUS_IN_PREPARATION,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_PRINTED => [
+                Order::STATUS_IN_PREPARATION,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_IN_PREPARATION => [
+                Order::STATUS_READY_FOR_PICKUP,
+                Order::STATUS_OUT_FOR_DELIVERY,
+                Order::STATUS_FINISHED,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_READY_FOR_PICKUP,
+            Order::STATUS_OUT_FOR_DELIVERY => [
+                Order::STATUS_FINISHED,
+                Order::STATUS_CANCELLED,
+            ],
+            default => [],
+        };
+
+        return array_values(array_filter(
+            $transitions,
+            fn (string $status): bool => $status !== $order->status,
+        ));
     }
 
     public function recalculateTotals(Order $order): Order

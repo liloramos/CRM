@@ -79,6 +79,55 @@ class PrintWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_ticket_uses_order_customer_snapshot_and_omits_empty_item_recipient(): void
+    {
+        $this->seed([CompanySeeder::class, PrintingSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, [
+            'customer_name_snapshot' => 'Cliente Avulso da Rua',
+            'customer_phone_snapshot' => '(62) 91111-2222',
+            'fulfillment_type' => Order::FULFILLMENT_PICKUP,
+        ]);
+
+        $orders->addItem($order, $product, [
+            'item_notes' => 'Sem observacao especial de pessoa.',
+            'beneficiary_name' => null,
+        ]);
+
+        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
+
+        $this->assertStringContainsString('Pagador: Cliente Avulso da Rua', $html);
+        $this->assertStringContainsString('Telefone: (62) 91111-2222', $html);
+        $this->assertStringNotContainsString('Para: Nao informado', $html);
+        $this->assertStringNotContainsString('Para:', $html);
+    }
+
+    public function test_ticket_displays_special_item_recipient_only_when_informed(): void
+    {
+        $this->seed([CompanySeeder::class, PrintingSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente Principal']);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, [
+            'payer_customer_id' => $customer->id,
+            'fulfillment_type' => Order::FULFILLMENT_PICKUP,
+        ]);
+
+        $orders->addItem($order, $product, [
+            'beneficiary_name' => 'Larissa',
+        ]);
+
+        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
+
+        $this->assertStringContainsString('Pagador: Cliente Principal', $html);
+        $this->assertStringContainsString('Para: Larissa', $html);
+    }
+
     public function test_ticket_preview_route_keeps_company_isolation(): void
     {
         [, $order] = $this->createOperationalOrder();
@@ -106,15 +155,15 @@ class PrintWorkflowTest extends TestCase
         [, $order] = $this->createOperationalOrder();
         $orders = app(OrderWorkflowService::class);
         $printing = app(PrintWorkflowService::class);
+        $job = $printing->generateTicket($order);
 
         try {
-            $orders->transitionTo($order, Order::STATUS_IN_PREPARATION, reason: 'prepare_without_ticket');
+            $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, reason: 'prepare_without_ticket');
             $this->fail('Preparation should require printed ticket.');
         } catch (DomainException $exception) {
             $this->assertStringContainsString('ticket is printed', $exception->getMessage());
         }
 
-        $job = $printing->generateTicket($order->refresh());
         $printing->markPrinted($job);
         $preparedOrder = $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, reason: 'prep_after_ticket');
 

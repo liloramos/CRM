@@ -7,14 +7,20 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\DailyMenuOptionOverride;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductOption;
 use App\Services\Operational\OperationalCrmPresenter;
+use App\Services\Orders\OrderCleanupService;
+use App\Services\Orders\OrderItemSelectionValidator;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\Payments\PaymentWorkflowService;
 use App\Services\Printing\PrintWorkflowService;
+use Carbon\CarbonImmutable;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -57,6 +63,8 @@ class OrderOperationsController extends Controller
 
         $validated = $request->validate([
             'payer_customer_id' => ['nullable', 'integer'],
+            'customer_name_snapshot' => ['nullable', 'string', 'max:120'],
+            'customer_phone_snapshot' => ['nullable', 'string', 'max:40'],
             'origin_channel' => ['nullable', Rule::in([Order::CHANNEL_MANUAL, Order::CHANNEL_COUNTER, Order::CHANNEL_PHONE, Order::CHANNEL_OTHER])],
             'fulfillment_type' => ['nullable', Rule::in([Order::FULFILLMENT_PICKUP, Order::FULFILLMENT_DELIVERY, Order::FULFILLMENT_COUNTER])],
             'general_notes' => ['nullable', 'string', 'max:1000'],
@@ -64,18 +72,40 @@ class OrderOperationsController extends Controller
             'pickup_person_name' => ['nullable', 'string', 'max:120'],
         ]);
 
+        $customer = null;
         if (! empty($validated['payer_customer_id'])) {
-            $customerExists = Customer::query()
+            $customer = Customer::query()
                 ->where('company_id', $company->id)
                 ->whereKey($validated['payer_customer_id'])
-                ->exists();
+                ->first();
 
-            if (! $customerExists) {
+            if (! $customer) {
                 throw ValidationException::withMessages([
                     'payer_customer_id' => ['Cliente nao pertence ao restaurante atual.'],
                 ]);
             }
         }
+
+        $validated['customer_name_snapshot'] = Str::squish((string) ($validated['customer_name_snapshot'] ?? ''));
+        $validated['customer_phone_snapshot'] = Str::squish((string) ($validated['customer_phone_snapshot'] ?? ''));
+
+        if ($customer) {
+            $validated['customer_name_snapshot'] = $validated['customer_name_snapshot'] !== ''
+                ? $validated['customer_name_snapshot']
+                : $customer->name;
+            $validated['customer_phone_snapshot'] = $validated['customer_phone_snapshot'] !== ''
+                ? $validated['customer_phone_snapshot']
+                : (string) ($customer->phone ?? '');
+        }
+
+        if (! $customer && $validated['customer_name_snapshot'] === '') {
+            throw ValidationException::withMessages([
+                'customer_name_snapshot' => ['Informe o nome do cliente ou selecione um cliente cadastrado.'],
+            ]);
+        }
+
+        $validated['customer_name_snapshot'] = $validated['customer_name_snapshot'] !== '' ? $validated['customer_name_snapshot'] : null;
+        $validated['customer_phone_snapshot'] = $validated['customer_phone_snapshot'] !== '' ? $validated['customer_phone_snapshot'] : null;
 
         $order = $orders->createDraft($company, [
             ...$validated,
@@ -98,6 +128,7 @@ class OrderOperationsController extends Controller
         Request $request,
         Order $order,
         OrderWorkflowService $orders,
+        OrderItemSelectionValidator $selectionValidator,
         OperationalCrmPresenter $presenter,
     ): JsonResponse {
         $company = $this->resolveCompany($request);
@@ -111,18 +142,36 @@ class OrderOperationsController extends Controller
             'options' => ['sometimes', 'array'],
             'options.*.product_option_id' => ['required_with:options', 'integer'],
             'options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            'structured_options' => ['sometimes', 'array'],
+            'structured_options.*.component_link_id' => ['nullable', 'integer'],
+            'structured_options.*.product_link_id' => ['nullable', 'integer'],
+            'structured_options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
         ]);
 
         $product = Product::query()
+            ->with('optionGroups')
             ->where('company_id', $company->id)
             ->whereKey($validated['product_id'])
             ->firstOrFail();
 
-        $validated['options'] = $this->validatedOptionRows(
-            companyId: (int) $company->id,
-            product: $product,
-            optionRows: $validated['options'] ?? [],
-        );
+        try {
+            $validated['options'] = $product->optionGroups->isNotEmpty()
+                ? $selectionValidator->validateStructuredSelections(
+                    $company->loadMissing('setting'),
+                    $product,
+                    $this->orderDateForSelection($order, $company),
+                    $validated['structured_options'] ?? [],
+                )
+                : $this->validatedOptionRows(
+                    companyId: (int) $company->id,
+                    product: $product,
+                    optionRows: $validated['options'] ?? [],
+                );
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
 
         try {
             $orders->addItem($order, $product, $validated);
@@ -134,6 +183,197 @@ class OrderOperationsController extends Controller
 
         return response()->json([
             'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
+        ]);
+    }
+
+    public function cancel(
+        Request $request,
+        Order $order,
+        OrderWorkflowService $orders,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:120'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        try {
+            $orders->transitionTo(
+                $order,
+                Order::STATUS_CANCELLED,
+                $request->user(),
+                $validated['reason'],
+                $validated['notes'] ?? 'Pedido cancelado pela interface operacional.',
+            );
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
+        ]);
+    }
+
+    public function confirmPayment(
+        Request $request,
+        Order $order,
+        PaymentWorkflowService $payments,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        $validated = $request->validate([
+            'method' => ['required', Rule::in(Payment::METHODS)],
+            'amount_cents' => ['nullable', 'integer', 'min:1'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+            'overpayment_action' => ['nullable', Rule::in([
+                Payment::OVERPAYMENT_PENDING_REVIEW,
+                Payment::OVERPAYMENT_KEEP_AS_CREDIT,
+                Payment::OVERPAYMENT_REFUND,
+            ])],
+        ]);
+
+        try {
+            $payments->confirmOrderPayment($order, $request->user(), [
+                ...$validated,
+                'customer_id' => $order->payer_customer_id,
+            ]);
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
+        ]);
+    }
+
+    public function destroyDraft(
+        Request $request,
+        Order $order,
+        OrderWorkflowService $orders,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        try {
+            $orders->deleteEmptyDraft($order);
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'deleted' => true,
+                'id' => (string) $order->id,
+            ],
+        ]);
+    }
+
+    public function destroyPermanently(
+        Request $request,
+        Order $order,
+        OrderCleanupService $cleanup,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        $validated = $request->validate([
+            'confirmation' => ['required', 'string', 'in:EXCLUIR'],
+        ]);
+
+        try {
+            $result = $cleanup->deleteOnePermanently($company, $order);
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        if ($result['blocked'] !== []) {
+            return $this->permanentDeletionBlockedResponse($result, singleOrder: true);
+        }
+
+        return response()->json([
+            'data' => [
+                ...$result,
+                'confirmation' => $validated['confirmation'],
+            ],
+        ]);
+    }
+
+    public function destroyManyPermanently(
+        Request $request,
+        OrderCleanupService $cleanup,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+
+        $validated = $request->validate([
+            'order_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'order_ids.*' => ['required', 'integer', 'min:1'],
+            'confirmation' => ['required', 'string', 'in:EXCLUIR'],
+        ]);
+
+        try {
+            $result = $cleanup->deleteManyPermanently(
+                $company,
+                array_map('intval', $validated['order_ids']),
+            );
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        if ($result['blocked'] !== []) {
+            return $this->permanentDeletionBlockedResponse($result, singleOrder: false);
+        }
+
+        return response()->json([
+            'data' => [
+                ...$result,
+                'confirmation' => $validated['confirmation'],
+            ],
+        ]);
+    }
+
+    public function destroyManyForTesting(
+        Request $request,
+        OrderCleanupService $cleanup,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+
+        $validated = $request->validate([
+            'order_ids' => ['required', 'array', 'min:1', 'max:100'],
+            'order_ids.*' => ['required', 'integer', 'min:1'],
+            'confirmation' => ['required', 'string', 'in:EXCLUIR'],
+        ]);
+
+        try {
+            $result = $cleanup->deleteManyForTesting(
+                $company,
+                array_map('intval', $validated['order_ids']),
+            );
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                ...$result,
+                'confirmation' => $validated['confirmation'],
+            ],
         ]);
     }
 
@@ -268,6 +508,13 @@ class OrderOperationsController extends Controller
             ->all();
     }
 
+    private function orderDateForSelection(Order $order, $company): CarbonImmutable
+    {
+        $timezone = $company->setting?->timezone ?: config('app.timezone');
+
+        return CarbonImmutable::parse($order->order_date?->toDateString() ?? now($timezone)->toDateString(), $timezone);
+    }
+
     /**
      * @return list<string>
      */
@@ -280,5 +527,21 @@ class OrderOperationsController extends Controller
             'latestPrintJob',
             'payments',
         ];
+    }
+
+    /**
+     * @param  array{eligible: list<array<string, mixed>>, blocked: list<array<string, mixed>>}  $result
+     */
+    private function permanentDeletionBlockedResponse(array $result, bool $singleOrder): JsonResponse
+    {
+        return response()->json([
+            'code' => $singleOrder ? OrderCleanupService::BLOCKED_CODE : OrderCleanupService::BULK_BLOCKED_CODE,
+            'message' => $singleOrder
+                ? 'Este pedido possui registros operacionais e nao pode ser excluido.'
+                : 'Um ou mais pedidos possuem registros operacionais e nao podem ser excluidos.',
+            'reasons' => $result['blocked'][0]['reasons'] ?? [],
+            'eligible' => $result['eligible'],
+            'blocked' => $result['blocked'],
+        ], 422);
     }
 }

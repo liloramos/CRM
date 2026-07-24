@@ -5,6 +5,7 @@ export const ordersMock: Order[] = [
   {
     id: 'pedido-001',
     code: '#S-1042',
+    backendStatus: 'ready_to_print',
     customer: customersMock[0],
     status: 'pronto_para_imprimir',
     paymentStatus: 'revisao_humana',
@@ -12,6 +13,7 @@ export const ordersMock: Order[] = [
     printStatus: 'aguardando',
     channel: 'WhatsApp',
     createdLabel: 'Hoje, atendimento atual',
+    availableTransitions: [],
     pickupPerson: 'Pessoa autorizada',
     generalNotes: 'Pedido fragmentado em mensagens; conferir resumo antes de enviar para cozinha.',
     kitchenNotes: 'Separar itens por beneficiario e destacar restricoes por marmita.',
@@ -73,6 +75,7 @@ export const ordersMock: Order[] = [
   {
     id: 'pedido-002',
     code: '#S-1041',
+    backendStatus: 'in_preparation',
     customer: customersMock[1],
     status: 'em_preparo',
     paymentStatus: 'pago',
@@ -80,6 +83,7 @@ export const ordersMock: Order[] = [
     printStatus: 'impresso',
     channel: 'Manual',
     createdLabel: 'Hoje, fila do almoco',
+    availableTransitions: [],
     deliveryLabel: 'Referencia de entrega cadastrada',
     generalNotes: 'Entrega com contato confirmado pelo atendente.',
     kitchenNotes: 'Prioridade normal.',
@@ -111,6 +115,7 @@ export const ordersMock: Order[] = [
   {
     id: 'pedido-003',
     code: '#S-1040',
+    backendStatus: 'payment_proof_received',
     customer: customersMock[2],
     status: 'manual',
     paymentStatus: 'pendente',
@@ -118,6 +123,7 @@ export const ordersMock: Order[] = [
     printStatus: 'erro',
     channel: 'Balcao',
     createdLabel: 'Hoje, balcao',
+    availableTransitions: [],
     generalNotes: 'Atendimento assumido manualmente por ambiguidade no pedido.',
     kitchenNotes: 'Aguardar confirmacao.',
     total: 22,

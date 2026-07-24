@@ -1,8 +1,9 @@
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
-import { StatusBadge } from '../../components/ui/StatusBadge'
+import { Badge } from '../../components/ui/Badge'
 import type { Order } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
+import { getOrderOperationalState } from '../pedidos/orderOperationalState'
 
 type PrintPreviewProps = {
   order: Order
@@ -11,10 +12,12 @@ type PrintPreviewProps = {
 }
 
 export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPreviewProps) {
+  const orderState = getOrderOperationalState(order)
+
   return (
     <Card className="print-panel">
       <SectionTitle
-        action={<StatusBadge status={order.printStatus} type="print" />}
+        action={<Badge tone={orderState.printBadge.tone}>{orderState.printBadge.label}</Badge>}
         eyebrow="Fluxo obrigatorio"
         title="Comanda / previa de impressao"
       />
@@ -60,7 +63,7 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
               <strong>
                 {item.quantity}x {item.name}
               </strong>
-              <span>Para: {item.beneficiary}</span>
+              {item.beneficiary ? <span>Para: {item.beneficiary}</span> : null}
               {item.additions.length > 0 ? <span>Opcoes: {item.additions.join(', ')}</span> : null}
               <span>Obs: {item.notes}</span>
               <b>{formatCurrency(item.quantity * item.unitPrice)}</b>
@@ -114,16 +117,21 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
             </div>
           </div>
           <div className="print-actions">
-            <Button icon="printer" onClick={() => onPrintTicket(order.id)} variant="primary">
+            <Button disabled={!orderState.canPrint} icon="printer" onClick={() => onPrintTicket(order.id)} variant="primary">
               Imprimir comanda
             </Button>
-            <Button icon="printer" onClick={() => onPreviewTicket(order.id)} variant="secondary">
+            <Button disabled={!orderState.canPrint} icon="printer" onClick={() => onPreviewTicket(order.id)} variant="secondary">
               Gerar previa HTML
             </Button>
-            <Button icon="arrow" onClick={() => onPreviewTicket(order.id)} variant="ghost">
+            <Button disabled={!orderState.canPrint} icon="arrow" onClick={() => onPreviewTicket(order.id)} variant="ghost">
               Regerar previa
             </Button>
           </div>
+          {!orderState.canPrint ? (
+            <p className="muted-text">
+              {orderState.isCancelled ? 'Pedido cancelado nao libera impressao operacional.' : 'Adicione itens antes de gerar a comanda.'}
+            </p>
+          ) : null}
         </div>
       </div>
     </Card>
