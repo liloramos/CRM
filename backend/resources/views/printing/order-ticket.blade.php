@@ -6,8 +6,8 @@
     <title>{{ $ticket['title'] }} {{ $ticket['order']['code'] ?? $ticket['order']['id'] }}</title>
     <style>
         @page {
-            margin: 0;
             size: 80mm auto;
+            margin: 0;
         }
 
         * {
@@ -40,10 +40,10 @@
         }
 
         .ticket {
-            width: 80mm;
-            min-height: 100vh;
+            width: 76mm;
+            min-height: auto;
             margin: 0 auto;
-            padding: 5mm 4mm;
+            padding: 5mm 2mm 14mm;
             background: #fff;
         }
 
@@ -77,6 +77,8 @@
 
         .item {
             margin-bottom: 8px;
+            break-inside: avoid;
+            page-break-inside: avoid;
         }
 
         .details {
@@ -88,22 +90,65 @@
             margin: 1px 0;
         }
 
+        .ticket::after {
+            content: "";
+            display: block;
+            height: 12mm;
+        }
+
         @media print {
+            html,
             body {
+                width: 80mm;
                 background: #fff;
+                color: #000;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
             }
 
-            .screen-actions {
-                display: none;
+            .screen-actions,
+            .no-print {
+                display: none !important;
             }
 
             .ticket {
+                width: 76mm;
                 margin: 0;
-                min-height: auto;
+                padding: 4mm 2mm 16mm;
                 box-shadow: none;
+            }
+
+            section,
+            .item,
+            .row,
+            footer {
+                break-inside: avoid;
+                page-break-inside: avoid;
             }
         }
     </style>
+    <script>
+        (function () {
+            var shouldAutoPrint = new URLSearchParams(window.location.search).get('autoprint') === '1'
+
+            if (!shouldAutoPrint) {
+                return
+            }
+
+            var printWhenReady = function () {
+                window.setTimeout(function () {
+                    window.print()
+                }, 200)
+            }
+
+            if (document.readyState === 'complete') {
+                printWhenReady()
+                return
+            }
+
+            window.addEventListener('load', printWhenReady, { once: true })
+        })()
+    </script>
 </head>
 <body>
     <div class="screen-actions">

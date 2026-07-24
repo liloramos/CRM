@@ -9,6 +9,7 @@ use App\Models\PrintJob;
 use App\Models\PrintJobEvent;
 use App\Models\Product;
 use App\Models\ProductOption;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\Printing\PrintWorkflowService;
@@ -16,6 +17,7 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\CompanySeeder;
 use Database\Seeders\MenuSeeder;
 use Database\Seeders\PrintingSeeder;
+use Database\Seeders\RoleAndPermissionSeeder;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -47,6 +49,55 @@ class PrintWorkflowTest extends TestCase
             'order_id' => $order->id,
             'print_job_id' => $job->id,
             'event_type' => PrintJobEvent::EVENT_TICKET_GENERATED,
+        ]);
+    }
+
+    public function test_ticket_preview_route_supports_autoprint_and_thermal_print_styles(): void
+    {
+        [$company, $order] = $this->createOperationalOrder();
+        $this->seed(RoleAndPermissionSeeder::class);
+
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ATENDENTE);
+
+        $response = $this->actingAs($user)
+            ->get("/orders/{$order->id}/ticket/preview?autoprint=1")
+            ->assertOk();
+
+        $html = $response->getContent();
+
+        $this->assertStringContainsString('text/html', (string) $response->headers->get('Content-Type'));
+        $this->assertStringContainsString('COMANDA DE PEDIDO', $html);
+        $this->assertStringContainsString('size: 80mm auto;', $html);
+        $this->assertStringContainsString('width: 76mm;', $html);
+        $this->assertStringContainsString('break-inside: avoid;', $html);
+        $this->assertStringContainsString("get('autoprint') === '1'", $html);
+        $this->assertStringContainsString('window.print()', $html);
+        $this->assertDatabaseHas('print_jobs', [
+            'order_id' => $order->id,
+            'requested_by_user_id' => $user->id,
+        ]);
+    }
+
+    public function test_ticket_preview_route_keeps_company_isolation(): void
+    {
+        [, $order] = $this->createOperationalOrder();
+        $this->seed(RoleAndPermissionSeeder::class);
+
+        $otherCompany = Company::query()->create([
+            'name' => 'Outro Restaurante',
+            'slug' => 'outro-restaurante',
+        ]);
+        $user = User::factory()->create(['company_id' => $otherCompany->id]);
+        $user->assignRole(Role::ATENDENTE);
+
+        $this->actingAs($user)
+            ->get("/orders/{$order->id}/ticket/preview?autoprint=1")
+            ->assertNotFound();
+
+        $this->assertDatabaseMissing('print_jobs', [
+            'order_id' => $order->id,
+            'requested_by_user_id' => $user->id,
         ]);
     }
 
