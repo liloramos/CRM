@@ -191,10 +191,13 @@ export type StructuredMenuProductSummary = {
   slug: string
   name: string
   product_type: string
-  base_price_cents: number
+  base_price_cents: number | null
   currency: string
   is_active: boolean
   is_available_by_default: boolean
+  administrative_status: 'active' | 'inactive' | 'legacy'
+  is_legacy: boolean
+  legacy_reason: string | null
   display_order: number
   availability: EffectiveAvailability
   service_days: ProductServiceDayKey[]
@@ -359,6 +362,11 @@ export type AdminDailyMenuAdjustment = {
   action: DailyMenuAdjustmentAction
   display_order: number | null
   notes: string | null
+  updated_at: string | null
+  marked_by: {
+    id: number
+    name: string
+  } | null
   component: StructuredMenuComponentSummary
 }
 

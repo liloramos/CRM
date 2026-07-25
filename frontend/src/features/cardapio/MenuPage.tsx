@@ -20,6 +20,7 @@ import {
   setComponentAvailability,
   updateMenuComponent,
   updateMenuProduct,
+  updateProductComponentOption,
   updateWeeklyMenuItem,
   upsertDailyMenuAdjustment,
   upsertWeeklyMenuComponent,
@@ -63,6 +64,7 @@ type ModalState =
   | { type: 'daily-adjustment-clear'; adjustment: AdminDailyMenuAdjustment }
   | { type: 'weekly-item'; item: AdminWeeklyMenuItem | null }
   | { type: 'weekly-delete'; item: AdminWeeklyMenuItem }
+  | { type: 'pending-configuration'; product: StructuredMenuProduct }
   | null
 
 type ProductFormState = {
@@ -95,6 +97,7 @@ type DailyAdjustmentFormState = {
   action: DailyMenuAdjustmentAction
   display_order: string
   notes: string
+  search: string
 }
 
 type WeeklyItemFormState = {
@@ -105,6 +108,15 @@ type WeeklyItemFormState = {
   is_active: boolean
   notes: string
 }
+
+type PendingConfigurationFormState = {
+  resolution: 'offered' | 'not_offered'
+  final_price: string
+}
+
+type ProductAdminFilter = 'active' | 'inactive' | 'legacy' | 'all'
+
+type ProductCardMode = 'daily' | 'admin' | 'rules'
 
 const menuAdminTabKey = 'sol.menu.admin.activeTab.v1'
 
@@ -187,6 +199,10 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
   const [availabilityForm, setAvailabilityForm] = useState<AvailabilityFormState>(emptyAvailabilityForm())
   const [dailyAdjustmentForm, setDailyAdjustmentForm] = useState<DailyAdjustmentFormState>(emptyDailyAdjustmentForm())
   const [weeklyItemForm, setWeeklyItemForm] = useState<WeeklyItemFormState>(emptyWeeklyItemForm())
+  const [pendingConfigurationForm, setPendingConfigurationForm] = useState<PendingConfigurationFormState>({
+    final_price: '',
+    resolution: 'not_offered',
+  })
 
   const loadDailyMenu = useCallback(async () => {
     setIsDailyLoading(true)
@@ -261,7 +277,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     setProductForm({
       name: product.name,
       description: product.description ?? '',
-      price: centsToInput(product.base_price_cents),
+      price: centsToInput(productPriceCents(product)),
       is_active: product.is_active,
       is_available_by_default: product.is_available_by_default,
       display_order: String(product.display_order),
@@ -300,6 +316,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       action,
       display_order: item ? String(item.display_order) : '',
       notes: item?.notes ?? '',
+      search: '',
     })
     setModal({ type: 'daily-adjustment', item, action })
   }
@@ -315,6 +332,17 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       notes: item?.notes ?? defaults?.notes ?? '',
     })
     setModal({ type: 'weekly-item', item })
+  }
+
+  function openPendingConfigurationModal(product: StructuredMenuProduct) {
+    const pendingOption = pendingComponentOption(product)
+
+    setMutationError(null)
+    setPendingConfigurationForm({
+      final_price: pendingOption?.final_price_cents ? centsToInput(pendingOption.final_price_cents) : '',
+      resolution: 'not_offered',
+    })
+    setModal({ type: 'pending-configuration', product })
   }
 
   async function handleModalPrimary() {
@@ -350,6 +378,10 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
 
     if (modal?.type === 'weekly-delete') {
       await handleDeleteWeeklyItem(modal.item)
+    }
+
+    if (modal?.type === 'pending-configuration') {
+      await handleResolvePendingConfiguration(modal.product)
     }
   }
 
@@ -503,6 +535,43 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }, 'Vinculo semanal removido.')
   }
 
+  async function handleResolvePendingConfiguration(product: StructuredMenuProduct) {
+    const pendingOption = pendingComponentOption(product)
+
+    if (!pendingOption) {
+      setMutationError('Nao ha configuracao pendente para este produto.')
+      return
+    }
+
+    const finalPriceCents = pendingConfigurationForm.resolution === 'offered'
+      ? parseCurrencyToCents(pendingConfigurationForm.final_price)
+      : null
+
+    if (pendingConfigurationForm.resolution === 'offered' && finalPriceCents === null) {
+      setMutationError('Informe o preco final da variacao em reais.')
+      return
+    }
+
+    if (
+      pendingConfigurationForm.resolution === 'offered'
+      && finalPriceCents !== null
+      && finalPriceCents < productPriceCents(product)
+    ) {
+      setMutationError('O preco final da variacao nao pode ser menor que o preco base do produto.')
+      return
+    }
+
+    await runMutation(async () => {
+      await updateProductComponentOption(pendingOption.id, {
+        date: selectedDate,
+        resolution: pendingConfigurationForm.resolution,
+        final_price_cents: finalPriceCents,
+      })
+    }, pendingConfigurationForm.resolution === 'offered'
+      ? 'Variacao configurada com preco informado.'
+      : 'Variacao marcada como nao oferecida.')
+  }
+
   async function runMutation(action: () => Promise<void>, success: string) {
     setIsMutating(true)
     setMutationError(null)
@@ -589,7 +658,6 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             <TodayTab
               adjustments={dayAdjustments}
               canManageMenu={canManageMenu}
-              components={components}
               dailyMenu={dailyMenu}
               error={dailyError}
               isLoading={isDailyLoading}
@@ -607,6 +675,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
               categories={productCategories}
               isLoading={isAdminLoading && canManageMenu}
               onEditProduct={openProductModal}
+              onResolvePending={openPendingConfigurationModal}
             />
           ) : null}
 
@@ -626,7 +695,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             />
           ) : null}
 
-          {activeTab === 'rules' ? <RulesTab products={rulesProducts} /> : null}
+          {activeTab === 'rules' ? <RulesTab onResolvePending={canManageMenu ? openPendingConfigurationModal : undefined} products={rulesProducts} /> : null}
         </div>
       </div>
 
@@ -639,21 +708,24 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
           open
           primaryDisabled={isMutating}
           primaryLabel={modalPrimaryLabel(modal, isMutating)}
-          size={modal.type === 'product' || modal.type === 'weekly-item' ? 'lg' : 'md'}
+          size={modal.type === 'product' || modal.type === 'weekly-item' || modal.type === 'pending-configuration' ? 'lg' : 'md'}
           title={modalTitle(modal)}
         >
           {renderModalContent({
             availabilityForm,
             componentForm,
             components,
+            dailyMenu,
             dailyAdjustmentForm,
             isMutating,
             modal,
             mutationError,
+            pendingConfigurationForm,
             productForm,
             setAvailabilityForm,
             setComponentForm,
             setDailyAdjustmentForm,
+            setPendingConfigurationForm,
             setProductForm,
             setWeeklyItemForm,
             weeklyItemForm,
@@ -667,7 +739,6 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
 function TodayTab({
   adjustments,
   canManageMenu,
-  components,
   dailyMenu,
   error,
   isLoading,
@@ -679,7 +750,6 @@ function TodayTab({
 }: {
   adjustments: AdminDailyMenuAdjustment[]
   canManageMenu: boolean
-  components: AdminMenuComponent[]
   dailyMenu: DailyStructuredMenu | null
   error: string | null
   isLoading: boolean
@@ -723,11 +793,12 @@ function TodayTab({
         onOpenAvailability={onOpenAvailability}
       />
       {canManageMenu ? (
-        <DailyAdjustmentsPanel adjustments={adjustments} components={components} onClearAdjustment={onClearAdjustment} />
+        <DailyAdjustmentsPanel adjustments={adjustments} onClearAdjustment={onClearAdjustment} />
       ) : null}
       <ProductCatalog
         actionLabel="Vendaveis nesta data"
         emptyDescription="Nao ha produtos liberados pelo backend para esta data."
+        mode="daily"
         productsByCategory={dailyMenu.catalog.categories}
       />
     </div>
@@ -861,45 +932,53 @@ function DailyMenuItem({
 
 function DailyAdjustmentsPanel({
   adjustments,
-  components,
   onClearAdjustment,
 }: {
   adjustments: AdminDailyMenuAdjustment[]
-  components: AdminMenuComponent[]
   onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
 }) {
-  const bisteca = components.find((component) => component.slug === 'bisteca-de-porco-na-chapa')
-
   return (
     <Card className="menu-admin-adjustments">
       <SectionTitle
-        eyebrow="Exclusivo da data"
-        title="Ajustes do dia"
+        eyebrow="Excecao por data"
+        title="Alteracoes somente de hoje"
       />
       <p className="muted-text">
-        {bisteca
-          ? 'Bisteca de porco na chapa fica disponivel aqui como inclusao pontual, sem alterar o semanal.'
-          : 'Inclua ou oculte componentes somente na data selecionada.'}
+        Estes ajustes valem apenas para a data indicada. Para mudar todas as semanas, use a aba Cardapio semanal.
       </p>
       {adjustments.length > 0 ? (
         <div className="menu-admin-list">
           {adjustments.map((adjustment) => (
-            <div className="menu-admin-row" key={adjustment.id}>
-              <div>
-                <strong>{adjustment.component.name}</strong>
+            <div className="daily-adjustment-row" key={adjustment.id}>
+              <div className="daily-adjustment-row__content">
+                <div className="daily-adjustment-row__title">
+                  <strong>{adjustment.component.name}</strong>
+                  <Badge size="sm" tone={adjustment.action === 'include' ? 'info' : 'warning'}>
+                    {adjustment.action === 'include' ? 'Incluido hoje' : 'Ocultado hoje'}
+                  </Badge>
+                </div>
+                <span>Secao: {sectionLabels[adjustment.section]}</span>
                 <span>
-                  {adjustment.action === 'include' ? 'Incluido' : 'Ocultado'} em {sectionLabels[adjustment.section]}
+                  Padrao semanal:{' '}
+                  {adjustment.action === 'include'
+                    ? 'este item nao entra automaticamente nesta data'
+                    : 'este item voltara a aparecer quando o ajuste for limpo'}
                 </span>
+                <span>Alteracao de hoje: {adjustment.action === 'include' ? 'mostrar nesta data' : 'nao mostrar nesta data'}</span>
                 {adjustment.notes ? <small>{adjustment.notes}</small> : null}
+                <small>
+                  Responsavel: {adjustment.marked_by?.name ?? 'Nao informado'}
+                  {adjustment.updated_at ? ` · ${formatDateTimeLabel(adjustment.updated_at)}` : ''}
+                </small>
               </div>
               <Button onClick={() => onClearAdjustment(adjustment)} size="sm" variant="secondary">
-                Limpar ajuste
+                Desfazer ajuste
               </Button>
             </div>
           ))}
         </div>
       ) : (
-        <p className="muted-text">Nenhum ajuste exclusivo foi registrado para esta data.</p>
+        <p className="muted-text">Nenhuma alteracao especial foi feita para hoje. O cardapio padrao da semana esta sendo utilizado.</p>
       )}
     </Card>
   )
@@ -910,15 +989,17 @@ function ProductsTab({
   categories,
   isLoading,
   onEditProduct,
+  onResolvePending,
 }: {
   canManageMenu: boolean
   categories: AdminMenuProductsResponse['categories']
   isLoading: boolean
   onEditProduct: (product: StructuredMenuProduct) => void
+  onResolvePending: (product: StructuredMenuProduct) => void
 }) {
   const [search, setSearch] = useState('')
   const [categorySlug, setCategorySlug] = useState('all')
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [activeFilter, setActiveFilter] = useState<ProductAdminFilter>('active')
 
   const visibleCategories = useMemo(() => {
     const normalizedSearch = normalizeSearch(search)
@@ -929,8 +1010,7 @@ function ProductsTab({
         products: category.products.filter((product) => {
           const matchesSearch = normalizeSearch(product.name).includes(normalizedSearch)
           const matchesCategory = categorySlug === 'all' || category.slug === categorySlug
-          const matchesActive =
-            activeFilter === 'all' || (activeFilter === 'active' ? product.is_active : !product.is_active)
+          const matchesActive = productMatchesAdminFilter(product, activeFilter)
 
           return matchesSearch && matchesCategory && matchesActive
         }),
@@ -969,17 +1049,20 @@ function ProductsTab({
         </label>
         <label>
           <span>Status</span>
-          <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as 'all' | 'active' | 'inactive')}>
-            <option value="all">Todos</option>
+          <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as ProductAdminFilter)}>
             <option value="active">Ativos</option>
             <option value="inactive">Inativos</option>
+            <option value="legacy">Legados</option>
+            <option value="all">Todos</option>
           </select>
         </label>
       </Card>
       <ProductCatalog
         actionLabel={canManageMenu ? 'Catalogo administrativo' : 'Produtos visiveis'}
         emptyDescription="Nenhum produto corresponde aos filtros."
+        mode="admin"
         onEditProduct={canManageMenu ? onEditProduct : undefined}
+        onResolvePending={canManageMenu ? onResolvePending : undefined}
         productsByCategory={visibleCategories}
       />
     </div>
@@ -989,12 +1072,16 @@ function ProductsTab({
 function ProductCatalog({
   actionLabel,
   emptyDescription,
+  mode = 'daily',
   onEditProduct,
+  onResolvePending,
   productsByCategory,
 }: {
   actionLabel: string
   emptyDescription: string
+  mode?: ProductCardMode
   onEditProduct?: (product: StructuredMenuProduct) => void
+  onResolvePending?: (product: StructuredMenuProduct) => void
   productsByCategory: AdminMenuProductsResponse['categories']
 }) {
   if (productsByCategory.length === 0) {
@@ -1013,7 +1100,13 @@ function ProductCatalog({
           <SectionTitle eyebrow={actionLabel} title={category.name} />
           <div className="structured-product-grid">
             {category.products.map((product) => (
-              <StructuredProductCard key={product.id} onEdit={onEditProduct} product={product} />
+              <StructuredProductCard
+                key={product.id}
+                mode={mode}
+                onEdit={onEditProduct}
+                onResolvePending={onResolvePending}
+                product={product}
+              />
             ))}
           </div>
         </Card>
@@ -1023,23 +1116,33 @@ function ProductCatalog({
 }
 
 function StructuredProductCard({
+  mode = 'daily',
   onEdit,
+  onResolvePending,
   product,
 }: {
+  mode?: ProductCardMode
   onEdit?: (product: StructuredMenuProduct) => void
+  onResolvePending?: (product: StructuredMenuProduct) => void
   product: StructuredMenuProduct
 }) {
   const insights = productInsights(product)
-  const price = formatCurrency(centsToCurrency(product.base_price_cents))
+  const price = formatCurrency(centsToCurrency(productPriceCents(product)))
+  const isVisuallyUnavailable = mode === 'daily' && !product.availability.available
 
   return (
-    <article className={product.availability.available ? 'structured-product-card' : 'structured-product-card is-unavailable'}>
+    <article className={isVisuallyUnavailable ? 'structured-product-card is-unavailable' : 'structured-product-card'}>
       <div className="structured-product-card__top">
-        <AvailabilityBadge availability={product.availability} />
+        {mode === 'admin' ? <ProductAdministrativeBadge product={product} /> : <AvailabilityBadge availability={product.availability} />}
         <strong>{price}</strong>
       </div>
       <div className="structured-product-card__title">
         <h3>{product.name}</h3>
+        {product.is_legacy && mode !== 'admin' ? (
+          <Badge size="sm" tone="neutral">
+            Legado
+          </Badge>
+        ) : null}
         {product.configuration_pending ? (
           <Badge size="sm" tone="warning">
             Configuracao pendente
@@ -1047,17 +1150,32 @@ function StructuredProductCard({
         ) : null}
       </div>
       {product.description ? <p>{product.description}</p> : null}
-      <p className="muted-text">Dias: {formatServiceDays(product.service_days)}</p>
+      {product.legacy_reason ? <p className="muted-text">{product.legacy_reason}</p> : null}
+      {mode === 'admin' ? (
+        <div className="structured-product-admin-state">
+          <span>{product.is_available_by_default ? 'Disponivel por padrao' : 'Indisponivel por padrao'}</span>
+          <span>Dias: {formatServiceDays(product.service_days)}</span>
+        </div>
+      ) : (
+        <p className="muted-text">Dias: {formatServiceDays(product.service_days)}</p>
+      )}
       <ul className="structured-product-rules">
         {insights.map((insight) => (
           <li key={insight}>{insight}</li>
         ))}
       </ul>
-      {onEdit ? (
-        <Button icon="edit" onClick={() => onEdit(product)} size="sm" variant="secondary">
-          Editar
-        </Button>
-      ) : null}
+      <div className="structured-product-card__actions">
+        {onResolvePending && product.configuration_pending ? (
+          <Button icon="alert" onClick={() => onResolvePending(product)} size="sm" variant="primary">
+            Resolver configuracao
+          </Button>
+        ) : null}
+        {onEdit ? (
+          <Button icon="edit" onClick={() => onEdit(product)} size="sm" variant="secondary">
+            Editar
+          </Button>
+        ) : null}
+      </div>
     </article>
   )
 }
@@ -1135,7 +1253,7 @@ function WeeklyTab({
 
       <Card className="daily-menu-card">
         <SectionTitle eyebrow={weeklyMenu.weekly_menu?.name ?? 'Semanal'} title={serviceDayLabels[selectedDay]} />
-        <div className="daily-menu-grid">
+        <div className="weekly-menu-grid">
           {sectionOrder.map((section) => (
             <div className="daily-menu-section" key={section}>
               <div className="menu-admin-section-heading">
@@ -1147,20 +1265,25 @@ function WeeklyTab({
               <div className="daily-menu-list">
                 {weeklyMenu.days[selectedDay][section].length > 0 ? (
                   weeklyMenu.days[selectedDay][section].map((item) => (
-                    <div className={item.is_active ? 'menu-admin-row' : 'menu-admin-row is-inactive'} key={item.id}>
-                      <div>
-                        <strong>{item.component.name}</strong>
-                        <span>
-                          Ordem {item.display_order} {item.is_active ? '' : '- inativo'}
-                        </span>
+                    <div className={item.is_active ? 'weekly-menu-item' : 'weekly-menu-item is-inactive'} key={item.id}>
+                      <div className="weekly-menu-item__body">
+                        <div className="weekly-menu-item__header">
+                          <strong>{item.component.name}</strong>
+                          {!item.is_active ? (
+                            <Badge size="sm" tone="neutral">
+                              Inativo
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <span>Ordem {item.display_order}</span>
                         {item.notes ? <small>{item.notes}</small> : null}
                       </div>
-                      <div className="menu-admin-item-actions">
+                      <div className="weekly-menu-item__actions menu-admin-item-actions">
                         <Button onClick={() => onEditItem(item)} size="sm" variant="secondary">
                           Editar vinculo
                         </Button>
                         <Button onClick={() => onEditComponent(adminComponentFor(item, components))} size="sm" variant="ghost">
-                          Componente
+                          Editar componente
                         </Button>
                         <Button onClick={() => onDeleteItem(item)} size="sm" variant="danger">
                           Remover
@@ -1180,7 +1303,13 @@ function WeeklyTab({
   )
 }
 
-function RulesTab({ products }: { products: StructuredMenuProduct[] }) {
+function RulesTab({
+  onResolvePending,
+  products,
+}: {
+  onResolvePending?: (product: StructuredMenuProduct) => void
+  products: StructuredMenuProduct[]
+}) {
   const productsBySlug = new Map(products.map((product) => [product.slug, product]))
   const ruleProducts = [
     'n5-casa',
@@ -1202,7 +1331,7 @@ function RulesTab({ products }: { products: StructuredMenuProduct[] }) {
       </Card>
       <div className="structured-product-grid">
         {ruleProducts.map((product) => (
-          <StructuredProductCard key={product.id} product={product} />
+          <StructuredProductCard key={product.id} onResolvePending={onResolvePending} product={product} />
         ))}
       </div>
     </div>
@@ -1334,14 +1463,17 @@ function renderModalContent({
   availabilityForm,
   componentForm,
   components,
+  dailyMenu,
   dailyAdjustmentForm,
   isMutating,
   modal,
   mutationError,
+  pendingConfigurationForm,
   productForm,
   setAvailabilityForm,
   setComponentForm,
   setDailyAdjustmentForm,
+  setPendingConfigurationForm,
   setProductForm,
   setWeeklyItemForm,
   weeklyItemForm,
@@ -1349,14 +1481,17 @@ function renderModalContent({
   availabilityForm: AvailabilityFormState
   componentForm: ComponentFormState | null
   components: AdminMenuComponent[]
+  dailyMenu: DailyStructuredMenu | null
   dailyAdjustmentForm: DailyAdjustmentFormState
   isMutating: boolean
   modal: Exclude<ModalState, null>
   mutationError: string | null
+  pendingConfigurationForm: PendingConfigurationFormState
   productForm: ProductFormState | null
   setAvailabilityForm: (updater: (current: AvailabilityFormState) => AvailabilityFormState) => void
   setComponentForm: (updater: (current: ComponentFormState | null) => ComponentFormState | null) => void
   setDailyAdjustmentForm: (updater: (current: DailyAdjustmentFormState) => DailyAdjustmentFormState) => void
+  setPendingConfigurationForm: (updater: (current: PendingConfigurationFormState) => PendingConfigurationFormState) => void
   setProductForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void
   setWeeklyItemForm: (updater: (current: WeeklyItemFormState) => WeeklyItemFormState) => void
   weeklyItemForm: WeeklyItemFormState
@@ -1382,6 +1517,7 @@ function renderModalContent({
       {modal.type === 'daily-adjustment' ? (
         <DailyAdjustmentForm
           components={components}
+          dailyMenu={dailyMenu}
           form={dailyAdjustmentForm}
           isMutating={isMutating}
           item={modal.item}
@@ -1408,6 +1544,14 @@ function renderModalContent({
           Remover <strong>{modal.item.component.name}</strong> de {serviceDayLabels[modal.item.service_day]} em{' '}
           {sectionLabels[modal.item.section]}? O componente global sera preservado.
         </p>
+      ) : null}
+      {modal.type === 'pending-configuration' ? (
+        <PendingConfigurationForm
+          form={pendingConfigurationForm}
+          isMutating={isMutating}
+          product={modal.product}
+          setForm={setPendingConfigurationForm}
+        />
       ) : null}
       {mutationError ? <p className="form-error">{mutationError}</p> : null}
     </div>
@@ -1485,6 +1629,82 @@ function ProductForm({
           ))}
         </div>
       </fieldset>
+    </>
+  )
+}
+
+function PendingConfigurationForm({
+  form,
+  isMutating,
+  product,
+  setForm,
+}: {
+  form: PendingConfigurationFormState
+  isMutating: boolean
+  product: StructuredMenuProduct
+  setForm: (updater: (current: PendingConfigurationFormState) => PendingConfigurationFormState) => void
+}) {
+  const pendingOption = pendingComponentOption(product)
+  const basePrice = formatCurrency(centsToCurrency(productPriceCents(product)))
+
+  if (!pendingOption) {
+    return (
+      <p className="muted-text">
+        Nao ha configuracao pendente neste produto. Atualize os dados do cardapio e tente novamente se o aviso continuar aparecendo.
+      </p>
+    )
+  }
+
+  return (
+    <>
+      <div className="menu-pending-summary">
+        <Badge size="sm" tone="warning">
+          Decisao necessaria
+        </Badge>
+        <strong>{product.name}</strong>
+        <p>
+          A variacao <strong>{pendingOption.name}</strong> esta cadastrada, mas ficou pendente porque falta uma decisao operacional:
+          oferecer com preco final definido ou deixar claro que essa variacao nao sera vendida.
+        </p>
+        <small>Preco base atual: {basePrice}</small>
+      </div>
+      <fieldset className="menu-admin-choice-group" disabled={isMutating}>
+        <legend>Como resolver?</legend>
+        <label>
+          <input
+            checked={form.resolution === 'not_offered'}
+            name="pending-configuration-resolution"
+            onChange={() => setForm((current) => ({ ...current, resolution: 'not_offered' }))}
+            type="radio"
+          />
+          <span>Nao oferecer essa variacao por enquanto</span>
+        </label>
+        <label>
+          <input
+            checked={form.resolution === 'offered'}
+            name="pending-configuration-resolution"
+            onChange={() => setForm((current) => ({ ...current, resolution: 'offered' }))}
+            type="radio"
+          />
+          <span>Oferecer com preco final definido</span>
+        </label>
+      </fieldset>
+      {form.resolution === 'offered' ? (
+        <label>
+          <span>Preco final em reais</span>
+          <input
+            disabled={isMutating}
+            inputMode="decimal"
+            placeholder="Ex.: 21,00"
+            value={form.final_price}
+            onChange={(event) => setForm((current) => ({ ...current, final_price: event.target.value }))}
+          />
+        </label>
+      ) : null}
+      <p className="muted-text">
+        Essa acao altera apenas a regra estruturada desta variacao. Se a equipe ainda nao souber o preco correto, escolha nao oferecer
+        para remover o alerta sem inventar valor.
+      </p>
     </>
   )
 }
@@ -1619,19 +1839,57 @@ function AvailabilityForm({
 
 function DailyAdjustmentForm({
   components,
+  dailyMenu,
   form,
   isMutating,
   item,
   setForm,
 }: {
   components: AdminMenuComponent[]
+  dailyMenu: DailyStructuredMenu | null
   form: DailyAdjustmentFormState
   isMutating: boolean
   item: DailyMenuComponent | null
   setForm: (updater: (current: DailyAdjustmentFormState) => DailyAdjustmentFormState) => void
 }) {
+  const normalizedSearch = normalizeSearch(form.search)
+  const sectionComponentType = componentTypeForSection(form.section)
+  const componentIdsAlreadyInSection = new Set(
+    dailyMenu?.sections[form.section]
+      .map((sectionItem) => sectionItem.component.id)
+      .filter((componentId) => !item || componentId !== item.component.id) ?? [],
+  )
+  const selectableComponents = components
+    .filter((component) => component.is_active)
+    .filter((component) => component.component_type === sectionComponentType)
+    .filter((component) => form.action !== 'include' || !componentIdsAlreadyInSection.has(component.id))
+    .filter((component) => normalizedSearch === '' || normalizeSearch(component.name).includes(normalizedSearch))
+
   return (
     <>
+      <label>
+        <span>Secao</span>
+        <select
+          disabled={isMutating || item !== null}
+          value={form.section}
+          onChange={(event) => setForm((current) => ({ ...current, component_id: '', section: event.target.value as DailyMenuSectionKey }))}
+        >
+          {sectionOrder.map((section) => (
+            <option key={section} value={section}>
+              {sectionLabels[section]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Buscar componente</span>
+        <input
+          disabled={isMutating || item !== null}
+          placeholder="Digite o nome do item"
+          value={form.search}
+          onChange={(event) => setForm((current) => ({ ...current, search: event.target.value }))}
+        />
+      </label>
       <label>
         <span>Componente</span>
         <select
@@ -1640,13 +1898,16 @@ function DailyAdjustmentForm({
           onChange={(event) => setForm((current) => ({ ...current, component_id: event.target.value }))}
         >
           <option value="">Selecione</option>
-          {components.map((component) => (
+          {selectableComponents.map((component) => (
             <option key={component.id} value={component.id}>
               {component.name}
             </option>
           ))}
         </select>
       </label>
+      {selectableComponents.length === 0 && item === null ? (
+        <p className="muted-text">Nenhum componente ativo encontrado para esta secao e busca.</p>
+      ) : null}
       <div className="menu-admin-form-grid">
         <label>
           <span>Acao</span>
@@ -1657,20 +1918,6 @@ function DailyAdjustmentForm({
           >
             <option value="include">Incluir somente nesta data</option>
             <option value="exclude">Ocultar somente nesta data</option>
-          </select>
-        </label>
-        <label>
-          <span>Secao</span>
-          <select
-            disabled={isMutating}
-            value={form.section}
-            onChange={(event) => setForm((current) => ({ ...current, section: event.target.value as DailyMenuSectionKey }))}
-          >
-            {sectionOrder.map((section) => (
-              <option key={section} value={section}>
-                {sectionLabels[section]}
-              </option>
-            ))}
           </select>
         </label>
       </div>
@@ -1820,6 +2067,51 @@ function AvailabilityBadge({ availability }: { availability: EffectiveAvailabili
   )
 }
 
+function ProductAdministrativeBadge({ product }: { product: StructuredMenuProduct }) {
+  if (product.administrative_status === 'legacy') {
+    return (
+      <Badge size="sm" tone="neutral">
+        Legado
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge size="sm" tone={product.administrative_status === 'active' ? 'success' : 'danger'}>
+      {product.administrative_status === 'active' ? 'Ativo' : 'Inativo'}
+    </Badge>
+  )
+}
+
+function productMatchesAdminFilter(product: StructuredMenuProduct, filter: ProductAdminFilter): boolean {
+  switch (filter) {
+    case 'active':
+      return product.administrative_status === 'active'
+    case 'inactive':
+      return product.administrative_status === 'inactive'
+    case 'legacy':
+      return product.administrative_status === 'legacy'
+    case 'all':
+      return true
+  }
+}
+
+function productPriceCents(product: StructuredMenuProduct): number {
+  return product.base_price_cents ?? 0
+}
+
+function pendingComponentOption(product: StructuredMenuProduct): StructuredComponentOption | null {
+  for (const group of product.groups) {
+    const pendingOption = group.component_options.find((option) => !option.link_active && option.requires_confirmation)
+
+    if (pendingOption) {
+      return pendingOption
+    }
+  }
+
+  return null
+}
+
 function productInsights(product: StructuredMenuProduct): string[] {
   const insights: string[] = []
 
@@ -1844,7 +2136,13 @@ function productInsights(product: StructuredMenuProduct): string[] {
   }
 
   if (product.configuration_pending) {
-    insights.push('Ha uma configuracao pendente de confirmacao operacional.')
+    const pendingOption = pendingComponentOption(product)
+
+    insights.push(
+      pendingOption
+        ? `Configuracao pendente: decidir se ${pendingOption.name} sera oferecido e qual sera o preco final.`
+        : 'Ha uma configuracao pendente de confirmacao operacional.',
+    )
   }
 
   return insights
@@ -1946,6 +2244,8 @@ function modalTitle(modal: Exclude<ModalState, null>): string {
       return modal.item ? 'Editar item semanal' : 'Adicionar item semanal'
     case 'weekly-delete':
       return 'Remover item semanal'
+    case 'pending-configuration':
+      return 'Resolver configuracao pendente'
   }
 }
 
@@ -1961,6 +2261,8 @@ function modalPrimaryLabel(modal: Exclude<ModalState, null>, isMutating: boolean
       return 'Limpar ajuste'
     case 'availability':
       return modal.action === 'clear' ? 'Restaurar' : 'Salvar disponibilidade'
+    case 'pending-configuration':
+      return 'Resolver configuracao'
     default:
       return 'Salvar'
   }
@@ -2031,6 +2333,7 @@ function emptyDailyAdjustmentForm(): DailyAdjustmentFormState {
     action: 'include',
     display_order: '',
     notes: '',
+    search: '',
   }
 }
 
@@ -2103,6 +2406,19 @@ function normalizeSearch(value: string): string {
 
 function normalizeComponentType(value: string): MenuComponentTypeKey {
   return componentTypes.includes(value as MenuComponentTypeKey) ? (value as MenuComponentTypeKey) : 'extra'
+}
+
+function componentTypeForSection(section: DailyMenuSectionKey): MenuComponentTypeKey {
+  switch (section) {
+    case 'hot':
+      return 'hot'
+    case 'salad':
+      return 'salad'
+    case 'meat':
+      return 'meat'
+    case 'extra':
+      return 'extra'
+  }
 }
 
 function parseDateString(value: string): Date | null {
@@ -2196,6 +2512,21 @@ function formatDateLabel(date: string): string {
   const [year, month, day] = date.split('-')
 
   return `${day}/${month}/${year}`
+}
+
+function formatDateTimeLabel(value: string): string {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: '2-digit',
+  }).format(date)
 }
 
 function friendlyError(error: unknown, fallback: string): string {

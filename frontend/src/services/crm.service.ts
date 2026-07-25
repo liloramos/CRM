@@ -119,6 +119,12 @@ export type UpdateComponentAvailabilityPayload = {
   replacement_component_id?: number | null
 }
 
+export type UpdateProductComponentOptionPayload = {
+  date?: string
+  resolution: 'offered' | 'not_offered'
+  final_price_cents?: number | null
+}
+
 export type UpsertWeeklyMenuComponentPayload = {
   service_day: WeeklyMenuServiceDayKey
   section: DailyMenuSectionKey
@@ -395,6 +401,21 @@ export async function updateMenuProduct(
     body: JSON.stringify(payload),
     method: 'PATCH',
   })
+
+  return response.data
+}
+
+export async function updateProductComponentOption(
+  optionId: number | string,
+  payload: UpdateProductComponentOptionPayload,
+): Promise<StructuredMenuProduct> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(
+    `/api/app/menu/product-component-options/${optionId}`,
+    {
+      body: JSON.stringify(payload),
+      method: 'PATCH',
+    },
+  )
 
   return response.data
 }

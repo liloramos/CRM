@@ -112,6 +112,9 @@ class StructuredProductConfigurationService
             'currency' => $product->currency,
             'is_active' => (bool) $product->is_active,
             'is_available_by_default' => (bool) $product->is_available_by_default,
+            'administrative_status' => $this->administrativeStatus($product),
+            'is_legacy' => $this->isLegacyProduct($product),
+            'legacy_reason' => $this->legacyReason($product),
             'display_order' => $product->display_order,
             'availability' => $this->productAvailability($product, $company, $date),
             'service_days' => $this->serviceDays($product),
@@ -281,6 +284,31 @@ class StructuredProductConfigurationService
         }
 
         return (bool) data_get($product->composition_rules, 'uses_weekly_menu', false);
+    }
+
+    private function administrativeStatus(Product $product): string
+    {
+        if ($this->isLegacyProduct($product)) {
+            return 'legacy';
+        }
+
+        return $product->is_active ? 'active' : 'inactive';
+    }
+
+    private function isLegacyProduct(Product $product): bool
+    {
+        return (bool) data_get($product->metadata, 'official_price_pending', false)
+            && ! $product->is_active
+            && $product->base_price_cents === null;
+    }
+
+    private function legacyReason(Product $product): ?string
+    {
+        if (! $this->isLegacyProduct($product)) {
+            return null;
+        }
+
+        return 'Registro legado preservado para historico; nao representa uma feijoada oficial vendavel.';
     }
 
     private function hasPendingConfiguration(Product $product): bool

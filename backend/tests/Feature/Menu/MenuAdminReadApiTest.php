@@ -54,12 +54,23 @@ class MenuAdminReadApiTest extends TestCase
 
         $this->assertTrue($products->has('feijoada'));
         $this->assertFalse($products['feijoada']['is_active']);
+        $this->assertTrue($products['feijoada']['is_legacy']);
+        $this->assertSame('legacy', $products['feijoada']['administrative_status']);
+        $this->assertSame('Registro legado preservado para historico; nao representa uma feijoada oficial vendavel.', $products['feijoada']['legacy_reason']);
         $this->assertSame([], $products['feijoada']['service_days']);
+        $this->assertSame('product_default', $products['feijoada']['availability']['source']);
         $this->assertSame(
             ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
             $products['coca-cola-2l']['service_days'],
         );
-        $this->assertSame(['saturday'], $products['feijoada-250ml']['service_days']);
+        foreach (['feijoada-250ml', 'feijoada-n5-500ml', 'feijoada-750ml', 'feijoada-grande-1100ml'] as $slug) {
+            $this->assertTrue($products[$slug]['is_active']);
+            $this->assertFalse($products[$slug]['is_legacy']);
+            $this->assertSame('active', $products[$slug]['administrative_status']);
+            $this->assertSame(['saturday'], $products[$slug]['service_days']);
+            $this->assertSame('product_service_day', $products[$slug]['availability']['source']);
+            $this->assertFalse($products[$slug]['availability']['available']);
+        }
         $this->assertFalse($products->has('produto-externo'));
         $this->assertSame($before, $this->tableCounts());
     }
@@ -79,7 +90,10 @@ class MenuAdminReadApiTest extends TestCase
 
         $this->assertTrue($components->has('bisteca-de-porco-na-chapa'));
         $this->assertSame(MenuComponentType::Meat->value, $components['bisteca-de-porco-na-chapa']['component_type']);
+        $this->assertTrue($components['bisteca-de-porco-na-chapa']['is_active']);
+        $this->assertSame(0, $components['bisteca-de-porco-na-chapa']['weekly_menu_items_count']);
         $this->assertSame('Filé de peixe empanado', $components['file-de-peixe']['name']);
+        $this->assertFalse($components->has('peixe-frito'));
         $this->assertFalse($components->has('componente-externo'));
         $this->assertSame($before, $this->tableCounts());
     }
@@ -140,6 +154,9 @@ class MenuAdminReadApiTest extends TestCase
         $this->assertSame('include', $data['adjustments'][0]['action']);
         $this->assertSame('meat', $data['adjustments'][0]['section']);
         $this->assertSame('bisteca-de-porco-na-chapa', $data['adjustments'][0]['component']['slug']);
+        $this->assertArrayHasKey('updated_at', $data['adjustments'][0]);
+        $this->assertArrayHasKey('marked_by', $data['adjustments'][0]);
+        $this->assertNull($data['adjustments'][0]['marked_by']);
         $this->assertSame($before, $this->tableCounts());
     }
 

@@ -146,7 +146,7 @@ class AdminMenuReadService
     public function dayAdjustments(Company $company, CarbonInterface $date): array
     {
         $adjustments = DailyMenuComponentAdjustment::query()
-            ->with('component')
+            ->with(['component', 'markedBy'])
             ->where('company_id', $company->id)
             ->whereDate('availability_date', $date->toDateString())
             ->orderBy('section')
@@ -160,6 +160,11 @@ class AdminMenuReadService
                 'action' => $adjustment->action->value,
                 'display_order' => $adjustment->display_order,
                 'notes' => $adjustment->notes,
+                'updated_at' => $adjustment->updated_at?->toIso8601String(),
+                'marked_by' => $adjustment->markedBy ? [
+                    'id' => $adjustment->markedBy->id,
+                    'name' => $adjustment->markedBy->name,
+                ] : null,
                 'component' => [
                     'id' => $adjustment->component->id,
                     'slug' => $adjustment->component->slug,
