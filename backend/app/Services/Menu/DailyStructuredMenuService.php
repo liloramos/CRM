@@ -18,6 +18,7 @@ class DailyStructuredMenuService
         private readonly ComponentAvailabilityResolver $availabilityResolver,
         private readonly StructuredMenuCatalogService $catalog,
         private readonly StructuredProductConfigurationService $products,
+        private readonly MenuComponentPresentation $components,
     ) {}
 
     /**
@@ -102,12 +103,7 @@ class DailyStructuredMenuService
                     'section' => $item['section']->value,
                     'display_order' => $item['display_order'],
                     'notes' => $item['notes'],
-                    'component' => [
-                        'id' => $component->id,
-                        'slug' => $component->slug,
-                        'name' => $component->name,
-                        'component_type' => $component->component_type->value,
-                    ],
+                    'component' => $this->components->summary($component),
                     'availability' => $availability,
                     'available' => (bool) $availability['available'],
                 ];

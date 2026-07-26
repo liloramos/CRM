@@ -92,6 +92,15 @@ class MenuAdminReadApiTest extends TestCase
         $this->assertSame(MenuComponentType::Meat->value, $components['bisteca-de-porco-na-chapa']['component_type']);
         $this->assertTrue($components['bisteca-de-porco-na-chapa']['is_active']);
         $this->assertSame(0, $components['bisteca-de-porco-na-chapa']['weekly_menu_items_count']);
+        $this->assertSame([], $components['bisteca-de-porco-na-chapa']['weekly_menu_items']);
+        $this->assertContains('Bisteca', $components['bisteca-de-porco-na-chapa']['search_aliases']);
+        $this->assertSame('Peixe frito', $components['file-de-peixe']['display_name']);
+        $this->assertContains('Peixe frito', $components['file-de-peixe']['search_aliases']);
+        $this->assertContains('File de peixe', $components['file-de-peixe']['search_aliases']);
+        $this->assertSame(1, $components['file-de-peixe']['weekly_menu_items_count']);
+        $this->assertSame('wednesday', $components['file-de-peixe']['weekly_menu_items'][0]['service_day']);
+        $this->assertSame('meat', $components['file-de-peixe']['weekly_menu_items'][0]['section']);
+        $this->assertSame('component_default', $components['file-de-peixe']['availability']['source']);
         $this->assertSame('Filé de peixe empanado', $components['file-de-peixe']['name']);
         $this->assertFalse($components->has('peixe-frito'));
         $this->assertFalse($components->has('componente-externo'));

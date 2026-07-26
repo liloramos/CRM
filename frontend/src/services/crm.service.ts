@@ -373,8 +373,8 @@ export async function getAdminMenuProducts(date?: string): Promise<AdminMenuProd
   return response.data
 }
 
-export async function getAdminMenuComponents(): Promise<AdminMenuComponentsResponse> {
-  const response = await requestJson<ApiEnvelope<AdminMenuComponentsResponse>>('/api/app/menu/admin/components')
+export async function getAdminMenuComponents(date?: string): Promise<AdminMenuComponentsResponse> {
+  const response = await requestJson<ApiEnvelope<AdminMenuComponentsResponse>>(`/api/app/menu/admin/components${dateQuery(date)}`)
 
   return response.data
 }

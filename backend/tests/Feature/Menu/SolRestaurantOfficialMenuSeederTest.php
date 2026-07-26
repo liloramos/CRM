@@ -125,7 +125,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
 
         foreach ($this->weeklyMenuComponentNames() as $name) {
             $this->assertDatabaseHas('menu_components', [
-                'slug' => Str::slug($name),
+                'slug' => $this->componentSlug($name),
                 'name' => $name,
                 'is_active' => true,
             ]);
@@ -463,7 +463,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'Disquinho',
             'Filé de frango empanado',
             'Strogonoff de frango',
-            'Filé de peixe',
+            'Filé de peixe empanado',
             'Filé de frango',
             'Strogonoff',
             'Linguiça',
@@ -473,5 +473,13 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'Cenoura refogada',
             'Quiabo',
         ];
+    }
+
+    private function componentSlug(string $name): string
+    {
+        return match ($name) {
+            'Filé de peixe empanado' => 'file-de-peixe',
+            default => Str::slug($name),
+        };
     }
 }

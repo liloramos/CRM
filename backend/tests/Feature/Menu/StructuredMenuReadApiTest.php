@@ -248,6 +248,17 @@ class StructuredMenuReadApiTest extends TestCase
             }
         }
 
+        $wednesday = $service->day($company, CarbonImmutable::parse('2026-07-22'));
+        $wednesdayFish = collect($wednesday['sections'][WeeklyMenuSection::Meat->value])
+            ->firstWhere('component.slug', 'file-de-peixe');
+
+        $this->assertNotNull($wednesdayFish);
+        $this->assertSame('Peixe frito', $wednesdayFish['component']['display_name']);
+        $this->assertSame('Filé de peixe empanado', $wednesdayFish['component']['supporting_name']);
+
+        $thursday = $service->day($company, CarbonImmutable::parse('2026-07-23'));
+        $this->assertNotContains('file-de-peixe', $this->sectionSlugs($thursday, WeeklyMenuSection::Meat->value));
+
         $sunday = $service->day($company, CarbonImmutable::parse('2026-07-26'));
 
         $this->assertFalse($sunday['is_service_day']);

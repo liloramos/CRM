@@ -17,7 +17,7 @@ class SolRestaurantMenuComponentSeeder extends Seeder
         foreach ($this->components() as $type => $names) {
             foreach (array_values($names) as $index => $name) {
                 MenuComponent::query()->updateOrCreate(
-                    ['company_id' => $company->id, 'slug' => Str::slug($name)],
+                    ['company_id' => $company->id, 'slug' => $this->slugFor($name)],
                     [
                         'name' => $name,
                         'component_type' => $type,
@@ -100,7 +100,7 @@ class SolRestaurantMenuComponentSeeder extends Seeder
                 'Disquinho',
                 'Filé de frango empanado',
                 'Strogonoff de frango',
-                'Filé de peixe',
+                'Filé de peixe empanado',
                 'Filé de frango',
                 'Strogonoff',
                 'Linguiça',
@@ -130,6 +130,14 @@ class SolRestaurantMenuComponentSeeder extends Seeder
             'Bife' => 'A DOCX cita bife como variação/adicional; preço operacional será modelado em etapa posterior.',
             'Ovo frito' => 'Cadastrado como carne do cardápio semanal; o papel de adicional pago permanece pendente.',
             default => null,
+        };
+    }
+
+    private function slugFor(string $name): string
+    {
+        return match ($name) {
+            'Filé de peixe empanado' => 'file-de-peixe',
+            default => Str::slug($name),
         };
     }
 }

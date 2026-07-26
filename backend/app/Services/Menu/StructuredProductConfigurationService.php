@@ -16,7 +16,10 @@ class StructuredProductConfigurationService
      */
     private array $dailyProductOverrideCache = [];
 
-    public function __construct(private readonly ComponentAvailabilityResolver $availabilityResolver) {}
+    public function __construct(
+        private readonly ComponentAvailabilityResolver $availabilityResolver,
+        private readonly MenuComponentPresentation $components,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -237,11 +240,9 @@ class StructuredProductConfigurationService
             ->toArray();
 
         return [
+            ...$this->components->summary($component),
             'id' => $link->id,
             'component_id' => $component->id,
-            'slug' => $component->slug,
-            'name' => $component->name,
-            'component_type' => $component->component_type->value,
             'price_delta_cents' => $link->price_delta_cents,
             'final_price_cents' => $link->final_price_cents,
             'included_quantity' => $link->included_quantity,

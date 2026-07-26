@@ -23,12 +23,13 @@ class AdminMenuReadController extends Controller
         ]);
     }
 
-    public function components(Request $request, AdminMenuReadService $menu): JsonResponse
+    public function components(StructuredMenuDateRequest $request, AdminMenuReadService $menu): JsonResponse
     {
-        $company = $this->resolveCompany($request);
+        $company = $this->resolveCompany($request)->loadMissing('setting');
+        $timezone = $company->setting?->timezone ?: config('app.timezone');
 
         return response()->json([
-            'data' => $menu->components($company),
+            'data' => $menu->components($company, $request->operationalDate($timezone)),
         ]);
     }
 

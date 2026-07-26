@@ -183,6 +183,9 @@ export type StructuredMenuComponentSummary = {
   id: number
   slug: string
   name: string
+  display_name: string
+  supporting_name: string | null
+  search_aliases: string[]
   component_type: MenuComponentTypeKey | string
 }
 
@@ -213,6 +216,9 @@ export type StructuredComponentOption = {
   component_id: number
   slug: string
   name: string
+  display_name: string
+  supporting_name: string | null
+  search_aliases: string[]
   component_type: MenuComponentTypeKey | string
   price_delta_cents: number
   final_price_cents: number | null
@@ -327,6 +333,15 @@ export type AdminMenuComponent = StructuredMenuComponentSummary & {
   display_order: number
   product_group_links_count: number
   weekly_menu_items_count: number
+  weekly_menu_items: Array<{
+    id: number
+    service_day: WeeklyMenuServiceDayKey
+    section: DailyMenuSectionKey
+    display_order: number
+    is_active: boolean
+    notes: string | null
+  }>
+  availability: EffectiveAvailability
 }
 
 export type AdminMenuComponentsResponse = {

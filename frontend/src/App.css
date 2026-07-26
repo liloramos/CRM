@@ -1774,7 +1774,7 @@ label textarea {
 .daily-menu-grid,
 .weekly-menu-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -2253,6 +2253,71 @@ label textarea {
   gap: 14px;
 }
 
+.menu-components-admin {
+  display: grid;
+  gap: 14px;
+}
+
+.component-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.component-admin-card {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.component-admin-card__header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.component-admin-card__header h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.25;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.component-admin-card__header span,
+.component-admin-card__meta span,
+.component-admin-card__status span {
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.component-admin-card__meta,
+.component-admin-card__status {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.component-admin-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.component-admin-card__actions .button {
+  flex: 1 1 138px;
+}
+
 .menu-admin-section-heading {
   justify-content: space-between;
 }
@@ -2331,6 +2396,12 @@ label textarea {
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.weekly-menu-item__name {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
 }
 
 .weekly-menu-item strong,
