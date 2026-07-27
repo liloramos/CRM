@@ -146,6 +146,12 @@ class OrderOperationsController extends Controller
             'structured_options.*.component_link_id' => ['nullable', 'integer'],
             'structured_options.*.product_link_id' => ['nullable', 'integer'],
             'structured_options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            'meat_mode' => ['nullable', 'string', 'in:traditional,beef_only'],
+            'traditional_meat_component_ids' => ['sometimes', 'array'],
+            'traditional_meat_component_ids.*' => ['integer'],
+            'additions' => ['sometimes', 'array'],
+            'additions.*.code' => ['required_with:additions', 'string', 'max:80'],
+            'additions.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
         ]);
 
         $product = Product::query()
@@ -155,21 +161,42 @@ class OrderOperationsController extends Controller
             ->firstOrFail();
 
         try {
-            $validated['options'] = $product->optionGroups->isNotEmpty()
-                ? $selectionValidator->validateStructuredSelections(
+            if ($product->optionGroups->isNotEmpty()) {
+                $selection = $selectionValidator->validateStructuredSelections(
                     $company->loadMissing('setting'),
                     $product,
                     $this->orderDateForSelection($order, $company),
                     $validated['structured_options'] ?? [],
-                )
-                : $this->validatedOptionRows(
+                    [
+                        'meat_mode' => $validated['meat_mode'] ?? 'traditional',
+                        'traditional_meat_component_ids' => $validated['traditional_meat_component_ids'] ?? [],
+                        'extra_beef_quantity' => $this->additionQuantity($validated['additions'] ?? [], 'extra_beef'),
+                    ],
+                    (int) $validated['quantity'],
+                );
+
+                $validated['options'] = $selection['options'];
+
+                foreach (['unit_price_cents', 'selected_components'] as $key) {
+                    if (array_key_exists($key, $selection)) {
+                        $validated[$key] = $selection[$key];
+                    }
+                }
+            } else {
+                $validated['options'] = $this->validatedOptionRows(
                     companyId: (int) $company->id,
                     product: $product,
                     optionRows: $validated['options'] ?? [],
                 );
+            }
         } catch (DomainException $exception) {
             return response()->json([
                 'message' => $exception->getMessage(),
+            ], 422);
+        } catch (ValidationException $exception) {
+            return response()->json([
+                'message' => collect($exception->errors())->flatten()->first() ?? 'Revise as escolhas do item.',
+                'errors' => $exception->errors(),
             ], 422);
         }
 
@@ -184,6 +211,16 @@ class OrderOperationsController extends Controller
         return response()->json([
             'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $additions
+     */
+    private function additionQuantity(array $additions, string $code): int
+    {
+        return collect($additions)
+            ->filter(fn (array $addition): bool => ($addition['code'] ?? null) === $code)
+            ->sum(fn (array $addition): int => max(1, (int) ($addition['quantity'] ?? 1)));
     }
 
     public function cancel(

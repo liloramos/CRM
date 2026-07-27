@@ -13,7 +13,10 @@ import type {
   Order,
   PrintPreviewResult,
   Product,
+  StructuredMeatConfiguration,
   StructuredComponentOption,
+  DailyMenuComponent,
+  StructuredProductAddition,
   StructuredProductOption,
   StructuredProductOptionGroup,
 } from '../../types/crm'
@@ -22,6 +25,8 @@ import { formatCurrency } from '../../utils/formatters'
 export type AutomationModeSelection = 'assisted' | 'manual'
 
 type PaymentMethodSelection = 'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other'
+
+type MeatModeSelection = 'traditional' | 'beef_only'
 
 type BlockedOrderDeletion = {
   order_id: string
@@ -40,8 +45,10 @@ type OperationalModalContentProps = {
   cancelReason: string
   deleteConfirmation: string
   itemHasDifferentBeneficiary: boolean
+  itemExtraBeef: boolean
   isActionBusy: boolean
   isSearchingCustomers: boolean
+  itemMeatMode: MeatModeSelection
   itemNotes: string
   itemQuantity: number
   modal: AppModal
@@ -59,6 +66,8 @@ type OperationalModalContentProps = {
   onCancelReasonChange: (value: string) => void
   onDeleteConfirmationChange: (value: string) => void
   onItemHasDifferentBeneficiaryChange: (value: boolean) => void
+  onItemExtraBeefChange: (value: boolean) => void
+  onItemMeatModeChange: (value: MeatModeSelection) => void
   onItemNotesChange: (value: string) => void
   onItemQuantityChange: (value: number) => void
   onNewCustomerModeChange: (value: boolean) => void
@@ -103,8 +112,10 @@ export function OperationalModalContent({
   cancelReason,
   deleteConfirmation,
   itemHasDifferentBeneficiary,
+  itemExtraBeef,
   isActionBusy,
   isSearchingCustomers,
+  itemMeatMode,
   itemNotes,
   itemQuantity,
   modal,
@@ -122,6 +133,8 @@ export function OperationalModalContent({
   onCancelReasonChange,
   onDeleteConfirmationChange,
   onItemHasDifferentBeneficiaryChange,
+  onItemExtraBeefChange,
+  onItemMeatModeChange,
   onItemNotesChange,
   onItemQuantityChange,
   onNewCustomerModeChange,
@@ -252,6 +265,9 @@ export function OperationalModalContent({
   if (modal === 'add-product') {
     const selectedProduct = addItemContext?.product ?? products.find((product) => product.id === selectedProductId)
     const structuredGroups = selectedProduct?.structuredGroups ?? []
+    const visibleStructuredGroups = selectedProduct?.meatConfiguration
+      ? structuredGroups.filter((group) => !['variacao_bife', 'bife_adicional'].includes(group.code))
+      : structuredGroups
     const legacyOptionGroups = groupOptions(selectedProduct?.options ?? [])
 
     return (
@@ -276,14 +292,27 @@ export function OperationalModalContent({
             ))}
           </select>
         </label>
-        {selectedProduct && structuredGroups.length > 0 ? (
-          <StructuredOptionPicker
-            groups={structuredGroups}
+        {selectedProduct?.meatConfiguration ? (
+          <BeefChoicePicker
+            dailyMeats={selectedProduct.dailyMeatOptions ?? []}
+            extraBeef={selectedProduct.additions?.find((addition) => addition.code === 'extra_beef') ?? null}
+            isExtraBeefSelected={itemExtraBeef}
+            meatConfiguration={selectedProduct.meatConfiguration}
+            meatMode={itemMeatMode}
+            onExtraBeefChange={onItemExtraBeefChange}
+            onMeatModeChange={onItemMeatModeChange}
             onSelectedOptionsChange={onSelectedOptionsChange}
             selectedOptionIds={selectedOptionIds}
           />
         ) : null}
-        {selectedProduct && structuredGroups.length === 0 && legacyOptionGroups.length > 0 ? (
+        {selectedProduct && visibleStructuredGroups.length > 0 ? (
+          <StructuredOptionPicker
+            groups={visibleStructuredGroups}
+            onSelectedOptionsChange={onSelectedOptionsChange}
+            selectedOptionIds={selectedOptionIds}
+          />
+        ) : null}
+        {selectedProduct && visibleStructuredGroups.length === 0 && legacyOptionGroups.length > 0 ? (
           <LegacyOptionPicker
             groups={legacyOptionGroups}
             onSelectedOptionsChange={onSelectedOptionsChange}
@@ -838,6 +867,144 @@ function CustomerSearchCombobox({
   )
 }
 
+function BeefChoicePicker({
+  dailyMeats,
+  extraBeef,
+  isExtraBeefSelected,
+  meatConfiguration,
+  meatMode,
+  onExtraBeefChange,
+  onMeatModeChange,
+  onSelectedOptionsChange,
+  selectedOptionIds,
+}: {
+  dailyMeats: DailyMenuComponent[]
+  extraBeef: StructuredProductAddition | null
+  isExtraBeefSelected: boolean
+  meatConfiguration: StructuredMeatConfiguration
+  meatMode: MeatModeSelection
+  onExtraBeefChange: (value: boolean) => void
+  onMeatModeChange: (value: MeatModeSelection) => void
+  onSelectedOptionsChange: (optionIds: string[]) => void
+  selectedOptionIds: string[]
+}) {
+  const selectedMeatIds = selectedOptionIds
+    .filter(isDailyMeatToken)
+    .map((token) => Number(token.replace('daily-meat:', '')))
+    .filter((value) => Number.isFinite(value))
+  const minMeats = meatConfiguration.traditional.selection_rules.min ?? 0
+  const maxMeats = meatConfiguration.traditional.selection_rules.max
+  const selectedCount = selectedMeatIds.length
+  const beefOnlyPrice = meatConfiguration.beef_only.final_price_cents
+  const canUseBeefOnly = meatConfiguration.beef_only.enabled && beefOnlyPrice !== null
+  const canUseExtraBeef = extraBeef?.enabled ?? false
+
+  function toggleMeat(componentId: number) {
+    const token = dailyMeatToken(componentId)
+    const checked = selectedOptionIds.includes(token)
+
+    if (!checked && maxMeats !== null && selectedCount >= maxMeats) {
+      return
+    }
+
+    onSelectedOptionsChange(
+      checked
+        ? selectedOptionIds.filter((optionId) => optionId !== token)
+        : [...selectedOptionIds, token],
+    )
+  }
+
+  return (
+    <div className="option-picker">
+      <div>
+        <strong>Escolha da carne</strong>
+        <p>Escolha as carnes tradicionais ou use somente bife, conforme a regra da marmita.</p>
+      </div>
+      <div className="option-picker__group">
+        <div className="option-picker__grid">
+          <label className={optionChoiceClassName(meatMode === 'traditional', false)}>
+            <input
+              checked={meatMode === 'traditional'}
+              name="meat-mode"
+              onChange={() => onMeatModeChange('traditional')}
+              type="radio"
+            />
+            <span className="option-choice__box" aria-hidden="true" />
+            <span className="option-choice__content">
+              <strong>Carnes tradicionais</strong>
+              <small>Escolha as carnes normalmente conforme a regra da marmita.</small>
+            </span>
+          </label>
+          <label className={optionChoiceClassName(meatMode === 'beef_only', !canUseBeefOnly)}>
+            <input
+              checked={meatMode === 'beef_only'}
+              disabled={!canUseBeefOnly}
+              name="meat-mode"
+              onChange={() => onMeatModeChange('beef_only')}
+              type="radio"
+            />
+            <span className="option-choice__box" aria-hidden="true" />
+            <span className="option-choice__content">
+              <strong>Somente bife{beefOnlyPrice !== null ? ` - ${formatCurrency(beefOnlyPrice / 100)}` : ''}</strong>
+              <small>O bife substitui todas as carnes tradicionais.</small>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      {meatMode === 'traditional' ? (
+        <div className="option-picker__group">
+          <div className="option-picker__heading">
+            <span>Carnes do dia</span>
+            <small>
+              Escolha {minMeats === maxMeats ? minMeats : `de ${minMeats} a ${maxMeats ?? 'varias'}`} carne
+              {minMeats === 1 && maxMeats === 1 ? '' : 's'}.
+            </small>
+          </div>
+          <div className="option-picker__grid">
+            {dailyMeats.length > 0 ? dailyMeats.map((item) => {
+              const token = dailyMeatToken(item.component.id)
+              const checked = selectedOptionIds.includes(token)
+              const disabled = !item.available || (!checked && maxMeats !== null && selectedCount >= maxMeats)
+              const supportingName = item.component.supporting_name && item.component.supporting_name !== item.component.display_name
+                ? item.component.supporting_name
+                : null
+
+              return (
+                <label className={optionChoiceClassName(checked, disabled)} key={token}>
+                  <input
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={() => toggleMeat(item.component.id)}
+                    type="checkbox"
+                  />
+                  <span className="option-choice__box" aria-hidden="true" />
+                  <span className="option-choice__content">
+                    <strong>{item.component.display_name || item.component.name}</strong>
+                    <small>{supportingName ?? (item.available ? 'Disponivel hoje' : 'Indisponivel hoje')}</small>
+                  </span>
+                </label>
+              )
+            }) : (
+              <p className="muted-text">Nenhuma carne disponivel no cardapio desta data.</p>
+            )}
+          </div>
+          {canUseExtraBeef ? (
+            <label className="checkbox-line">
+              <input
+                checked={isExtraBeefSelected}
+                onChange={(event) => onExtraBeefChange(event.target.checked)}
+                type="checkbox"
+              />
+              Adicionar 1 bife - + {formatCurrency((extraBeef?.price_cents ?? 0) / 100)}
+            </label>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function StructuredOptionPicker({
   groups,
   onSelectedOptionsChange,
@@ -1105,6 +1272,14 @@ function componentOptionToken(id: number): string {
 
 function productOptionToken(id: number): string {
   return `product:${id}`
+}
+
+function dailyMeatToken(id: number): string {
+  return `daily-meat:${id}`
+}
+
+function isDailyMeatToken(token: string): boolean {
+  return token.startsWith('daily-meat:')
 }
 
 function groupOptions(options: MenuOption[]): Array<{ groupLabel: string; options: MenuOption[] }> {

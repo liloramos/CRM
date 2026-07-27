@@ -90,6 +90,7 @@ export type OrderItem = {
   name: string
   quantity: number
   unitPrice: number
+  totalPrice: number
   notes: string
   beneficiary: string | null
   additions: string[]
@@ -158,6 +159,9 @@ export type Product = {
   tags: string[]
   options: MenuOption[]
   structuredGroups?: StructuredProductOptionGroup[]
+  meatConfiguration?: StructuredMeatConfiguration | null
+  additions?: StructuredProductAddition[]
+  dailyMeatOptions?: DailyMenuComponent[]
   comboItems?: StructuredComboItem[]
   usesWeeklyMenu?: boolean
   configurationPending?: boolean

@@ -66,7 +66,7 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
               {item.beneficiary ? <span>Para: {item.beneficiary}</span> : null}
               {item.additions.length > 0 ? <span>Opcoes: {item.additions.join(', ')}</span> : null}
               <span>Obs: {item.notes}</span>
-              <b>{formatCurrency(item.quantity * item.unitPrice)}</b>
+              <b>{formatCurrency(item.totalPrice ?? item.quantity * item.unitPrice)}</b>
             </div>
           ))}
           <hr />

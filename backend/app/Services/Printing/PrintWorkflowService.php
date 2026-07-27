@@ -445,6 +445,8 @@ class PrintWorkflowService
                             'name' => $option->name,
                             'option_type' => $option->option_type,
                             'quantity' => $option->quantity,
+                            'price_delta_cents' => (int) $option->price_delta_cents,
+                            'total_price_cents' => (int) $option->total_price_cents,
                             'price_delta' => $this->money((int) $option->price_delta_cents, $currency),
                             'total_price' => $this->money((int) $option->total_price_cents, $currency),
                         ])

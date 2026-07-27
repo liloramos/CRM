@@ -58,6 +58,12 @@ type OrderItemOptionPayload =
         product_link_id?: number
         quantity?: number
       }>
+      meat_mode?: 'traditional' | 'beef_only'
+      traditional_meat_component_ids?: number[]
+      additions?: Array<{
+        code: string
+        quantity: number
+      }>
       options?: never
     }
   | {
@@ -66,6 +72,9 @@ type OrderItemOptionPayload =
         quantity?: number
       }>
       structured_options?: never
+      meat_mode?: never
+      traditional_meat_component_ids?: never
+      additions?: never
     }
 
 type BlockedOrderDeletion = {
@@ -73,6 +82,8 @@ type BlockedOrderDeletion = {
   code?: string | null
   reasons: string[]
 }
+
+type MeatModeSelection = 'traditional' | 'beef_only'
 
 function App() {
   const { logout, status: authStatus, user } = useAuth()
@@ -93,6 +104,8 @@ function App() {
   const [itemHasDifferentBeneficiary, setItemHasDifferentBeneficiary] = useState(false)
   const [beneficiaryName, setBeneficiaryName] = useState('')
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
+  const [itemMeatMode, setItemMeatMode] = useState<MeatModeSelection>('traditional')
+  const [itemExtraBeef, setItemExtraBeef] = useState(false)
   const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
   const [automationMode, setAutomationMode] = useState<AutomationModeSelection>('assisted')
   const [addItemContext, setAddItemContext] = useState<AddItemContext | null>(null)
@@ -330,7 +343,7 @@ function App() {
     setActionError(null)
 
     try {
-      const optionPayload = buildOrderItemOptions(addItemContext.product, selectedOptionIds)
+      const optionPayload = buildOrderItemOptions(addItemContext.product, selectedOptionIds, itemMeatMode, itemExtraBeef)
 
       const response = await addOrderItem(addItemContext.orderId, {
         product_id: addItemContext.product.id,
@@ -362,6 +375,8 @@ function App() {
       setItemHasDifferentBeneficiary(false)
       setBeneficiaryName('')
       setSelectedOptionIds([])
+      setItemMeatMode('traditional')
+      setItemExtraBeef(false)
       await loadSnapshot()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
@@ -373,6 +388,8 @@ function App() {
   function handleProductChange(productId: string) {
     setSelectedProductId(productId)
     setSelectedOptionIds([])
+    setItemMeatMode('traditional')
+    setItemExtraBeef(false)
 
     if (activeModal !== 'add-product') {
       return
@@ -387,6 +404,15 @@ function App() {
 
     setActionError(null)
     setAddItemContext((current) => (current ? { ...current, product } : current))
+  }
+
+  function handleMeatModeChange(mode: MeatModeSelection) {
+    setItemMeatMode(mode)
+    setSelectedOptionIds((current) => current.filter((token) => !isDailyMeatToken(token)))
+
+    if (mode === 'beef_only') {
+      setItemExtraBeef(false)
+    }
   }
 
   async function handleTicketPreview(orderId: string) {
@@ -758,6 +784,8 @@ function App() {
     setItemNotes('')
     setItemQuantity(1)
     setSelectedOptionIds([])
+    setItemMeatMode('traditional')
+    setItemExtraBeef(false)
 
     const product = selectedProductForAddItem(snapshot?.products ?? [], selectedProductId)
 
@@ -799,6 +827,9 @@ function App() {
       setAddItemContext(null)
       setItemHasDifferentBeneficiary(false)
       setBeneficiaryName('')
+      setSelectedOptionIds([])
+      setItemMeatMode('traditional')
+      setItemExtraBeef(false)
     }
 
     if (activeModal === 'new-order') {
@@ -1056,7 +1087,9 @@ function App() {
           itemHasDifferentBeneficiary={itemHasDifferentBeneficiary}
           isActionBusy={isActionBusy}
           isSearchingCustomers={isSearchingCustomers}
+          itemExtraBeef={itemExtraBeef}
           itemNotes={itemNotes}
+          itemMeatMode={itemMeatMode}
           itemQuantity={itemQuantity}
           modal={activeModal}
           newCustomerMode={newCustomerMode}
@@ -1074,6 +1107,8 @@ function App() {
           onItemNotesChange={setItemNotes}
           onItemQuantityChange={setItemQuantity}
           onItemHasDifferentBeneficiaryChange={setItemHasDifferentBeneficiary}
+          onItemExtraBeefChange={setItemExtraBeef}
+          onItemMeatModeChange={handleMeatModeChange}
           onNewCustomerModeChange={setNewCustomerMode}
           onNewCustomerNameChange={setNewCustomerName}
           onNewCustomerPhoneChange={setNewCustomerPhone}
@@ -1118,7 +1153,12 @@ function selectedProductForAddItem(products: Product[], selectedProductId: strin
   )
 }
 
-function buildOrderItemOptions(product: Product, selectedOptionIds: string[]): OrderItemOptionPayload {
+function buildOrderItemOptions(
+  product: Product,
+  selectedOptionIds: string[],
+  meatMode: MeatModeSelection,
+  extraBeefSelected: boolean,
+): OrderItemOptionPayload {
   const groups = product.structuredGroups ?? []
 
   if (groups.length === 0) {
@@ -1131,13 +1171,22 @@ function buildOrderItemOptions(product: Product, selectedOptionIds: string[]): O
   }
 
   const selectedTokens = new Set(selectedOptionIds)
+  const dailyMeatIds = selectedOptionIds
+    .filter(isDailyMeatToken)
+    .map((token) => Number(token.replace('daily-meat:', '')))
+    .filter((value) => Number.isFinite(value))
   const structuredOptions: Array<{
     component_link_id?: number
     product_link_id?: number
     quantity?: number
   }> = []
+  const hasBeefRules = product.meatConfiguration !== null && product.meatConfiguration !== undefined
 
   for (const group of groups) {
+    if (hasBeefRules && ['variacao_bife', 'bife_adicional'].includes(group.code)) {
+      continue
+    }
+
     if (group.selection_mode === 'fixed') {
       continue
     }
@@ -1177,7 +1226,40 @@ function buildOrderItemOptions(product: Product, selectedOptionIds: string[]): O
     }
   }
 
-  return { structured_options: structuredOptions }
+  if (!hasBeefRules) {
+    return { structured_options: structuredOptions }
+  }
+
+  if (meatMode === 'beef_only') {
+    if (dailyMeatIds.length > 0 || extraBeefSelected) {
+      throw new Error('Somente bife nao pode ser combinado com outras carnes.')
+    }
+
+    return {
+      structured_options: structuredOptions,
+      meat_mode: 'beef_only',
+      traditional_meat_component_ids: [],
+      additions: [],
+    }
+  }
+
+  const minMeats = product.meatConfiguration?.traditional.selection_rules.min ?? 0
+  const maxMeats = product.meatConfiguration?.traditional.selection_rules.max ?? null
+
+  if (dailyMeatIds.length < minMeats) {
+    throw new Error('Escolha as carnes obrigatorias desta marmita.')
+  }
+
+  if (maxMeats !== null && dailyMeatIds.length > maxMeats) {
+    throw new Error('Escolhas acima do limite em carnes.')
+  }
+
+  return {
+    structured_options: structuredOptions,
+    meat_mode: 'traditional',
+    traditional_meat_component_ids: dailyMeatIds,
+    additions: extraBeefSelected ? [{ code: 'extra_beef', quantity: 1 }] : [],
+  }
 }
 
 function assertStructuredComponentOptionAvailable(option: StructuredComponentOption) {
@@ -1206,6 +1288,10 @@ function componentOptionToken(id: number): string {
 
 function productOptionToken(id: number): string {
   return `product:${id}`
+}
+
+function isDailyMeatToken(token: string): boolean {
+  return token.startsWith('daily-meat:')
 }
 
 function parseCurrencyInputToCents(value: string): number {

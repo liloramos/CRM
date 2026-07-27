@@ -4,6 +4,7 @@ namespace Tests\Feature\Printing;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\MenuComponent;
 use App\Models\Order;
 use App\Models\PrintJob;
 use App\Models\PrintJobEvent;
@@ -18,6 +19,7 @@ use Database\Seeders\CompanySeeder;
 use Database\Seeders\MenuSeeder;
 use Database\Seeders\PrintingSeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
+use Database\Seeders\SolRestaurantStructuredMenuSeeder;
 use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -126,6 +128,74 @@ class PrintWorkflowTest extends TestCase
 
         $this->assertStringContainsString('Pagador: Cliente Principal', $html);
         $this->assertStringContainsString('Para: Larissa', $html);
+    }
+
+    public function test_ticket_prints_n8_and_n9_beef_modes_with_only_selected_options(): void
+    {
+        $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, [
+            'customer_name_snapshot' => 'Cliente do Bife',
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $porco = $this->menuComponentId($company, 'porco');
+        $frango = $this->menuComponentId($company, 'frango-ao-molho');
+        $n8 = Product::query()->where('company_id', $company->id)->where('slug', 'n8-tradicional')->firstOrFail();
+        $n9 = Product::query()->where('company_id', $company->id)->where('slug', 'n9-tradicional')->firstOrFail();
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $n8->id,
+            'quantity' => 1,
+            'meat_mode' => 'beef_only',
+            'structured_options' => [],
+        ])->assertOk();
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $n8->id,
+            'quantity' => 1,
+            'meat_mode' => 'traditional',
+            'traditional_meat_component_ids' => [$porco, $frango],
+            'additions' => [
+                ['code' => 'extra_beef', 'quantity' => 1],
+            ],
+            'structured_options' => [],
+        ])->assertOk();
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $n9->id,
+            'quantity' => 1,
+            'meat_mode' => 'beef_only',
+            'structured_options' => [],
+        ])->assertOk();
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $n9->id,
+            'quantity' => 1,
+            'meat_mode' => 'traditional',
+            'traditional_meat_component_ids' => [$porco, $frango],
+            'additions' => [
+                ['code' => 'extra_beef', 'quantity' => 1],
+            ],
+            'structured_options' => [],
+        ])->assertOk();
+
+        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
+
+        $this->assertStringContainsString('1x N8 Tradicional', $html);
+        $this->assertStringContainsString('1x Somente bife', $html);
+        $this->assertStringContainsString('R$ 20,00', $html);
+        $this->assertStringContainsString('1x Porco', $html);
+        $this->assertStringContainsString('1x Frango ao molho', $html);
+        $this->assertStringContainsString('1x Bife adicional', $html);
+        $this->assertStringContainsString('R$ 23,00', $html);
+        $this->assertStringContainsString('1x N9 Tradicional', $html);
+        $this->assertStringContainsString('R$ 22,00', $html);
+        $this->assertStringContainsString('R$ 25,00', $html);
+        $this->assertStringNotContainsString('Almondega', $html);
+        $this->assertStringNotContainsString('Para: Nao informado', $html);
     }
 
     public function test_ticket_preview_route_keeps_company_isolation(): void
@@ -258,5 +328,14 @@ class PrintWorkflowTest extends TestCase
         ]);
 
         return [$company, $order->refresh()];
+    }
+
+    private function menuComponentId(Company $company, string $slug): int
+    {
+        return (int) MenuComponent::query()
+            ->where('company_id', $company->id)
+            ->where('slug', $slug)
+            ->firstOrFail()
+            ->id;
     }
 }

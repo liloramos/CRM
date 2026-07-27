@@ -9,27 +9,35 @@ use App\Models\ProductGroupComponent;
 use App\Models\ProductGroupProduct;
 use App\Models\ProductOptionGroup;
 use App\Services\Menu\ComponentAvailabilityResolver;
+use App\Services\Menu\DailyStructuredMenuService;
 use App\Services\Menu\StructuredProductConfigurationService;
+use App\Services\Menu\TraditionalMarmitaBeefRuleService;
 use Carbon\CarbonInterface;
 use DomainException;
 use Illuminate\Support\Collection;
+use Illuminate\Validation\ValidationException;
 
 class OrderItemSelectionValidator
 {
     public function __construct(
         private readonly ComponentAvailabilityResolver $componentAvailability,
         private readonly StructuredProductConfigurationService $productConfiguration,
+        private readonly DailyStructuredMenuService $dailyMenu,
+        private readonly TraditionalMarmitaBeefRuleService $beefRules,
     ) {}
 
     /**
      * @param  list<array<string, mixed>>  $rows
-     * @return list<array<string, mixed>>
+     * @param  array<string, mixed>  $meatSelection
+     * @return array{options: list<array<string, mixed>>, unit_price_cents?: int, selected_components?: array<string, mixed>}
      */
     public function validateStructuredSelections(
         Company $company,
         Product $product,
         CarbonInterface $date,
         array $rows,
+        array $meatSelection = [],
+        int $itemQuantity = 1,
     ): array {
         $product->loadMissing([
             'optionGroups.componentOptions.component',
@@ -38,7 +46,7 @@ class OrderItemSelectionValidator
         ]);
 
         if ($product->optionGroups->isEmpty()) {
-            return [];
+            return ['options' => []];
         }
 
         foreach ($rows as $row) {
@@ -60,6 +68,18 @@ class OrderItemSelectionValidator
 
         $this->assertRowsBelongToProduct($product, $componentRows, $productRows);
 
+        if ($this->hasTraditionalBeefRules($product)) {
+            return $this->validateTraditionalMarmita(
+                company: $company,
+                product: $product,
+                date: $date,
+                componentRows: $componentRows,
+                productRows: $productRows,
+                meatSelection: $meatSelection,
+                itemQuantity: $itemQuantity,
+            );
+        }
+
         $validated = [];
 
         foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
@@ -69,7 +89,82 @@ class OrderItemSelectionValidator
             ];
         }
 
-        return $validated;
+        return ['options' => $validated];
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $componentRows
+     * @param  Collection<int, array<string, mixed>>  $productRows
+     * @param  array<string, mixed>  $meatSelection
+     * @return array{options: list<array<string, mixed>>, unit_price_cents: int}
+     */
+    private function validateTraditionalMarmita(
+        Company $company,
+        Product $product,
+        CarbonInterface $date,
+        Collection $componentRows,
+        Collection $productRows,
+        array $meatSelection,
+        int $itemQuantity,
+    ): array {
+        $this->rejectSpecialBeefRows($product, $componentRows);
+
+        $mode = $meatSelection['meat_mode'] ?? 'traditional';
+        $traditionalMeatIds = $this->integerList($meatSelection['traditional_meat_component_ids'] ?? []);
+        $extraBeefQuantity = max(0, (int) ($meatSelection['extra_beef_quantity'] ?? 0));
+
+        $quote = $this->quoteBeefRules($product, [
+            'meat_mode' => $mode,
+            'traditional_meat_component_ids' => $traditionalMeatIds,
+            'extra_beef_quantity' => $extraBeefQuantity,
+        ]);
+
+        $validated = [];
+
+        foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
+            if ($this->isBeefRuleGroup($group)) {
+                continue;
+            }
+
+            if ($mode === 'beef_only' && $this->groupContainsTraditionalMeat($group)) {
+                continue;
+            }
+
+            $validated = [
+                ...$validated,
+                ...$this->validateGroup($company, $product, $date, $group, $componentRows, $productRows),
+            ];
+        }
+
+        if ($mode === 'beef_only') {
+            $beefOnly = $this->configuredBeefLink($product, 'variacao_bife', 'beef_only');
+            $this->assertComponentAvailable($company, $product, $date, $beefOnly, 'beef_only');
+
+            return [
+                'options' => [
+                    ...$validated,
+                    $this->beefOnlyRow($beefOnly, $quote),
+                ],
+                'unit_price_cents' => (int) $quote['total_cents'],
+            ];
+        }
+
+        $dailyMeats = $this->availableDailyMeats($company, $date);
+        $traditionalRows = $this->traditionalMeatRows($dailyMeats, $traditionalMeatIds);
+
+        if ($extraBeefQuantity > 0) {
+            $extraBeef = $this->configuredBeefLink($product, 'bife_adicional', 'extra_beef_quantity');
+            $this->assertComponentAvailable($company, $product, $date, $extraBeef, 'extra_beef_quantity');
+            $traditionalRows[] = $this->extraBeefRow($extraBeef, $quote, $extraBeefQuantity, $itemQuantity);
+        }
+
+        return [
+            'options' => [
+                ...$validated,
+                ...$traditionalRows,
+            ],
+            'unit_price_cents' => (int) $quote['total_cents'],
+        ];
     }
 
     /**
@@ -101,6 +196,201 @@ class OrderItemSelectionValidator
         if ($invalidComponentIds !== [] || $invalidProductIds !== []) {
             throw new DomainException('Uma ou mais escolhas nao pertencem ao produto selecionado.');
         }
+    }
+
+    private function hasTraditionalBeefRules(Product $product): bool
+    {
+        return in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true);
+    }
+
+    private function isBeefRuleGroup(ProductOptionGroup $group): bool
+    {
+        return in_array($group->code, ['variacao_bife', 'bife_adicional'], true);
+    }
+
+    private function groupContainsTraditionalMeat(ProductOptionGroup $group): bool
+    {
+        return $group->componentOptions
+            ->contains(fn (ProductGroupComponent $link): bool => $link->component?->component_type?->value === 'meat');
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $componentRows
+     */
+    private function rejectSpecialBeefRows(Product $product, Collection $componentRows): void
+    {
+        $specialLinkIds = $product->optionGroups
+            ->filter(fn (ProductOptionGroup $group): bool => $this->isBeefRuleGroup($group))
+            ->flatMap(fn (ProductOptionGroup $group) => $group->componentOptions->pluck('id'))
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+
+        $selectedSpecialIds = $componentRows->keys()
+            ->filter(fn (int $id): bool => in_array($id, $specialLinkIds, true))
+            ->values()
+            ->all();
+
+        if ($selectedSpecialIds !== []) {
+            throw ValidationException::withMessages([
+                'structured_options' => ['Use a escolha da carne para informar somente bife ou bife adicional.'],
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $selection
+     * @return array<string, mixed>
+     */
+    private function quoteBeefRules(Product $product, array $selection): array
+    {
+        try {
+            return $this->beefRules->quote($product, $selection);
+        } catch (ValidationException $exception) {
+            throw $exception;
+        }
+    }
+
+    private function configuredBeefLink(Product $product, string $groupCode, string $field): ProductGroupComponent
+    {
+        $link = $product->optionGroups
+            ->firstWhere('code', $groupCode)
+            ?->componentOptions
+            ->first(fn (ProductGroupComponent $componentLink): bool => $componentLink->component?->slug === 'bife');
+
+        if (! $link instanceof ProductGroupComponent || ! $link->is_active || $link->requires_confirmation) {
+            throw ValidationException::withMessages([
+                $field => ['Esta opcao nao esta disponivel para o produto selecionado.'],
+            ]);
+        }
+
+        return $link;
+    }
+
+    private function assertComponentAvailable(
+        Company $company,
+        Product $product,
+        CarbonInterface $date,
+        ProductGroupComponent $link,
+        string $field,
+    ): void {
+        $availability = $this->componentAvailability
+            ->resolve($company, $link->component, $date, $product)
+            ->toArray();
+
+        if (! $availability['available']) {
+            throw ValidationException::withMessages([
+                $field => ['Esta opcao nao esta disponivel para o produto selecionado.'],
+            ]);
+        }
+    }
+
+    /**
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function availableDailyMeats(Company $company, CarbonInterface $date): Collection
+    {
+        $day = $this->dailyMenu->day($company, $date);
+
+        return collect($day['sections']['meat'] ?? [])
+            ->filter(fn (array $item): bool => (bool) ($item['available'] ?? false))
+            ->keyBy(fn (array $item): int => (int) data_get($item, 'component.id'));
+    }
+
+    /**
+     * @param  Collection<int, array<string, mixed>>  $dailyMeats
+     * @param  array<int, int>  $traditionalMeatIds
+     * @return list<array<string, mixed>>
+     */
+    private function traditionalMeatRows(Collection $dailyMeats, array $traditionalMeatIds): array
+    {
+        $rows = [];
+        $counts = array_count_values($traditionalMeatIds);
+
+        foreach ($counts as $componentId => $quantity) {
+            $item = $dailyMeats->get((int) $componentId);
+
+            if (! is_array($item)) {
+                throw ValidationException::withMessages([
+                    'traditional_meat_component_ids' => ['Uma das carnes escolhidas nao esta disponivel hoje.'],
+                ]);
+            }
+
+            $component = $item['component'];
+            $name = (string) ($component['display_name'] ?? $component['name'] ?? 'Carne do dia');
+
+            $rows[] = [
+                'product_option_id' => null,
+                'name' => $name,
+                'option_type' => ProductSelectionMode::IncludedChoice->value,
+                'group_code' => 'carne',
+                'quantity' => (int) $quantity,
+                'price_delta_cents' => 0,
+                'total_price_cents' => 0,
+                'metadata' => [
+                    'source' => 'daily_menu_component',
+                    'menu_component_id' => (int) $component['id'],
+                    'meat_mode' => 'traditional',
+                    'included_in_unit_price' => true,
+                ],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param  array<string, mixed>  $quote
+     * @return array<string, mixed>
+     */
+    private function beefOnlyRow(ProductGroupComponent $link, array $quote): array
+    {
+        return [
+            'product_option_id' => null,
+            'name' => 'Somente bife',
+            'option_type' => ProductSelectionMode::Variation->value,
+            'group_code' => 'variacao_bife',
+            'quantity' => 1,
+            'price_delta_cents' => (int) ($link->price_delta_cents ?? 0),
+            'total_price_cents' => 0,
+            'metadata' => [
+                'source' => 'product_group_component',
+                'product_option_group_id' => $link->product_option_group_id,
+                'product_group_component_id' => $link->id,
+                'menu_component_id' => $link->menu_component_id,
+                'meat_mode' => 'beef_only',
+                'final_price_cents' => $quote['beef_only_final_price_cents'] ?? $link->final_price_cents,
+                'included_in_unit_price' => true,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $quote
+     * @return array<string, mixed>
+     */
+    private function extraBeefRow(ProductGroupComponent $link, array $quote, int $extraBeefQuantity, int $itemQuantity): array
+    {
+        return [
+            'product_option_id' => null,
+            'name' => 'Bife adicional',
+            'option_type' => ProductSelectionMode::Addon->value,
+            'group_code' => 'bife_adicional',
+            'quantity' => $extraBeefQuantity,
+            'price_delta_cents' => (int) ($quote['extra_beef_unit_price_cents'] ?? $link->price_delta_cents ?? 0),
+            'total_price_cents' => 0,
+            'metadata' => [
+                'source' => 'product_group_component',
+                'product_option_group_id' => $link->product_option_group_id,
+                'product_group_component_id' => $link->id,
+                'menu_component_id' => $link->menu_component_id,
+                'meat_mode' => 'traditional',
+                'addition_code' => 'extra_beef',
+                'per_unit_quantity' => $extraBeefQuantity,
+                'line_quantity' => $itemQuantity,
+                'included_in_unit_price' => true,
+                'unit_price_cents' => $quote['extra_beef_unit_price_cents'] ?? $link->price_delta_cents,
+            ],
+        ];
     }
 
     /**
@@ -283,5 +573,21 @@ class OrderItemSelectionValidator
         if ($group->max_quantity !== null && $quantityTotal > (int) $group->max_quantity) {
             throw new DomainException("Quantidade acima do limite em {$group->label}.");
         }
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function integerList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return collect($value)
+            ->filter(fn (mixed $item): bool => is_numeric($item))
+            ->map(fn (mixed $item): int => (int) $item)
+            ->values()
+            ->all();
     }
 }

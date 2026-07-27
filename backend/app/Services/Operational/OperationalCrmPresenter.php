@@ -124,9 +124,13 @@ class OperationalCrmPresenter
                     'name' => $item->product_name,
                     'quantity' => (int) $item->quantity,
                     'unitPrice' => $this->cents((int) $item->unit_price_cents),
+                    'totalPrice' => $this->cents((int) $item->total_price_cents),
                     'notes' => $item->item_notes ?: 'Sem observacao por item.',
                     'beneficiary' => $item->beneficiary_name ?: null,
-                    'additions' => $item->options->pluck('name')->values()->all(),
+                    'additions' => $item->options
+                        ->map(fn ($option): string => $this->optionLabel($option))
+                        ->values()
+                        ->all(),
                     'unavailable' => false,
                 ])
                 ->values(),
@@ -393,6 +397,13 @@ class OperationalCrmPresenter
         return round($value / 100, 2);
     }
 
+    private function money(int $amountCents, string $currency): string
+    {
+        $prefix = $currency === 'BRL' ? 'R$ ' : "{$currency} ";
+
+        return $prefix.number_format($amountCents / 100, 2, ',', '.');
+    }
+
     private function mapOrderStatus(string $status): string
     {
         return match ($status) {
@@ -532,6 +543,15 @@ class OperationalCrmPresenter
         }
 
         return $option->dailyMenuOptionOverrides->first()?->reason;
+    }
+
+    private function optionLabel($option): string
+    {
+        if ((int) $option->price_delta_cents <= 0 || $option->group_code !== 'bife_adicional') {
+            return $option->name;
+        }
+
+        return $option->name.' - '.$this->money((int) $option->price_delta_cents, 'BRL');
     }
 
     private function optionGroupLabel(?string $groupCode): string

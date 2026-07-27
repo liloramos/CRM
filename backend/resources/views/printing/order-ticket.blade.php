@@ -221,7 +221,14 @@
                     @if (! empty($item['options']))
                         <ul class="details">
                             @foreach ($item['options'] as $option)
-                                <li>{{ $option['quantity'] }}x {{ $option['name'] }} {{ $option['total_price'] }}</li>
+                                <li>
+                                    {{ $option['quantity'] }}x {{ $option['name'] }}
+                                    @if (($option['total_price_cents'] ?? 0) > 0)
+                                        {{ $option['total_price'] }}
+                                    @elseif (($option['price_delta_cents'] ?? 0) > 0)
+                                        {{ $option['price_delta'] }}
+                                    @endif
+                                </li>
                             @endforeach
                         </ul>
                     @endif

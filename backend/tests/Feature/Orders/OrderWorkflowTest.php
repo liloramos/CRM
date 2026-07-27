@@ -444,6 +444,217 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_n8_traditional_beef_modes_are_validated_priced_and_persisted(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n8-tradicional')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $porco = $this->menuComponentId($company, 'porco');
+        $frango = $this->menuComponentId($company, 'frango-ao-molho');
+
+        $traditional = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango],
+                'structured_options' => [],
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+
+        $this->assertSame(16, $traditional['unitPrice']);
+        $this->assertSame(16, $traditional['totalPrice']);
+        $this->assertContains('Porco', $traditional['additions']);
+        $this->assertContains('Frango ao molho', $traditional['additions']);
+
+        $beefOnly = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'beef_only',
+                'structured_options' => [],
+                'unit_price_cents' => 9999,
+            ])
+            ->assertOk()
+            ->json('data.items.1');
+
+        $this->assertSame(20, $beefOnly['unitPrice']);
+        $this->assertSame(20, $beefOnly['totalPrice']);
+        $this->assertContains('Somente bife', $beefOnly['additions']);
+
+        $withExtraBeef = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango],
+                'additions' => [
+                    ['code' => 'extra_beef', 'quantity' => 1],
+                ],
+                'structured_options' => [],
+                'unit_price_cents' => 9999,
+            ])
+            ->assertOk()
+            ->json('data.items.2');
+
+        $this->assertSame(23, $withExtraBeef['unitPrice']);
+        $this->assertSame(46, $withExtraBeef['totalPrice']);
+        $this->assertContains('Bife adicional - R$ 7,00', $withExtraBeef['additions']);
+        $this->assertSame(82, (int) (Order::query()->findOrFail($order->id)->total_cents / 100));
+        $this->assertDatabaseHas('order_item_options', [
+            'name' => 'Bife adicional',
+            'group_code' => 'bife_adicional',
+            'price_delta_cents' => 700,
+            'total_price_cents' => 0,
+        ]);
+    }
+
+    public function test_n8_beef_modes_reject_invalid_combinations_and_unavailable_meat(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n8-tradicional')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $porco = $this->menuComponentId($company, 'porco');
+        $frango = $this->menuComponentId($company, 'frango-ao-molho');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'beef_only',
+                'traditional_meat_component_ids' => [$porco],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Somente bife substitui as carnes tradicionais.');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'beef_only',
+                'additions' => [
+                    ['code' => 'extra_beef', 'quantity' => 1],
+                ],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Bife adicional nao pode ser combinado com somente bife.');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Escolha exatamente duas carnes tradicionais.');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango],
+                'additions' => [
+                    ['code' => 'extra_beef', 'quantity' => 2],
+                ],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'No maximo um bife adicional pode ser escolhido.');
+
+        DailyComponentAvailability::query()->create([
+            'company_id' => $company->id,
+            'menu_component_id' => $porco,
+            'availability_date' => '2026-07-06',
+            'status' => MenuAvailabilityStatus::SoldOut,
+            'reason' => 'Acabou no almoco.',
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Uma das carnes escolhidas nao esta disponivel hoje.');
+    }
+
+    public function test_n9_beef_modes_are_priced_and_serialized(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n9-tradicional')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $porco = $this->menuComponentId($company, 'porco');
+        $frango = $this->menuComponentId($company, 'frango-ao-molho');
+
+        $traditional = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango],
+                'structured_options' => [],
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+
+        $this->assertSame(18, $traditional['unitPrice']);
+
+        $beefOnly = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'beef_only',
+                'structured_options' => [],
+            ])
+            ->assertOk()
+            ->json('data.items.1');
+
+        $this->assertSame(22, $beefOnly['unitPrice']);
+        $this->assertContains('Somente bife', $beefOnly['additions']);
+
+        $withExtraBeef = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 2,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango],
+                'additions' => [
+                    ['code' => 'extra_beef', 'quantity' => 1],
+                ],
+                'structured_options' => [],
+            ])
+            ->assertOk()
+            ->json('data.items.2');
+
+        $this->assertSame(25, $withExtraBeef['unitPrice']);
+        $this->assertSame(50, $withExtraBeef['totalPrice']);
+        $this->assertContains('Bife adicional - R$ 7,00', $withExtraBeef['additions']);
+    }
+
     public function test_manual_orders_keep_customer_beneficiary_items_and_printing_separate(): void
     {
         $this->seed([CompanySeeder::class, MenuSeeder::class]);
@@ -1031,5 +1242,14 @@ class OrderWorkflowTest extends TestCase
         }
 
         return $rows;
+    }
+
+    private function menuComponentId(Company $company, string $slug): int
+    {
+        return (int) MenuComponent::query()
+            ->where('company_id', $company->id)
+            ->where('slug', $slug)
+            ->firstOrFail()
+            ->id;
     }
 }

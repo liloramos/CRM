@@ -126,7 +126,9 @@ class OrderWorkflowService
                 $option = $this->resolveProductOption($optionRow);
                 $optionQuantity = max(1, (int) ($optionRow['quantity'] ?? 1));
                 $priceDeltaCents = (int) ($optionRow['price_delta_cents'] ?? ($option?->price_delta_cents ?? 0));
-                $optionTotal = $priceDeltaCents * $optionQuantity;
+                $optionTotal = array_key_exists('total_price_cents', $optionRow)
+                    ? (int) $optionRow['total_price_cents']
+                    : $priceDeltaCents * $optionQuantity;
                 $optionsTotal += $optionTotal;
 
                 $item->options()->create([

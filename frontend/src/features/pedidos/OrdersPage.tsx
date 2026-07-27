@@ -352,7 +352,7 @@ function orderItemColumns(showBeneficiary: boolean): DataTableColumn<OrderItem>[
 
   columns.push(
     { key: 'quantity', header: 'Qtd.', render: (item) => `${item.quantity}x`, align: 'right' },
-    { key: 'total', header: 'Subtotal', render: (item) => formatCurrency(item.quantity * item.unitPrice), align: 'right' },
+    { key: 'total', header: 'Subtotal', render: (item) => formatCurrency(item.totalPrice ?? item.quantity * item.unitPrice), align: 'right' },
   )
 
   return columns

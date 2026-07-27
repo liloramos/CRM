@@ -23,6 +23,7 @@ import type {
   CustomerSummary,
   DailyMenuAdjustmentMutationResponse,
   DailyMenuAdjustmentAction,
+  DailyMenuComponent,
   DailyMenuSectionKey,
   DailyStructuredMenu,
   EffectiveAvailabilityStatus,
@@ -88,6 +89,12 @@ type AddItemPayload = {
     component_link_id?: number
     product_link_id?: number
     quantity?: number
+  }>
+  meat_mode?: 'traditional' | 'beef_only'
+  traditional_meat_component_ids?: number[]
+  additions?: Array<{
+    code: string
+    quantity: number
   }>
 }
 
@@ -676,14 +683,19 @@ export async function clearDailyMenuAdjustment(
 }
 
 async function getStructuredOperationalProducts(): Promise<Product[]> {
-  const catalog = await getStructuredMenuCatalog()
+  const dailyMenu = await getDailyStructuredMenu()
+  const dailyMeats = dailyMenu.sections.meat ?? []
 
-  return catalog.categories
-    .flatMap((category) => category.products.map((product) => mapStructuredProduct(product, category.name)))
+  return dailyMenu.catalog.categories
+    .flatMap((category) => category.products.map((product) => mapStructuredProduct(product, category.name, dailyMeats)))
     .filter((product) => product.available)
 }
 
-function mapStructuredProduct(product: StructuredMenuProduct, categoryName: string): Product {
+function mapStructuredProduct(
+  product: StructuredMenuProduct,
+  categoryName: string,
+  dailyMeats: DailyMenuComponent[] = [],
+): Product {
   return {
     id: String(product.id),
     slug: product.slug,
@@ -695,6 +707,9 @@ function mapStructuredProduct(product: StructuredMenuProduct, categoryName: stri
     tags: [],
     options: [],
     structuredGroups: product.groups,
+    meatConfiguration: product.meat_configuration,
+    additions: product.additions,
+    dailyMeatOptions: product.meat_configuration ? dailyMeats : [],
     comboItems: product.combo_items,
     usesWeeklyMenu: product.uses_weekly_menu,
     configurationPending: product.configuration_pending,
