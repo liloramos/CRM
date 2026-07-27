@@ -32,6 +32,30 @@ class UpdateMenuProductRequest extends FormRequest
             'display_order' => ['required', 'integer', 'min:0', 'max:65535'],
             'service_days' => ['required', 'array'],
             'service_days.*' => ['required', Rule::in(array_column(ProductServiceDay::cases(), 'value'))],
+            'beef_rules' => ['nullable', 'array'],
+            'beef_rules.beef_only' => ['required_with:beef_rules', 'array'],
+            'beef_rules.beef_only.enabled' => ['required_with:beef_rules.beef_only', 'boolean'],
+            'beef_rules.beef_only.final_price_cents' => [
+                'nullable',
+                'integer',
+                'min:0',
+                'required_if:beef_rules.beef_only.enabled,true',
+            ],
+            'beef_rules.extra_beef' => ['required_with:beef_rules', 'array'],
+            'beef_rules.extra_beef.enabled' => ['required_with:beef_rules.extra_beef', 'boolean'],
+            'beef_rules.extra_beef.price_cents' => [
+                'nullable',
+                'integer',
+                'min:0',
+                'required_if:beef_rules.extra_beef.enabled,true',
+            ],
+            'beef_rules.extra_beef.max_quantity' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:10',
+                'required_if:beef_rules.extra_beef.enabled,true',
+            ],
         ];
     }
 

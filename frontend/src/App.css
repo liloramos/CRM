@@ -2205,6 +2205,24 @@ label textarea {
   font-weight: 800;
 }
 
+.menu-beef-rules-form {
+  gap: 12px;
+}
+
+.menu-beef-rule-card {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.menu-beef-rule-card .muted-text {
+  margin: 0;
+}
+
 .menu-admin-adjustments {
   display: grid;
   gap: 10px;

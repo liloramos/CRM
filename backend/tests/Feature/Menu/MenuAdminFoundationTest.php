@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductGroupComponent;
 use App\Models\ProductOption;
+use App\Models\ProductOptionGroup;
 use App\Models\ProductServiceDay as ProductServiceDayModel;
 use App\Models\Role;
 use App\Models\User;
@@ -94,81 +95,103 @@ class MenuAdminFoundationTest extends TestCase
         $this->assertFalse($this->catalogHasProduct('2026-07-23', 'n5-casa'));
     }
 
-    public function test_n8_traditional_pending_bife_configuration_can_be_marked_as_not_offered(): void
+    public function test_n8_traditional_beef_rules_are_resolved_in_the_baseline(): void
     {
         $this->seedAdminMenu();
 
         $admin = $this->adminUser();
-        $link = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $beefOnly = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $extraBeef = $this->componentOptionLink('n8-tradicional', 'bife_adicional', 'bife');
 
-        $this->assertFalse($link->is_active);
-        $this->assertTrue($link->requires_confirmation);
-        $this->assertNull($link->final_price_cents);
-
-        $this->actingAs($admin)
-            ->patchJson($this->componentOptionUrl($link), [
-                'date' => '2026-07-23',
-                'resolution' => 'not_offered',
-            ])
-            ->assertOk()
-            ->assertJsonPath('data.slug', 'n8-tradicional')
-            ->assertJsonPath('data.configuration_pending', false);
-
-        $link->refresh();
-
-        $this->assertFalse($link->is_active);
-        $this->assertFalse($link->requires_confirmation);
-        $this->assertNull($link->final_price_cents);
-        $this->assertSame(0, $link->price_delta_cents);
-    }
-
-    public function test_n8_traditional_pending_bife_configuration_can_be_offered_with_human_defined_price(): void
-    {
-        $this->seedAdminMenu();
-
-        $admin = $this->adminUser();
-        $link = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $this->assertTrue($beefOnly->is_active);
+        $this->assertFalse($beefOnly->requires_confirmation);
+        $this->assertSame(2000, $beefOnly->final_price_cents);
+        $this->assertSame(400, $beefOnly->price_delta_cents);
+        $this->assertTrue($extraBeef->is_active);
+        $this->assertSame(700, $extraBeef->price_delta_cents);
 
         $this->actingAs($admin)
-            ->patchJson($this->componentOptionUrl($link), [
-                'date' => '2026-07-23',
-                'resolution' => 'offered',
-                'final_price_cents' => 2100,
-            ])
+            ->getJson("/api/app/menu/products/{$this->product('n8-tradicional')->id}/configuration?date=2026-07-23")
             ->assertOk()
             ->assertJsonPath('data.slug', 'n8-tradicional')
             ->assertJsonPath('data.configuration_pending', false)
-            ->assertJsonPath('data.groups.0.component_options.0.final_price_cents', 2100);
-
-        $link->refresh();
-
-        $this->assertTrue($link->is_active);
-        $this->assertFalse($link->requires_confirmation);
-        $this->assertSame(2100, $link->final_price_cents);
-        $this->assertSame(500, $link->price_delta_cents);
+            ->assertJsonPath('data.meat_configuration.beef_only.final_price_cents', 2000)
+            ->assertJsonPath('data.additions.0.code', 'extra_beef')
+            ->assertJsonPath('data.additions.0.price_cents', 700);
     }
 
-    public function test_n8_traditional_pending_bife_price_cannot_be_lower_than_base_price(): void
+    public function test_admin_can_update_distinct_beef_rules_without_duplicate_groups(): void
     {
         $this->seedAdminMenu();
 
         $admin = $this->adminUser();
-        $link = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $product = $this->product('n8-tradicional');
+        $payload = [
+            ...$this->productPayload($product),
+            'beef_rules' => [
+                'beef_only' => [
+                    'enabled' => true,
+                    'final_price_cents' => 2050,
+                ],
+                'extra_beef' => [
+                    'enabled' => true,
+                    'price_cents' => 750,
+                    'max_quantity' => 1,
+                ],
+            ],
+        ];
 
         $this->actingAs($admin)
-            ->patchJson($this->componentOptionUrl($link), [
-                'date' => '2026-07-23',
-                'resolution' => 'offered',
-                'final_price_cents' => 1500,
-            ])
+            ->patchJson($this->productUrl($product), $payload)
+            ->assertOk()
+            ->assertJsonPath('data.slug', 'n8-tradicional')
+            ->assertJsonPath('data.configuration_pending', false)
+            ->assertJsonPath('data.meat_configuration.beef_only.final_price_cents', 2050)
+            ->assertJsonPath('data.additions.0.price_cents', 750);
+
+        $beefOnly = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $extraBeef = $this->componentOptionLink('n8-tradicional', 'bife_adicional', 'bife');
+
+        $this->assertSame(2050, $beefOnly->final_price_cents);
+        $this->assertSame(450, $beefOnly->price_delta_cents);
+        $this->assertSame(750, $extraBeef->price_delta_cents);
+        $this->assertSame(1, $extraBeef->group->max_quantity);
+        $this->assertSame(2, ProductOptionGroup::query()
+            ->where('product_id', $product->id)
+            ->whereIn('code', ['variacao_bife', 'bife_adicional'])
+            ->count());
+    }
+
+    public function test_beef_rules_reject_invalid_prices_and_preserve_existing_values(): void
+    {
+        $this->seedAdminMenu();
+
+        $admin = $this->adminUser();
+        $product = $this->product('n8-tradicional');
+        $payload = [
+            ...$this->productPayload($product),
+            'beef_rules' => [
+                'beef_only' => [
+                    'enabled' => true,
+                    'final_price_cents' => 1500,
+                ],
+                'extra_beef' => [
+                    'enabled' => true,
+                    'price_cents' => 700,
+                    'max_quantity' => 1,
+                ],
+            ],
+        ];
+
+        $this->actingAs($admin)
+            ->patchJson($this->productUrl($product), $payload)
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('final_price_cents');
+            ->assertJsonValidationErrors('beef_rules.beef_only.final_price_cents');
 
-        $link->refresh();
+        $beefOnly = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
 
-        $this->assertFalse($link->is_active);
-        $this->assertTrue($link->requires_confirmation);
-        $this->assertNull($link->final_price_cents);
+        $this->assertSame(2000, $beefOnly->final_price_cents);
+        $this->assertSame(400, $beefOnly->price_delta_cents);
     }
 
     public function test_product_schedule_filters_feijoadas_and_legacy_confirmed_products_by_day(): void

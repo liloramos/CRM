@@ -102,6 +102,17 @@ export type UpdateMenuProductPayload = {
   is_available_by_default: boolean
   display_order: number
   service_days: ProductServiceDayKey[]
+  beef_rules?: {
+    beef_only: {
+      enabled: boolean
+      final_price_cents: number | null
+    }
+    extra_beef: {
+      enabled: boolean
+      price_cents: number | null
+      max_quantity: number | null
+    }
+  }
 }
 
 export type SaveMenuComponentPayload = {

@@ -273,6 +273,39 @@ export type StructuredComboItem = {
   display_order: number
 }
 
+export type StructuredMeatConfiguration = {
+  traditional: {
+    enabled: boolean
+    base_price_cents: number | null
+    selection_rules: {
+      min: number | null
+      max: number | null
+      same_component_only: boolean
+    }
+  }
+  beef_only: {
+    enabled: boolean
+    final_price_cents: number | null
+    price_delta_cents: number | null
+    replaces_traditional_meats: boolean
+    option_id: number | null
+    component: StructuredMenuComponentSummary | null
+  }
+}
+
+export type StructuredProductAddition = {
+  code: 'extra_beef' | string
+  group_code: string
+  name: string
+  enabled: boolean
+  price_cents: number
+  price_delta_cents: number
+  max_quantity: number | null
+  requires_traditional_meats: boolean
+  option_id: number
+  component: StructuredMenuComponentSummary
+}
+
 export type StructuredMenuProduct = StructuredMenuProductSummary & {
   description: string | null
   menu_rule_code: string | null
@@ -280,6 +313,8 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
   allows_item_notes: boolean
   notes_hint: string | null
   configuration_pending: boolean
+  meat_configuration: StructuredMeatConfiguration | null
+  additions: StructuredProductAddition[]
   groups: StructuredProductOptionGroup[]
   combo_items: StructuredComboItem[]
 }

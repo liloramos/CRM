@@ -174,14 +174,26 @@ class StructuredMenuReadApiTest extends TestCase
         $this->assertSame(2200, $n9Bife['final_price_cents']);
         $this->assertTrue($n9Bife['link_active']);
         $this->assertFalse($n9Bife['requires_confirmation']);
+        $this->assertSame(2200, $n9['meat_configuration']['beef_only']['final_price_cents']);
+        $this->assertSame(700, $n9['additions'][0]['price_cents']);
+        $this->assertSame(1, $n9['additions'][0]['max_quantity']);
 
         $n8Tradicional = $service->configuration($this->product('n8-tradicional'), $company, $date);
         $n8Bife = $this->group($n8Tradicional, 'variacao_bife')['component_options'][0];
         $this->assertSame('bife', $n8Bife['slug']);
-        $this->assertNull($n8Bife['final_price_cents']);
-        $this->assertFalse($n8Bife['link_active']);
-        $this->assertTrue($n8Bife['requires_confirmation']);
-        $this->assertTrue($n8Tradicional['configuration_pending']);
+        $this->assertSame(400, $n8Bife['price_delta_cents']);
+        $this->assertSame(2000, $n8Bife['final_price_cents']);
+        $this->assertTrue($n8Bife['link_active']);
+        $this->assertFalse($n8Bife['requires_confirmation']);
+        $this->assertFalse($n8Tradicional['configuration_pending']);
+        $this->assertSame(['variacao_bife', 'bife_adicional'], array_column($n8Tradicional['groups'], 'code'));
+        $this->assertSame(1600, $n8Tradicional['meat_configuration']['traditional']['base_price_cents']);
+        $this->assertSame(2, $n8Tradicional['meat_configuration']['traditional']['selection_rules']['min']);
+        $this->assertSame(2, $n8Tradicional['meat_configuration']['traditional']['selection_rules']['max']);
+        $this->assertSame(2000, $n8Tradicional['meat_configuration']['beef_only']['final_price_cents']);
+        $this->assertSame('extra_beef', $n8Tradicional['additions'][0]['code']);
+        $this->assertSame(700, $n8Tradicional['additions'][0]['price_cents']);
+        $this->assertSame(1, $n8Tradicional['additions'][0]['max_quantity']);
     }
 
     public function test_product_configuration_marks_unavailable_component_options(): void

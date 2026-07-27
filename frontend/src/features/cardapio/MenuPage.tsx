@@ -77,6 +77,15 @@ type ProductFormState = {
   is_available_by_default: boolean
   display_order: string
   service_days: ProductServiceDayKey[]
+  beef_rules: BeefRulesFormState | null
+}
+
+type BeefRulesFormState = {
+  beef_only_enabled: boolean
+  beef_only_final_price: string
+  extra_beef_enabled: boolean
+  extra_beef_price: string
+  extra_beef_max_quantity: string
 }
 
 type ComponentFormState = {
@@ -293,6 +302,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       is_available_by_default: product.is_available_by_default,
       display_order: String(product.display_order),
       service_days: [...product.service_days],
+      beef_rules: beefRulesFormFromProduct(product),
     })
     setModal({ type: 'product', product })
   }
@@ -422,6 +432,39 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }
   }
 
+  function beefRulesPayload(form: BeefRulesFormState) {
+    const beefOnlyFinalPrice = form.beef_only_enabled ? parseCurrencyToCents(form.beef_only_final_price) : null
+    const extraBeefPrice = form.extra_beef_enabled ? parseCurrencyToCents(form.extra_beef_price) : null
+    const extraBeefMaxQuantity = form.extra_beef_enabled ? parseInteger(form.extra_beef_max_quantity) : null
+
+    if (form.beef_only_enabled && beefOnlyFinalPrice === null) {
+      setMutationError('Informe o preco final do modo somente bife.')
+      return null
+    }
+
+    if (form.extra_beef_enabled && extraBeefPrice === null) {
+      setMutationError('Informe o preco do bife adicional.')
+      return null
+    }
+
+    if (form.extra_beef_enabled && (extraBeefMaxQuantity === null || extraBeefMaxQuantity < 1)) {
+      setMutationError('Informe uma quantidade maxima valida para o bife adicional.')
+      return null
+    }
+
+    return {
+      beef_only: {
+        enabled: form.beef_only_enabled,
+        final_price_cents: beefOnlyFinalPrice,
+      },
+      extra_beef: {
+        enabled: form.extra_beef_enabled,
+        price_cents: extraBeefPrice,
+        max_quantity: extraBeefMaxQuantity,
+      },
+    }
+  }
+
   async function handleSaveProduct(product: StructuredMenuProduct) {
     if (!productForm) {
       return
@@ -440,6 +483,12 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       return
     }
 
+    const beefRules = productForm.beef_rules ? beefRulesPayload(productForm.beef_rules) : undefined
+
+    if (beefRules === null) {
+      return
+    }
+
     await runMutation(async () => {
       await updateMenuProduct(product.id, {
         date: selectedDate,
@@ -450,6 +499,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
         is_available_by_default: productForm.is_available_by_default,
         display_order: displayOrder,
         service_days: productForm.service_days,
+        ...(beefRules ? { beef_rules: beefRules } : {}),
       })
     }, 'Produto atualizado com dados do backend.')
   }
@@ -1955,7 +2005,75 @@ function ProductForm({
           ))}
         </div>
       </fieldset>
+      {form.beef_rules ? (
+        <BeefRulesForm form={form.beef_rules} isMutating={isMutating} setForm={setForm} />
+      ) : null}
     </>
+  )
+}
+
+function BeefRulesForm({
+  form,
+  isMutating,
+  setForm,
+}: {
+  form: BeefRulesFormState
+  isMutating: boolean
+  setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void
+}) {
+  return (
+    <fieldset className="menu-admin-fieldset menu-beef-rules-form">
+      <legend>Regras de bife</legend>
+      <div className="menu-beef-rule-card">
+        <CheckField
+          checked={form.beef_only_enabled}
+          disabled={isMutating}
+          label="Somente bife"
+          onChange={(checked) => updateBeefRulesForm(setForm, 'beef_only_enabled', checked)}
+        />
+        <p className="muted-text">Substitui todas as carnes tradicionais.</p>
+        <label>
+          <span>Preco final em reais</span>
+          <input
+            disabled={isMutating || !form.beef_only_enabled}
+            inputMode="decimal"
+            placeholder="Ex.: 20,00"
+            value={form.beef_only_final_price}
+            onChange={(event) => updateBeefRulesForm(setForm, 'beef_only_final_price', event.target.value)}
+          />
+        </label>
+      </div>
+      <div className="menu-beef-rule-card">
+        <CheckField
+          checked={form.extra_beef_enabled}
+          disabled={isMutating}
+          label="Bife adicional"
+          onChange={(checked) => updateBeefRulesForm(setForm, 'extra_beef_enabled', checked)}
+        />
+        <p className="muted-text">Mantem as carnes escolhidas e acrescenta um pedaco de bife.</p>
+        <div className="menu-admin-form-grid">
+          <label>
+            <span>Valor adicional em reais</span>
+            <input
+              disabled={isMutating || !form.extra_beef_enabled}
+              inputMode="decimal"
+              placeholder="Ex.: 7,00"
+              value={form.extra_beef_price}
+              onChange={(event) => updateBeefRulesForm(setForm, 'extra_beef_price', event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Quantidade maxima</span>
+            <input
+              disabled={isMutating || !form.extra_beef_enabled}
+              inputMode="numeric"
+              value={form.extra_beef_max_quantity}
+              onChange={(event) => updateBeefRulesForm(setForm, 'extra_beef_max_quantity', event.target.value)}
+            />
+          </label>
+        </div>
+      </div>
+    </fieldset>
   )
 }
 
@@ -2610,6 +2728,24 @@ function pendingComponentOption(product: StructuredMenuProduct): StructuredCompo
   return null
 }
 
+function beefRulesFormFromProduct(product: StructuredMenuProduct): BeefRulesFormState | null {
+  if (!product.meat_configuration) {
+    return null
+  }
+
+  const extraBeef = product.additions.find((addition) => addition.code === 'extra_beef')
+
+  return {
+    beef_only_enabled: product.meat_configuration.beef_only.enabled,
+    beef_only_final_price: product.meat_configuration.beef_only.final_price_cents !== null
+      ? centsToInput(product.meat_configuration.beef_only.final_price_cents)
+      : '',
+    extra_beef_enabled: extraBeef?.enabled ?? false,
+    extra_beef_price: extraBeef ? centsToInput(extraBeef.price_cents) : '',
+    extra_beef_max_quantity: String(extraBeef?.max_quantity ?? 1),
+  }
+}
+
 function productInsights(product: StructuredMenuProduct): string[] {
   const insights: string[] = []
 
@@ -2617,11 +2753,17 @@ function productInsights(product: StructuredMenuProduct): string[] {
     insights.push('Usa o cardapio do dia para quentes, saladas, carnes e extras.')
   }
 
+  beefRuleInsights(product).forEach((insight) => insights.push(insight))
+
   product.combo_items.forEach((item) => {
     insights.push(`Inclui ${item.quantity}x ${item.included_product.name} no preco fechado.`)
   })
 
   product.groups.forEach((group) => {
+    if (product.meat_configuration && ['variacao_bife', 'bife_adicional'].includes(group.code)) {
+      return
+    }
+
     const summary = summarizeGroup(group)
 
     if (summary) {
@@ -2641,6 +2783,35 @@ function productInsights(product: StructuredMenuProduct): string[] {
         ? `Configuracao pendente: decidir se ${componentDisplayName(pendingOption)} sera oferecido e qual sera o preco final.`
         : 'Ha uma configuracao pendente de confirmacao operacional.',
     )
+  }
+
+  return insights
+}
+
+function beefRuleInsights(product: StructuredMenuProduct): string[] {
+  if (!product.meat_configuration) {
+    return []
+  }
+
+  const basePrice = product.meat_configuration.traditional.base_price_cents ?? productPriceCents(product)
+  const beefOnly = product.meat_configuration.beef_only
+  const extraBeef = product.additions.find((addition) => addition.code === 'extra_beef')
+  const insights = [`Preco padrao: ${formatCurrency(centsToCurrency(basePrice))}.`]
+
+  if (beefOnly.enabled && beefOnly.final_price_cents !== null) {
+    insights.push(`Somente bife: ${formatCurrency(centsToCurrency(beefOnly.final_price_cents))}; substitui as carnes tradicionais.`)
+  } else {
+    insights.push('Somente bife: inativo.')
+  }
+
+  if (extraBeef?.enabled) {
+    const total = basePrice + extraBeef.price_cents
+
+    insights.push(
+      `Adicionar bife as carnes escolhidas: + ${formatCurrency(centsToCurrency(extraBeef.price_cents))}; total ${formatCurrency(centsToCurrency(total))}.`,
+    )
+  } else {
+    insights.push('Bife adicional: inativo.')
   }
 
   return insights
@@ -2778,6 +2949,26 @@ function updateProductForm<Key extends keyof ProductFormState>(
   value: ProductFormState[Key],
 ) {
   setForm((current) => (current ? { ...current, [key]: value } : current))
+}
+
+function updateBeefRulesForm<Key extends keyof BeefRulesFormState>(
+  setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void,
+  key: Key,
+  value: BeefRulesFormState[Key],
+) {
+  setForm((current) => {
+    if (!current?.beef_rules) {
+      return current
+    }
+
+    return {
+      ...current,
+      beef_rules: {
+        ...current.beef_rules,
+        [key]: value,
+      },
+    }
+  })
 }
 
 function updateComponentForm<Key extends keyof ComponentFormState>(

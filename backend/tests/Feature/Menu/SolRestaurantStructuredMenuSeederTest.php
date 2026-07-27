@@ -38,8 +38,8 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
         $this->assertSame(29, Product::query()->where('company_id', $company->id)->count());
         $this->assertSame(64, DB::table('menu_components')->where('company_id', $company->id)->count());
-        $this->assertSame(10, DB::table('product_option_groups')->where('company_id', $company->id)->count());
-        $this->assertSame(30, DB::table('product_group_components')->count());
+        $this->assertSame(12, DB::table('product_option_groups')->where('company_id', $company->id)->count());
+        $this->assertSame(32, DB::table('product_group_components')->count());
         $this->assertSame(5, DB::table('product_group_products')->count());
         $this->assertSame(1, WeeklyMenu::query()->where('company_id', $company->id)->count());
         $this->assertSame(210, WeeklyMenuComponentItem::query()->where('company_id', $company->id)->count());
@@ -229,8 +229,8 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
 
-        $this->assertSame(['variacao_bife'], $this->groupCodes('n8-tradicional'));
-        $this->assertSame(['variacao_bife'], $this->groupCodes('n9-tradicional'));
+        $this->assertSame(['variacao_bife', 'bife_adicional'], $this->groupCodes('n8-tradicional'));
+        $this->assertSame(['variacao_bife', 'bife_adicional'], $this->groupCodes('n9-tradicional'));
 
         $n9Link = $this->componentLinks('n9-tradicional', 'variacao_bife')->first();
         $this->assertNotNull($n9Link);
@@ -243,10 +243,27 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         $n8Link = $this->componentLinks('n8-tradicional', 'variacao_bife')->first();
         $this->assertNotNull($n8Link);
         $this->assertSame(['bife'], $this->componentSlugs('n8-tradicional', 'variacao_bife'));
-        $this->assertSame(0, $n8Link->price_delta_cents);
-        $this->assertNull($n8Link->final_price_cents);
-        $this->assertTrue($n8Link->requires_confirmation);
-        $this->assertFalse($n8Link->is_active);
+        $this->assertSame(400, $n8Link->price_delta_cents);
+        $this->assertSame(2000, $n8Link->final_price_cents);
+        $this->assertFalse($n8Link->requires_confirmation);
+        $this->assertTrue($n8Link->is_active);
+
+        foreach (['n8-tradicional', 'n9-tradicional'] as $slug) {
+            $additional = $this->componentLinks($slug, 'bife_adicional')->first();
+            $group = ProductOptionGroup::query()
+                ->whereHas('product', fn ($query) => $query->where('slug', $slug))
+                ->where('code', 'bife_adicional')
+                ->firstOrFail();
+
+            $this->assertNotNull($additional);
+            $this->assertSame(['bife'], $this->componentSlugs($slug, 'bife_adicional'));
+            $this->assertSame(ProductSelectionMode::Addon, $group->selection_mode);
+            $this->assertSame(700, $additional->price_delta_cents);
+            $this->assertNull($additional->final_price_cents);
+            $this->assertSame(1, $group->max_quantity);
+            $this->assertFalse($additional->requires_confirmation);
+            $this->assertTrue($additional->is_active);
+        }
     }
 
     public function test_no_paid_ovo_group_or_legacy_ovo_product_link_is_created(): void
