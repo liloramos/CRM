@@ -182,9 +182,10 @@ class SolRestaurantProductRuleSeeder extends Seeder
 
     private function seedBifeVariationRules(Company $company): void
     {
-        $n9 = $this->group($company, $this->product($company, 'n9-tradicional'), [
+        $n9Product = $this->product($company, 'n9-tradicional');
+        $n9 = $this->group($company, $n9Product, [
             'code' => 'variacao_bife',
-            'label' => 'Variação com bife',
+            'label' => 'Somente bife',
             'selection_mode' => ProductSelectionMode::Variation,
             'selection_actor' => ProductSelectionActor::Customer,
             'is_required' => false,
@@ -203,9 +204,12 @@ class SolRestaurantProductRuleSeeder extends Seeder
             ],
         ]);
 
-        $n8 = $this->group($company, $this->product($company, 'n8-tradicional'), [
+        $this->seedBifeAdditionalRule($company, $n9Product, 20);
+
+        $n8Product = $this->product($company, 'n8-tradicional');
+        $n8 = $this->group($company, $n8Product, [
             'code' => 'variacao_bife',
-            'label' => 'Variação com bife',
+            'label' => 'Somente bife',
             'selection_mode' => ProductSelectionMode::Variation,
             'selection_actor' => ProductSelectionActor::Customer,
             'is_required' => false,
@@ -217,10 +221,39 @@ class SolRestaurantProductRuleSeeder extends Seeder
 
         $this->syncComponentLinks($n8, [
             'bife' => [
-                'price_delta_cents' => 0,
+                'price_delta_cents' => 400,
+                'final_price_cents' => 2000,
+                'requires_confirmation' => false,
+                'is_active' => true,
+            ],
+        ]);
+
+        $this->seedBifeAdditionalRule($company, $n8Product, 20);
+    }
+
+    private function seedBifeAdditionalRule(Company $company, Product $product, int $displayOrder): void
+    {
+        $group = $this->group($company, $product, [
+            'code' => 'bife_adicional',
+            'label' => 'Bife adicional',
+            'selection_mode' => ProductSelectionMode::Addon,
+            'selection_actor' => ProductSelectionActor::Customer,
+            'is_required' => false,
+            'min_choices' => 0,
+            'max_choices' => 1,
+            'min_quantity' => 0,
+            'max_quantity' => 1,
+            'same_component_only' => true,
+            'included_in_base_price' => false,
+            'display_order' => $displayOrder,
+        ]);
+
+        $this->syncComponentLinks($group, [
+            'bife' => [
+                'price_delta_cents' => 700,
                 'final_price_cents' => null,
-                'requires_confirmation' => true,
-                'is_active' => false,
+                'requires_confirmation' => false,
+                'is_active' => true,
             ],
         ]);
     }

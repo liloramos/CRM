@@ -20,6 +20,7 @@ import {
   setComponentAvailability,
   updateMenuComponent,
   updateMenuProduct,
+  updateProductComponentOption,
   updateWeeklyMenuItem,
   upsertDailyMenuAdjustment,
   upsertWeeklyMenuComponent,
@@ -41,6 +42,7 @@ import type {
   MenuComponentTypeKey,
   ProductServiceDayKey,
   StructuredComponentOption,
+  StructuredMenuComponentSummary,
   StructuredMenuProduct,
   StructuredProductOption,
   StructuredProductOptionGroup,
@@ -63,6 +65,8 @@ type ModalState =
   | { type: 'daily-adjustment-clear'; adjustment: AdminDailyMenuAdjustment }
   | { type: 'weekly-item'; item: AdminWeeklyMenuItem | null }
   | { type: 'weekly-delete'; item: AdminWeeklyMenuItem }
+  | { type: 'pending-configuration'; product: StructuredMenuProduct }
+  | { type: 'component-days'; component: AdminMenuComponent }
   | null
 
 type ProductFormState = {
@@ -73,6 +77,15 @@ type ProductFormState = {
   is_available_by_default: boolean
   display_order: string
   service_days: ProductServiceDayKey[]
+  beef_rules: BeefRulesFormState | null
+}
+
+type BeefRulesFormState = {
+  beef_only_enabled: boolean
+  beef_only_final_price: string
+  extra_beef_enabled: boolean
+  extra_beef_price: string
+  extra_beef_max_quantity: string
 }
 
 type ComponentFormState = {
@@ -95,6 +108,7 @@ type DailyAdjustmentFormState = {
   action: DailyMenuAdjustmentAction
   display_order: string
   notes: string
+  search: string
 }
 
 type WeeklyItemFormState = {
@@ -105,6 +119,23 @@ type WeeklyItemFormState = {
   is_active: boolean
   notes: string
 }
+
+type PendingConfigurationFormState = {
+  resolution: 'offered' | 'not_offered'
+  final_price: string
+}
+
+type ComponentDaysFormState = {
+  service_days: WeeklyMenuServiceDayKey[]
+  section: DailyMenuSectionKey
+  display_order: string
+}
+
+type ComponentAdminFilter = 'all' | MenuComponentTypeKey | 'active' | 'inactive' | 'without_days'
+
+type ProductAdminFilter = 'active' | 'inactive' | 'legacy' | 'all'
+
+type ProductCardMode = 'daily' | 'admin' | 'rules'
 
 const menuAdminTabKey = 'sol.menu.admin.activeTab.v1'
 
@@ -187,6 +218,11 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
   const [availabilityForm, setAvailabilityForm] = useState<AvailabilityFormState>(emptyAvailabilityForm())
   const [dailyAdjustmentForm, setDailyAdjustmentForm] = useState<DailyAdjustmentFormState>(emptyDailyAdjustmentForm())
   const [weeklyItemForm, setWeeklyItemForm] = useState<WeeklyItemFormState>(emptyWeeklyItemForm())
+  const [pendingConfigurationForm, setPendingConfigurationForm] = useState<PendingConfigurationFormState>({
+    final_price: '',
+    resolution: 'not_offered',
+  })
+  const [componentDaysForm, setComponentDaysForm] = useState<ComponentDaysFormState>(emptyComponentDaysForm())
 
   const loadDailyMenu = useCallback(async () => {
     setIsDailyLoading(true)
@@ -217,7 +253,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     try {
       const [productsResponse, componentsResponse, weeklyResponse, adjustmentsResponse] = await Promise.all([
         getAdminMenuProducts(selectedDate),
-        getAdminMenuComponents(),
+        getAdminMenuComponents(selectedDate),
         getAdminWeeklyMenu(),
         getAdminDailyMenuAdjustments(selectedDate),
       ])
@@ -261,11 +297,12 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     setProductForm({
       name: product.name,
       description: product.description ?? '',
-      price: centsToInput(product.base_price_cents),
+      price: centsToInput(productPriceCents(product)),
       is_active: product.is_active,
       is_available_by_default: product.is_available_by_default,
       display_order: String(product.display_order),
       service_days: [...product.service_days],
+      beef_rules: beefRulesFormFromProduct(product),
     })
     setModal({ type: 'product', product })
   }
@@ -292,14 +329,19 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     setModal({ type: 'availability', item, action: status === 'clear' ? 'clear' : 'set' })
   }
 
-  function openDailyAdjustmentModal(item: DailyMenuComponent | null, action: DailyMenuAdjustmentAction) {
+  function openDailyAdjustmentModal(
+    item: DailyMenuComponent | null,
+    action: DailyMenuAdjustmentAction,
+    defaults?: Partial<DailyAdjustmentFormState>,
+  ) {
     setMutationError(null)
     setDailyAdjustmentForm({
-      component_id: item ? String(item.component.id) : '',
-      section: item?.section ?? 'meat',
+      component_id: item ? String(item.component.id) : defaults?.component_id ?? '',
+      section: item?.section ?? defaults?.section ?? 'meat',
       action,
-      display_order: item ? String(item.display_order) : '',
-      notes: item?.notes ?? '',
+      display_order: item ? String(item.display_order) : defaults?.display_order ?? '',
+      notes: item?.notes ?? defaults?.notes ?? '',
+      search: defaults?.search ?? '',
     })
     setModal({ type: 'daily-adjustment', item, action })
   }
@@ -315,6 +357,35 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       notes: item?.notes ?? defaults?.notes ?? '',
     })
     setModal({ type: 'weekly-item', item })
+  }
+
+  function openPendingConfigurationModal(product: StructuredMenuProduct) {
+    const pendingOption = pendingComponentOption(product)
+
+    setMutationError(null)
+    setPendingConfigurationForm({
+      final_price: pendingOption?.final_price_cents ? centsToInput(pendingOption.final_price_cents) : '',
+      resolution: 'not_offered',
+    })
+    setModal({ type: 'pending-configuration', product })
+  }
+
+  function openComponentDaysModal(component: AdminMenuComponent) {
+    setMutationError(null)
+    setComponentDaysForm({
+      display_order: '',
+      section: sectionForComponentType(component.component_type),
+      service_days: component.weekly_menu_items.map((item) => item.service_day),
+    })
+    setModal({ type: 'component-days', component })
+  }
+
+  function openComponentDailyAdjustment(component: AdminMenuComponent) {
+    openDailyAdjustmentModal(null, 'include', {
+      component_id: String(component.id),
+      search: componentDisplayName(component),
+      section: sectionForComponentType(component.component_type),
+    })
   }
 
   async function handleModalPrimary() {
@@ -351,6 +422,47 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     if (modal?.type === 'weekly-delete') {
       await handleDeleteWeeklyItem(modal.item)
     }
+
+    if (modal?.type === 'pending-configuration') {
+      await handleResolvePendingConfiguration(modal.product)
+    }
+
+    if (modal?.type === 'component-days') {
+      await handleSaveComponentDays(modal.component)
+    }
+  }
+
+  function beefRulesPayload(form: BeefRulesFormState) {
+    const beefOnlyFinalPrice = form.beef_only_enabled ? parseCurrencyToCents(form.beef_only_final_price) : null
+    const extraBeefPrice = form.extra_beef_enabled ? parseCurrencyToCents(form.extra_beef_price) : null
+    const extraBeefMaxQuantity = form.extra_beef_enabled ? parseInteger(form.extra_beef_max_quantity) : null
+
+    if (form.beef_only_enabled && beefOnlyFinalPrice === null) {
+      setMutationError('Informe o preco final do modo somente bife.')
+      return null
+    }
+
+    if (form.extra_beef_enabled && extraBeefPrice === null) {
+      setMutationError('Informe o preco do bife adicional.')
+      return null
+    }
+
+    if (form.extra_beef_enabled && (extraBeefMaxQuantity === null || extraBeefMaxQuantity < 1)) {
+      setMutationError('Informe uma quantidade maxima valida para o bife adicional.')
+      return null
+    }
+
+    return {
+      beef_only: {
+        enabled: form.beef_only_enabled,
+        final_price_cents: beefOnlyFinalPrice,
+      },
+      extra_beef: {
+        enabled: form.extra_beef_enabled,
+        price_cents: extraBeefPrice,
+        max_quantity: extraBeefMaxQuantity,
+      },
+    }
   }
 
   async function handleSaveProduct(product: StructuredMenuProduct) {
@@ -371,6 +483,12 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       return
     }
 
+    const beefRules = productForm.beef_rules ? beefRulesPayload(productForm.beef_rules) : undefined
+
+    if (beefRules === null) {
+      return
+    }
+
     await runMutation(async () => {
       await updateMenuProduct(product.id, {
         date: selectedDate,
@@ -381,6 +499,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
         is_available_by_default: productForm.is_available_by_default,
         display_order: displayOrder,
         service_days: productForm.service_days,
+        ...(beefRules ? { beef_rules: beefRules } : {}),
       })
     }, 'Produto atualizado com dados do backend.')
   }
@@ -503,6 +622,88 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }, 'Vinculo semanal removido.')
   }
 
+  async function handleResolvePendingConfiguration(product: StructuredMenuProduct) {
+    const pendingOption = pendingComponentOption(product)
+
+    if (!pendingOption) {
+      setMutationError('Nao ha configuracao pendente para este produto.')
+      return
+    }
+
+    const finalPriceCents = pendingConfigurationForm.resolution === 'offered'
+      ? parseCurrencyToCents(pendingConfigurationForm.final_price)
+      : null
+
+    if (pendingConfigurationForm.resolution === 'offered' && finalPriceCents === null) {
+      setMutationError('Informe o preco final da variacao em reais.')
+      return
+    }
+
+    if (
+      pendingConfigurationForm.resolution === 'offered'
+      && finalPriceCents !== null
+      && finalPriceCents < productPriceCents(product)
+    ) {
+      setMutationError('O preco final da variacao nao pode ser menor que o preco base do produto.')
+      return
+    }
+
+    await runMutation(async () => {
+      await updateProductComponentOption(pendingOption.id, {
+        date: selectedDate,
+        resolution: pendingConfigurationForm.resolution,
+        final_price_cents: finalPriceCents,
+      })
+    }, pendingConfigurationForm.resolution === 'offered'
+      ? 'Variacao configurada com preco informado.'
+      : 'Variacao marcada como nao oferecida.')
+  }
+
+  async function handleSaveComponentDays(component: AdminMenuComponent) {
+    const displayOrder = componentDaysForm.display_order ? parseInteger(componentDaysForm.display_order) : null
+
+    if (componentDaysForm.display_order && displayOrder === null) {
+      setMutationError('Informe uma ordem valida.')
+      return
+    }
+
+    const selectedDays = new Set(componentDaysForm.service_days)
+    const existingItems = component.weekly_menu_items
+
+    await runMutation(async () => {
+      for (const item of existingItems) {
+        if (!selectedDays.has(item.service_day)) {
+          await deleteWeeklyMenuItem(item.id)
+          continue
+        }
+
+        if (item.section !== componentDaysForm.section || (displayOrder !== null && item.display_order !== displayOrder)) {
+          await updateWeeklyMenuItem(item.id, {
+            service_day: item.service_day,
+            section: componentDaysForm.section,
+            display_order: displayOrder ?? item.display_order,
+            is_active: true,
+            notes: item.notes,
+          })
+        }
+      }
+
+      for (const day of componentDaysForm.service_days) {
+        const alreadyLinked = existingItems.some((item) => item.service_day === day)
+
+        if (!alreadyLinked) {
+          await upsertWeeklyMenuComponent(component.id, {
+            service_day: day,
+            section: componentDaysForm.section,
+            display_order: displayOrder,
+            is_active: true,
+            notes: null,
+          })
+        }
+      }
+    }, 'Dias da semana atualizados.')
+  }
+
   async function runMutation(action: () => Promise<void>, success: string) {
     setIsMutating(true)
     setMutationError(null)
@@ -589,7 +790,6 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             <TodayTab
               adjustments={dayAdjustments}
               canManageMenu={canManageMenu}
-              components={components}
               dailyMenu={dailyMenu}
               error={dailyError}
               isLoading={isDailyLoading}
@@ -607,6 +807,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
               categories={productCategories}
               isLoading={isAdminLoading && canManageMenu}
               onEditProduct={openProductModal}
+              onResolvePending={openPendingConfigurationModal}
             />
           ) : null}
 
@@ -614,19 +815,25 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             <WeeklyTab
               canManageMenu={canManageMenu}
               components={components}
+              dayAdjustments={dayAdjustments}
               isLoading={isAdminLoading}
+              onAddComponentToday={openComponentDailyAdjustment}
+              onClearAdjustment={(adjustment) => setModal({ type: 'daily-adjustment-clear', adjustment })}
               onCreateComponent={() => openComponentModal(null)}
               onDeleteItem={(item) => setModal({ type: 'weekly-delete', item })}
+              onDefineComponentDays={openComponentDaysModal}
               onEditComponent={openComponentModal}
               onEditItem={(item) => openWeeklyItemModal(item)}
+              onOpenComponentAvailability={(component, status) => openAvailabilityModal(dailyItemFromComponent(component), status)}
               onNewItem={(section) => openWeeklyItemModal(null, { service_day: selectedWeeklyDay, section })}
+              selectedDate={selectedDate}
               selectedDay={selectedWeeklyDay}
               setSelectedDay={setSelectedWeeklyDay}
               weeklyMenu={weeklyMenu}
             />
           ) : null}
 
-          {activeTab === 'rules' ? <RulesTab products={rulesProducts} /> : null}
+          {activeTab === 'rules' ? <RulesTab onResolvePending={canManageMenu ? openPendingConfigurationModal : undefined} products={rulesProducts} /> : null}
         </div>
       </div>
 
@@ -639,21 +846,30 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
           open
           primaryDisabled={isMutating}
           primaryLabel={modalPrimaryLabel(modal, isMutating)}
-          size={modal.type === 'product' || modal.type === 'weekly-item' ? 'lg' : 'md'}
+          size={
+            modal.type === 'product' || modal.type === 'weekly-item' || modal.type === 'pending-configuration' || modal.type === 'component-days'
+              ? 'lg'
+              : 'md'
+          }
           title={modalTitle(modal)}
         >
           {renderModalContent({
             availabilityForm,
             componentForm,
+            componentDaysForm,
             components,
+            dailyMenu,
             dailyAdjustmentForm,
             isMutating,
             modal,
             mutationError,
+            pendingConfigurationForm,
             productForm,
             setAvailabilityForm,
+            setComponentDaysForm,
             setComponentForm,
             setDailyAdjustmentForm,
+            setPendingConfigurationForm,
             setProductForm,
             setWeeklyItemForm,
             weeklyItemForm,
@@ -667,7 +883,6 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
 function TodayTab({
   adjustments,
   canManageMenu,
-  components,
   dailyMenu,
   error,
   isLoading,
@@ -679,7 +894,6 @@ function TodayTab({
 }: {
   adjustments: AdminDailyMenuAdjustment[]
   canManageMenu: boolean
-  components: AdminMenuComponent[]
   dailyMenu: DailyStructuredMenu | null
   error: string | null
   isLoading: boolean
@@ -723,11 +937,12 @@ function TodayTab({
         onOpenAvailability={onOpenAvailability}
       />
       {canManageMenu ? (
-        <DailyAdjustmentsPanel adjustments={adjustments} components={components} onClearAdjustment={onClearAdjustment} />
+        <DailyAdjustmentsPanel adjustments={adjustments} onClearAdjustment={onClearAdjustment} />
       ) : null}
       <ProductCatalog
         actionLabel="Vendaveis nesta data"
         emptyDescription="Nao ha produtos liberados pelo backend para esta data."
+        mode="daily"
         productsByCategory={dailyMenu.catalog.categories}
       />
     </div>
@@ -822,7 +1037,8 @@ function DailyMenuItem({
   return (
     <div className={item.available ? 'daily-menu-item' : 'daily-menu-item is-unavailable'}>
       <div className="daily-menu-item__content">
-        <strong>{item.component.name}</strong>
+        <strong>{componentDisplayName(item.component)}</strong>
+        {componentSupportingName(item.component) ? <span>{componentSupportingName(item.component)}</span> : null}
         <div className="menu-admin-inline-badges">
           <AvailabilityBadge availability={item.availability} />
           {item.source === 'daily_adjustment' ? (
@@ -833,7 +1049,7 @@ function DailyMenuItem({
         </div>
         {item.notes ? <span>{item.notes}</span> : null}
         {item.availability.reason ? <span>{item.availability.reason}</span> : null}
-        {item.availability.replacement ? <span>Substituto sugerido: {item.availability.replacement.name}</span> : null}
+        {item.availability.replacement ? <span>Substituto sugerido: {componentDisplayName(item.availability.replacement)}</span> : null}
       </div>
       {canManageMenu ? (
         <div className="daily-menu-item__actions menu-admin-item-actions">
@@ -861,45 +1077,54 @@ function DailyMenuItem({
 
 function DailyAdjustmentsPanel({
   adjustments,
-  components,
   onClearAdjustment,
 }: {
   adjustments: AdminDailyMenuAdjustment[]
-  components: AdminMenuComponent[]
   onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
 }) {
-  const bisteca = components.find((component) => component.slug === 'bisteca-de-porco-na-chapa')
-
   return (
     <Card className="menu-admin-adjustments">
       <SectionTitle
-        eyebrow="Exclusivo da data"
-        title="Ajustes do dia"
+        eyebrow="Excecao por data"
+        title="Alteracoes somente de hoje"
       />
       <p className="muted-text">
-        {bisteca
-          ? 'Bisteca de porco na chapa fica disponivel aqui como inclusao pontual, sem alterar o semanal.'
-          : 'Inclua ou oculte componentes somente na data selecionada.'}
+        Estes ajustes valem apenas para a data indicada. Para mudar todas as semanas, use a aba Cardapio semanal.
       </p>
       {adjustments.length > 0 ? (
         <div className="menu-admin-list">
           {adjustments.map((adjustment) => (
-            <div className="menu-admin-row" key={adjustment.id}>
-              <div>
-                <strong>{adjustment.component.name}</strong>
+            <div className="daily-adjustment-row" key={adjustment.id}>
+              <div className="daily-adjustment-row__content">
+                <div className="daily-adjustment-row__title">
+                  <strong>{componentDisplayName(adjustment.component)}</strong>
+                  {componentSupportingName(adjustment.component) ? <span>{componentSupportingName(adjustment.component)}</span> : null}
+                  <Badge size="sm" tone={adjustment.action === 'include' ? 'info' : 'warning'}>
+                    {adjustment.action === 'include' ? 'Incluido hoje' : 'Ocultado hoje'}
+                  </Badge>
+                </div>
+                <span>Secao: {sectionLabels[adjustment.section]}</span>
                 <span>
-                  {adjustment.action === 'include' ? 'Incluido' : 'Ocultado'} em {sectionLabels[adjustment.section]}
+                  Padrao semanal:{' '}
+                  {adjustment.action === 'include'
+                    ? 'este item nao entra automaticamente nesta data'
+                    : 'este item voltara a aparecer quando o ajuste for limpo'}
                 </span>
+                <span>Alteracao de hoje: {adjustment.action === 'include' ? 'mostrar nesta data' : 'nao mostrar nesta data'}</span>
                 {adjustment.notes ? <small>{adjustment.notes}</small> : null}
+                <small>
+                  Responsavel: {adjustment.marked_by?.name ?? 'Nao informado'}
+                  {adjustment.updated_at ? ` - ${formatDateTimeLabel(adjustment.updated_at)}` : ''}
+                </small>
               </div>
               <Button onClick={() => onClearAdjustment(adjustment)} size="sm" variant="secondary">
-                Limpar ajuste
+                Desfazer ajuste
               </Button>
             </div>
           ))}
         </div>
       ) : (
-        <p className="muted-text">Nenhum ajuste exclusivo foi registrado para esta data.</p>
+        <p className="muted-text">Nenhuma alteracao especial foi feita para hoje. O cardapio padrao da semana esta sendo utilizado.</p>
       )}
     </Card>
   )
@@ -910,15 +1135,17 @@ function ProductsTab({
   categories,
   isLoading,
   onEditProduct,
+  onResolvePending,
 }: {
   canManageMenu: boolean
   categories: AdminMenuProductsResponse['categories']
   isLoading: boolean
   onEditProduct: (product: StructuredMenuProduct) => void
+  onResolvePending: (product: StructuredMenuProduct) => void
 }) {
   const [search, setSearch] = useState('')
   const [categorySlug, setCategorySlug] = useState('all')
-  const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [activeFilter, setActiveFilter] = useState<ProductAdminFilter>('active')
 
   const visibleCategories = useMemo(() => {
     const normalizedSearch = normalizeSearch(search)
@@ -929,8 +1156,7 @@ function ProductsTab({
         products: category.products.filter((product) => {
           const matchesSearch = normalizeSearch(product.name).includes(normalizedSearch)
           const matchesCategory = categorySlug === 'all' || category.slug === categorySlug
-          const matchesActive =
-            activeFilter === 'all' || (activeFilter === 'active' ? product.is_active : !product.is_active)
+          const matchesActive = productMatchesAdminFilter(product, activeFilter)
 
           return matchesSearch && matchesCategory && matchesActive
         }),
@@ -969,17 +1195,20 @@ function ProductsTab({
         </label>
         <label>
           <span>Status</span>
-          <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as 'all' | 'active' | 'inactive')}>
-            <option value="all">Todos</option>
+          <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as ProductAdminFilter)}>
             <option value="active">Ativos</option>
             <option value="inactive">Inativos</option>
+            <option value="legacy">Legados</option>
+            <option value="all">Todos</option>
           </select>
         </label>
       </Card>
       <ProductCatalog
         actionLabel={canManageMenu ? 'Catalogo administrativo' : 'Produtos visiveis'}
         emptyDescription="Nenhum produto corresponde aos filtros."
+        mode="admin"
         onEditProduct={canManageMenu ? onEditProduct : undefined}
+        onResolvePending={canManageMenu ? onResolvePending : undefined}
         productsByCategory={visibleCategories}
       />
     </div>
@@ -989,12 +1218,16 @@ function ProductsTab({
 function ProductCatalog({
   actionLabel,
   emptyDescription,
+  mode = 'daily',
   onEditProduct,
+  onResolvePending,
   productsByCategory,
 }: {
   actionLabel: string
   emptyDescription: string
+  mode?: ProductCardMode
   onEditProduct?: (product: StructuredMenuProduct) => void
+  onResolvePending?: (product: StructuredMenuProduct) => void
   productsByCategory: AdminMenuProductsResponse['categories']
 }) {
   if (productsByCategory.length === 0) {
@@ -1013,7 +1246,13 @@ function ProductCatalog({
           <SectionTitle eyebrow={actionLabel} title={category.name} />
           <div className="structured-product-grid">
             {category.products.map((product) => (
-              <StructuredProductCard key={product.id} onEdit={onEditProduct} product={product} />
+              <StructuredProductCard
+                key={product.id}
+                mode={mode}
+                onEdit={onEditProduct}
+                onResolvePending={onResolvePending}
+                product={product}
+              />
             ))}
           </div>
         </Card>
@@ -1022,24 +1261,224 @@ function ProductCatalog({
   )
 }
 
+function ComponentCatalog({
+  adjustments,
+  canManageMenu,
+  components,
+  onAddToday,
+  onClearAdjustment,
+  onCreateComponent,
+  onDefineDays,
+  onEditComponent,
+  onOpenAvailability,
+  selectedDate,
+}: {
+  adjustments: AdminDailyMenuAdjustment[]
+  canManageMenu: boolean
+  components: AdminMenuComponent[]
+  onAddToday: (component: AdminMenuComponent) => void
+  onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
+  onCreateComponent: () => void
+  onDefineDays: (component: AdminMenuComponent) => void
+  onEditComponent: (component: AdminMenuComponent) => void
+  onOpenAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
+  selectedDate: string
+}) {
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<ComponentAdminFilter>('all')
+  const adjustmentsByComponent = useMemo(
+    () => new Map(adjustments.map((adjustment) => [adjustment.component.id, adjustment])),
+    [adjustments],
+  )
+  const visibleComponents = useMemo(() => {
+    const normalizedSearch = normalizeSearch(search)
+
+    return components.filter((component) => {
+      const matchesSearch = normalizedSearch === '' || componentSearchText(component).includes(normalizedSearch)
+      const matchesFilter = componentMatchesAdminFilter(component, filter)
+
+      return matchesSearch && matchesFilter
+    })
+  }, [components, filter, search])
+
+  return (
+    <Card className="menu-components-admin">
+      <SectionTitle
+        action={canManageMenu ? (
+          <Button icon="plus" onClick={onCreateComponent} size="sm" variant="secondary">
+            Nova carne ou ingrediente
+          </Button>
+        ) : null}
+        eyebrow="Administracao"
+        title="Ingredientes e opcoes"
+      />
+      <p className="muted-text">
+        Localize carnes, saladas e acompanhamentos para editar, definir dias fixos ou usar apenas em uma alteracao da data.
+      </p>
+      <div className="menu-admin-filters">
+        <label>
+          <span>Buscar ingrediente</span>
+          <input
+            placeholder="Ex.: Peixe frito, bisteca ou salada"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <label>
+          <span>Filtro</span>
+          <select value={filter} onChange={(event) => setFilter(event.target.value as ComponentAdminFilter)}>
+            <option value="all">Todos</option>
+            <option value="meat">Carnes</option>
+            <option value="salad">Saladas</option>
+            <option value="hot">Acompanhamentos quentes</option>
+            <option value="extra">Extras</option>
+            <option value="addon">Adicionais</option>
+            <option value="juice_flavor">Bebidas e sabores</option>
+            <option value="active">Ativos</option>
+            <option value="inactive">Inativos</option>
+            <option value="without_days">Sem dia fixo</option>
+          </select>
+        </label>
+      </div>
+      {visibleComponents.length > 0 ? (
+        <div className="component-admin-grid">
+          {visibleComponents.map((component) => (
+            <ComponentAdminCard
+              adjustment={adjustmentsByComponent.get(component.id) ?? null}
+              canManageMenu={canManageMenu}
+              component={component}
+              key={component.id}
+              onAddToday={onAddToday}
+              onClearAdjustment={onClearAdjustment}
+              onDefineDays={onDefineDays}
+              onEditComponent={onEditComponent}
+              onOpenAvailability={onOpenAvailability}
+              selectedDate={selectedDate}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="muted-text">Nenhum ingrediente encontrado com esses filtros.</p>
+      )}
+    </Card>
+  )
+}
+
+function ComponentAdminCard({
+  adjustment,
+  canManageMenu,
+  component,
+  onAddToday,
+  onClearAdjustment,
+  onDefineDays,
+  onEditComponent,
+  onOpenAvailability,
+  selectedDate,
+}: {
+  adjustment: AdminDailyMenuAdjustment | null
+  canManageMenu: boolean
+  component: AdminMenuComponent
+  onAddToday: (component: AdminMenuComponent) => void
+  onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
+  onDefineDays: (component: AdminMenuComponent) => void
+  onEditComponent: (component: AdminMenuComponent) => void
+  onOpenAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
+  selectedDate: string
+}) {
+  const hasFixedDays = component.weekly_menu_items.length > 0
+
+  return (
+    <article className="component-admin-card">
+      <div className="component-admin-card__header">
+        <div>
+          <h3>{componentDisplayName(component)}</h3>
+          {componentSupportingName(component) ? <span>{componentSupportingName(component)}</span> : null}
+        </div>
+        <div className="menu-admin-inline-badges">
+          <Badge size="sm" tone={component.is_active ? 'success' : 'danger'}>
+            {component.is_active ? 'Ativo' : 'Inativo'}
+          </Badge>
+          <Badge size="sm" tone="neutral">
+            {componentTypeLabel(component.component_type)}
+          </Badge>
+        </div>
+      </div>
+      <div className="component-admin-card__meta">
+        <span>{hasFixedDays ? `Dias: ${formatWeeklyComponentDays(component)}` : 'Sem dia fixo - use em uma alteracao do dia.'}</span>
+        <span>Produtos/grupos vinculados: {component.product_group_links_count}</span>
+        <span>Data consultada: {formatDateLabel(selectedDate)}</span>
+      </div>
+      <div className="component-admin-card__status">
+        <AvailabilityBadge availability={component.availability} />
+        {adjustment ? (
+          <span>
+            {adjustment.action === 'include' ? 'Adicionado somente nesta data' : 'Ocultado somente nesta data'}
+            {adjustment.marked_by?.name ? ` por ${adjustment.marked_by.name}` : ''}
+            {adjustment.updated_at ? ` - ${formatDateTimeLabel(adjustment.updated_at)}` : ''}
+          </span>
+        ) : null}
+      </div>
+      {canManageMenu ? (
+        <div className="component-admin-card__actions">
+          <Button onClick={() => onEditComponent(component)} size="sm" variant="secondary">
+            Editar
+          </Button>
+          <Button onClick={() => onDefineDays(component)} size="sm" variant="secondary">
+            Definir dias da semana
+          </Button>
+          <Button onClick={() => onAddToday(component)} size="sm" variant="primary">
+            Adicionar somente hoje
+          </Button>
+          <Button onClick={() => onOpenAvailability(component, 'sold_out')} size="sm" variant="ghost">
+            Esgotado hoje
+          </Button>
+          <Button onClick={() => onOpenAvailability(component, 'unavailable')} size="sm" variant="ghost">
+            Indisponivel hoje
+          </Button>
+          {component.availability.source !== 'component_default' ? (
+            <Button onClick={() => onOpenAvailability(component, 'clear')} size="sm" variant="ghost">
+              Restaurar disponibilidade
+            </Button>
+          ) : null}
+          {adjustment ? (
+            <Button onClick={() => onClearAdjustment(adjustment)} size="sm" variant="ghost">
+              Desfazer alteracao
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
 function StructuredProductCard({
+  mode = 'daily',
   onEdit,
+  onResolvePending,
   product,
 }: {
+  mode?: ProductCardMode
   onEdit?: (product: StructuredMenuProduct) => void
+  onResolvePending?: (product: StructuredMenuProduct) => void
   product: StructuredMenuProduct
 }) {
   const insights = productInsights(product)
-  const price = formatCurrency(centsToCurrency(product.base_price_cents))
+  const price = formatCurrency(centsToCurrency(productPriceCents(product)))
+  const isVisuallyUnavailable = mode === 'daily' && !product.availability.available
 
   return (
-    <article className={product.availability.available ? 'structured-product-card' : 'structured-product-card is-unavailable'}>
+    <article className={isVisuallyUnavailable ? 'structured-product-card is-unavailable' : 'structured-product-card'}>
       <div className="structured-product-card__top">
-        <AvailabilityBadge availability={product.availability} />
+        {mode === 'admin' ? <ProductAdministrativeBadge product={product} /> : <AvailabilityBadge availability={product.availability} />}
         <strong>{price}</strong>
       </div>
       <div className="structured-product-card__title">
         <h3>{product.name}</h3>
+        {product.is_legacy && mode !== 'admin' ? (
+          <Badge size="sm" tone="neutral">
+            Legado
+          </Badge>
+        ) : null}
         {product.configuration_pending ? (
           <Badge size="sm" tone="warning">
             Configuracao pendente
@@ -1047,17 +1486,32 @@ function StructuredProductCard({
         ) : null}
       </div>
       {product.description ? <p>{product.description}</p> : null}
-      <p className="muted-text">Dias: {formatServiceDays(product.service_days)}</p>
+      {product.legacy_reason ? <p className="muted-text">{product.legacy_reason}</p> : null}
+      {mode === 'admin' ? (
+        <div className="structured-product-admin-state">
+          <span>{product.is_available_by_default ? 'Disponivel por padrao' : 'Indisponivel por padrao'}</span>
+          <span>Dias: {formatServiceDays(product.service_days)}</span>
+        </div>
+      ) : (
+        <p className="muted-text">Dias: {formatServiceDays(product.service_days)}</p>
+      )}
       <ul className="structured-product-rules">
         {insights.map((insight) => (
           <li key={insight}>{insight}</li>
         ))}
       </ul>
-      {onEdit ? (
-        <Button icon="edit" onClick={() => onEdit(product)} size="sm" variant="secondary">
-          Editar
-        </Button>
-      ) : null}
+      <div className="structured-product-card__actions">
+        {onResolvePending && product.configuration_pending ? (
+          <Button icon="alert" onClick={() => onResolvePending(product)} size="sm" variant="primary">
+            Resolver configuracao
+          </Button>
+        ) : null}
+        {onEdit ? (
+          <Button icon="edit" onClick={() => onEdit(product)} size="sm" variant="secondary">
+            Editar
+          </Button>
+        ) : null}
+      </div>
     </article>
   )
 }
@@ -1065,24 +1519,36 @@ function StructuredProductCard({
 function WeeklyTab({
   canManageMenu,
   components,
+  dayAdjustments,
   isLoading,
+  onAddComponentToday,
+  onClearAdjustment,
   onCreateComponent,
   onDeleteItem,
+  onDefineComponentDays,
   onEditComponent,
   onEditItem,
+  onOpenComponentAvailability,
   onNewItem,
+  selectedDate,
   selectedDay,
   setSelectedDay,
   weeklyMenu,
 }: {
   canManageMenu: boolean
   components: AdminMenuComponent[]
+  dayAdjustments: AdminDailyMenuAdjustment[]
   isLoading: boolean
+  onAddComponentToday: (component: AdminMenuComponent) => void
+  onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
   onCreateComponent: () => void
   onDeleteItem: (item: AdminWeeklyMenuItem) => void
+  onDefineComponentDays: (component: AdminMenuComponent) => void
   onEditComponent: (component: AdminMenuComponent) => void
   onEditItem: (item: AdminWeeklyMenuItem) => void
+  onOpenComponentAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
   onNewItem: (section: DailyMenuSectionKey) => void
+  selectedDate: string
   selectedDay: WeeklyMenuServiceDayKey
   setSelectedDay: (day: WeeklyMenuServiceDayKey) => void
   weeklyMenu: AdminWeeklyMenuResponse | null
@@ -1113,6 +1579,19 @@ function WeeklyTab({
 
   return (
     <div className="menu-admin-stack">
+      <ComponentCatalog
+        adjustments={dayAdjustments}
+        canManageMenu={canManageMenu}
+        components={components}
+        onAddToday={onAddComponentToday}
+        onClearAdjustment={onClearAdjustment}
+        onCreateComponent={onCreateComponent}
+        onDefineDays={onDefineComponentDays}
+        onEditComponent={onEditComponent}
+        onOpenAvailability={onOpenComponentAvailability}
+        selectedDate={selectedDate}
+      />
+
       <Card className="menu-admin-weekly-toolbar">
         <div className="menu-admin-day-tabs" role="tablist" aria-label="Dias do cardapio semanal">
           {weeklyDayOrder.map((day) => (
@@ -1135,7 +1614,7 @@ function WeeklyTab({
 
       <Card className="daily-menu-card">
         <SectionTitle eyebrow={weeklyMenu.weekly_menu?.name ?? 'Semanal'} title={serviceDayLabels[selectedDay]} />
-        <div className="daily-menu-grid">
+        <div className="weekly-menu-grid">
           {sectionOrder.map((section) => (
             <div className="daily-menu-section" key={section}>
               <div className="menu-admin-section-heading">
@@ -1147,20 +1626,28 @@ function WeeklyTab({
               <div className="daily-menu-list">
                 {weeklyMenu.days[selectedDay][section].length > 0 ? (
                   weeklyMenu.days[selectedDay][section].map((item) => (
-                    <div className={item.is_active ? 'menu-admin-row' : 'menu-admin-row is-inactive'} key={item.id}>
-                      <div>
-                        <strong>{item.component.name}</strong>
-                        <span>
-                          Ordem {item.display_order} {item.is_active ? '' : '- inativo'}
-                        </span>
+                    <div className={item.is_active ? 'weekly-menu-item' : 'weekly-menu-item is-inactive'} key={item.id}>
+                      <div className="weekly-menu-item__body">
+                        <div className="weekly-menu-item__header">
+                          <div className="weekly-menu-item__name">
+                            <strong>{componentDisplayName(item.component)}</strong>
+                            {componentSupportingName(item.component) ? <span>{componentSupportingName(item.component)}</span> : null}
+                          </div>
+                          {!item.is_active ? (
+                            <Badge size="sm" tone="neutral">
+                              Inativo
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <span>Ordem {item.display_order}</span>
                         {item.notes ? <small>{item.notes}</small> : null}
                       </div>
-                      <div className="menu-admin-item-actions">
+                      <div className="weekly-menu-item__actions menu-admin-item-actions">
                         <Button onClick={() => onEditItem(item)} size="sm" variant="secondary">
                           Editar vinculo
                         </Button>
                         <Button onClick={() => onEditComponent(adminComponentFor(item, components))} size="sm" variant="ghost">
-                          Componente
+                          Editar componente
                         </Button>
                         <Button onClick={() => onDeleteItem(item)} size="sm" variant="danger">
                           Remover
@@ -1180,7 +1667,13 @@ function WeeklyTab({
   )
 }
 
-function RulesTab({ products }: { products: StructuredMenuProduct[] }) {
+function RulesTab({
+  onResolvePending,
+  products,
+}: {
+  onResolvePending?: (product: StructuredMenuProduct) => void
+  products: StructuredMenuProduct[]
+}) {
   const productsBySlug = new Map(products.map((product) => [product.slug, product]))
   const ruleProducts = [
     'n5-casa',
@@ -1202,7 +1695,7 @@ function RulesTab({ products }: { products: StructuredMenuProduct[] }) {
       </Card>
       <div className="structured-product-grid">
         {ruleProducts.map((product) => (
-          <StructuredProductCard key={product.id} product={product} />
+          <StructuredProductCard key={product.id} onResolvePending={onResolvePending} product={product} />
         ))}
       </div>
     </div>
@@ -1332,31 +1825,41 @@ function CalendarDatePicker({
 
 function renderModalContent({
   availabilityForm,
+  componentDaysForm,
   componentForm,
   components,
+  dailyMenu,
   dailyAdjustmentForm,
   isMutating,
   modal,
   mutationError,
+  pendingConfigurationForm,
   productForm,
   setAvailabilityForm,
+  setComponentDaysForm,
   setComponentForm,
   setDailyAdjustmentForm,
+  setPendingConfigurationForm,
   setProductForm,
   setWeeklyItemForm,
   weeklyItemForm,
 }: {
   availabilityForm: AvailabilityFormState
+  componentDaysForm: ComponentDaysFormState
   componentForm: ComponentFormState | null
   components: AdminMenuComponent[]
+  dailyMenu: DailyStructuredMenu | null
   dailyAdjustmentForm: DailyAdjustmentFormState
   isMutating: boolean
   modal: Exclude<ModalState, null>
   mutationError: string | null
+  pendingConfigurationForm: PendingConfigurationFormState
   productForm: ProductFormState | null
   setAvailabilityForm: (updater: (current: AvailabilityFormState) => AvailabilityFormState) => void
+  setComponentDaysForm: (updater: (current: ComponentDaysFormState) => ComponentDaysFormState) => void
   setComponentForm: (updater: (current: ComponentFormState | null) => ComponentFormState | null) => void
   setDailyAdjustmentForm: (updater: (current: DailyAdjustmentFormState) => DailyAdjustmentFormState) => void
+  setPendingConfigurationForm: (updater: (current: PendingConfigurationFormState) => PendingConfigurationFormState) => void
   setProductForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void
   setWeeklyItemForm: (updater: (current: WeeklyItemFormState) => WeeklyItemFormState) => void
   weeklyItemForm: WeeklyItemFormState
@@ -1382,6 +1885,7 @@ function renderModalContent({
       {modal.type === 'daily-adjustment' ? (
         <DailyAdjustmentForm
           components={components}
+          dailyMenu={dailyMenu}
           form={dailyAdjustmentForm}
           isMutating={isMutating}
           item={modal.item}
@@ -1390,7 +1894,7 @@ function renderModalContent({
       ) : null}
       {modal.type === 'daily-adjustment-clear' ? (
         <p>
-          Remover o ajuste de <strong>{modal.adjustment.component.name}</strong> em {sectionLabels[modal.adjustment.section]} e voltar
+          Remover o ajuste de <strong>{componentDisplayName(modal.adjustment.component)}</strong> em {sectionLabels[modal.adjustment.section]} e voltar
           ao comportamento do cardapio semanal desta data?
         </p>
       ) : null}
@@ -1405,9 +1909,25 @@ function renderModalContent({
       ) : null}
       {modal.type === 'weekly-delete' ? (
         <p>
-          Remover <strong>{modal.item.component.name}</strong> de {serviceDayLabels[modal.item.service_day]} em{' '}
+          Remover <strong>{componentDisplayName(modal.item.component)}</strong> de {serviceDayLabels[modal.item.service_day]} em{' '}
           {sectionLabels[modal.item.section]}? O componente global sera preservado.
         </p>
+      ) : null}
+      {modal.type === 'pending-configuration' ? (
+        <PendingConfigurationForm
+          form={pendingConfigurationForm}
+          isMutating={isMutating}
+          product={modal.product}
+          setForm={setPendingConfigurationForm}
+        />
+      ) : null}
+      {modal.type === 'component-days' ? (
+        <ComponentDaysForm
+          component={modal.component}
+          form={componentDaysForm}
+          isMutating={isMutating}
+          setForm={setComponentDaysForm}
+        />
       ) : null}
       {mutationError ? <p className="form-error">{mutationError}</p> : null}
     </div>
@@ -1485,6 +2005,150 @@ function ProductForm({
           ))}
         </div>
       </fieldset>
+      {form.beef_rules ? (
+        <BeefRulesForm form={form.beef_rules} isMutating={isMutating} setForm={setForm} />
+      ) : null}
+    </>
+  )
+}
+
+function BeefRulesForm({
+  form,
+  isMutating,
+  setForm,
+}: {
+  form: BeefRulesFormState
+  isMutating: boolean
+  setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void
+}) {
+  return (
+    <fieldset className="menu-admin-fieldset menu-beef-rules-form">
+      <legend>Regras de bife</legend>
+      <div className="menu-beef-rule-card">
+        <CheckField
+          checked={form.beef_only_enabled}
+          disabled={isMutating}
+          label="Somente bife"
+          onChange={(checked) => updateBeefRulesForm(setForm, 'beef_only_enabled', checked)}
+        />
+        <p className="muted-text">Substitui todas as carnes tradicionais.</p>
+        <label>
+          <span>Preco final em reais</span>
+          <input
+            disabled={isMutating || !form.beef_only_enabled}
+            inputMode="decimal"
+            placeholder="Ex.: 20,00"
+            value={form.beef_only_final_price}
+            onChange={(event) => updateBeefRulesForm(setForm, 'beef_only_final_price', event.target.value)}
+          />
+        </label>
+      </div>
+      <div className="menu-beef-rule-card">
+        <CheckField
+          checked={form.extra_beef_enabled}
+          disabled={isMutating}
+          label="Bife adicional"
+          onChange={(checked) => updateBeefRulesForm(setForm, 'extra_beef_enabled', checked)}
+        />
+        <p className="muted-text">Mantem as carnes escolhidas e acrescenta um pedaco de bife.</p>
+        <div className="menu-admin-form-grid">
+          <label>
+            <span>Valor adicional em reais</span>
+            <input
+              disabled={isMutating || !form.extra_beef_enabled}
+              inputMode="decimal"
+              placeholder="Ex.: 7,00"
+              value={form.extra_beef_price}
+              onChange={(event) => updateBeefRulesForm(setForm, 'extra_beef_price', event.target.value)}
+            />
+          </label>
+          <label>
+            <span>Quantidade maxima</span>
+            <input
+              disabled={isMutating || !form.extra_beef_enabled}
+              inputMode="numeric"
+              value={form.extra_beef_max_quantity}
+              onChange={(event) => updateBeefRulesForm(setForm, 'extra_beef_max_quantity', event.target.value)}
+            />
+          </label>
+        </div>
+      </div>
+    </fieldset>
+  )
+}
+
+function PendingConfigurationForm({
+  form,
+  isMutating,
+  product,
+  setForm,
+}: {
+  form: PendingConfigurationFormState
+  isMutating: boolean
+  product: StructuredMenuProduct
+  setForm: (updater: (current: PendingConfigurationFormState) => PendingConfigurationFormState) => void
+}) {
+  const pendingOption = pendingComponentOption(product)
+  const basePrice = formatCurrency(centsToCurrency(productPriceCents(product)))
+
+  if (!pendingOption) {
+    return (
+      <p className="muted-text">
+        Nao ha configuracao pendente neste produto. Atualize os dados do cardapio e tente novamente se o aviso continuar aparecendo.
+      </p>
+    )
+  }
+
+  return (
+    <>
+      <div className="menu-pending-summary">
+        <Badge size="sm" tone="warning">
+          Decisao necessaria
+        </Badge>
+        <strong>{product.name}</strong>
+        <p>
+          A variacao <strong>{componentDisplayName(pendingOption)}</strong> esta cadastrada, mas ficou pendente porque falta uma decisao operacional:
+          oferecer com preco final definido ou deixar claro que essa variacao nao sera vendida.
+        </p>
+        <small>Preco base atual: {basePrice}</small>
+      </div>
+      <fieldset className="menu-admin-choice-group" disabled={isMutating}>
+        <legend>Como resolver?</legend>
+        <label>
+          <input
+            checked={form.resolution === 'not_offered'}
+            name="pending-configuration-resolution"
+            onChange={() => setForm((current) => ({ ...current, resolution: 'not_offered' }))}
+            type="radio"
+          />
+          <span>Nao oferecer essa variacao por enquanto</span>
+        </label>
+        <label>
+          <input
+            checked={form.resolution === 'offered'}
+            name="pending-configuration-resolution"
+            onChange={() => setForm((current) => ({ ...current, resolution: 'offered' }))}
+            type="radio"
+          />
+          <span>Oferecer com preco final definido</span>
+        </label>
+      </fieldset>
+      {form.resolution === 'offered' ? (
+        <label>
+          <span>Preco final em reais</span>
+          <input
+            disabled={isMutating}
+            inputMode="decimal"
+            placeholder="Ex.: 21,00"
+            value={form.final_price}
+            onChange={(event) => setForm((current) => ({ ...current, final_price: event.target.value }))}
+          />
+        </label>
+      ) : null}
+      <p className="muted-text">
+        Essa acao altera apenas a regra estruturada desta variacao. Se a equipe ainda nao souber o preco correto, escolha nao oferecer
+        para remover o alerta sem inventar valor.
+      </p>
     </>
   )
 }
@@ -1547,6 +2211,69 @@ function ComponentForm({
   )
 }
 
+function ComponentDaysForm({
+  component,
+  form,
+  isMutating,
+  setForm,
+}: {
+  component: AdminMenuComponent
+  form: ComponentDaysFormState
+  isMutating: boolean
+  setForm: (updater: (current: ComponentDaysFormState) => ComponentDaysFormState) => void
+}) {
+  return (
+    <>
+      <div className="menu-pending-summary">
+        <strong>{componentDisplayName(component)}</strong>
+        {componentSupportingName(component) ? <small>{componentSupportingName(component)}</small> : null}
+        <p>
+          Escolha os dias fixos em que este item entra no cardapio semanal. Sem nenhum dia marcado, ele continua disponivel para
+          ser usado apenas em alteracoes de uma data especifica.
+        </p>
+      </div>
+      <label>
+        <span>Secao do cardapio</span>
+        <select
+          disabled={isMutating}
+          value={form.section}
+          onChange={(event) => setForm((current) => ({ ...current, section: event.target.value as DailyMenuSectionKey }))}
+        >
+          {sectionOrder.map((section) => (
+            <option key={section} value={section}>
+              {sectionLabels[section]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <fieldset className="menu-admin-choice-group" disabled={isMutating}>
+        <legend>Dias da semana</legend>
+        {weeklyDayOrder.map((day) => (
+          <label key={day}>
+            <input
+              checked={form.service_days.includes(day)}
+              onChange={() => setForm((current) => toggleWeeklyServiceDay(current, day))}
+              type="checkbox"
+            />
+            <span>{serviceDayLabels[day]}</span>
+          </label>
+        ))}
+      </fieldset>
+      <label>
+        <span>Ordem opcional</span>
+        <input
+          disabled={isMutating}
+          inputMode="numeric"
+          placeholder="Deixe vazio para usar a proxima ordem"
+          value={form.display_order}
+          onChange={(event) => setForm((current) => ({ ...current, display_order: event.target.value }))}
+        />
+      </label>
+      <p className="muted-text">Domingo nao possui cardapio semanal recorrente nesta estrutura.</p>
+    </>
+  )
+}
+
 function AvailabilityForm({
   components,
   form,
@@ -1565,7 +2292,7 @@ function AvailabilityForm({
   if (isClear) {
     return (
       <p>
-        Restaurar a disponibilidade de <strong>{item.component.name}</strong> para o padrao do componente nesta data?
+        Restaurar a disponibilidade de <strong>{componentDisplayName(item.component)}</strong> para o padrao do componente nesta data?
       </p>
     )
   }
@@ -1573,7 +2300,7 @@ function AvailabilityForm({
   return (
     <>
       <p>
-        Alteracao global para <strong>{item.component.name}</strong> na data selecionada.
+        Alteracao global para <strong>{componentDisplayName(item.component)}</strong> na data selecionada.
       </p>
       <label>
         <span>Status</span>
@@ -1608,7 +2335,7 @@ function AvailabilityForm({
             .filter((component) => component.id !== item.component.id && component.is_active)
             .map((component) => (
               <option key={component.id} value={component.id}>
-                {component.name}
+                {componentOptionLabel(component)}
               </option>
             ))}
         </select>
@@ -1619,19 +2346,57 @@ function AvailabilityForm({
 
 function DailyAdjustmentForm({
   components,
+  dailyMenu,
   form,
   isMutating,
   item,
   setForm,
 }: {
   components: AdminMenuComponent[]
+  dailyMenu: DailyStructuredMenu | null
   form: DailyAdjustmentFormState
   isMutating: boolean
   item: DailyMenuComponent | null
   setForm: (updater: (current: DailyAdjustmentFormState) => DailyAdjustmentFormState) => void
 }) {
+  const normalizedSearch = normalizeSearch(form.search)
+  const sectionComponentType = componentTypeForSection(form.section)
+  const componentIdsAlreadyInSection = new Set(
+    dailyMenu?.sections[form.section]
+      .map((sectionItem) => sectionItem.component.id)
+      .filter((componentId) => !item || componentId !== item.component.id) ?? [],
+  )
+  const selectableComponents = components
+    .filter((component) => component.is_active)
+    .filter((component) => component.component_type === sectionComponentType)
+    .filter((component) => form.action !== 'include' || !componentIdsAlreadyInSection.has(component.id))
+    .filter((component) => normalizedSearch === '' || componentSearchText(component).includes(normalizedSearch))
+
   return (
     <>
+      <label>
+        <span>Secao</span>
+        <select
+          disabled={isMutating || item !== null}
+          value={form.section}
+          onChange={(event) => setForm((current) => ({ ...current, component_id: '', section: event.target.value as DailyMenuSectionKey }))}
+        >
+          {sectionOrder.map((section) => (
+            <option key={section} value={section}>
+              {sectionLabels[section]}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Buscar componente</span>
+        <input
+          disabled={isMutating || item !== null}
+          placeholder="Digite o nome do item"
+          value={form.search}
+          onChange={(event) => setForm((current) => ({ ...current, search: event.target.value }))}
+        />
+      </label>
       <label>
         <span>Componente</span>
         <select
@@ -1640,13 +2405,16 @@ function DailyAdjustmentForm({
           onChange={(event) => setForm((current) => ({ ...current, component_id: event.target.value }))}
         >
           <option value="">Selecione</option>
-          {components.map((component) => (
+          {selectableComponents.map((component) => (
             <option key={component.id} value={component.id}>
-              {component.name}
+              {componentOptionLabel(component)}
             </option>
           ))}
         </select>
       </label>
+      {selectableComponents.length === 0 && item === null ? (
+        <p className="muted-text">Nenhum componente ativo encontrado para esta secao e busca.</p>
+      ) : null}
       <div className="menu-admin-form-grid">
         <label>
           <span>Acao</span>
@@ -1657,20 +2425,6 @@ function DailyAdjustmentForm({
           >
             <option value="include">Incluir somente nesta data</option>
             <option value="exclude">Ocultar somente nesta data</option>
-          </select>
-        </label>
-        <label>
-          <span>Secao</span>
-          <select
-            disabled={isMutating}
-            value={form.section}
-            onChange={(event) => setForm((current) => ({ ...current, section: event.target.value as DailyMenuSectionKey }))}
-          >
-            {sectionOrder.map((section) => (
-              <option key={section} value={section}>
-                {sectionLabels[section]}
-              </option>
-            ))}
           </select>
         </label>
       </div>
@@ -1722,7 +2476,7 @@ function WeeklyItemForm({
           <option value="">Selecione</option>
           {components.map((component) => (
             <option key={component.id} value={component.id}>
-              {component.name}
+              {componentOptionLabel(component)}
             </option>
           ))}
         </select>
@@ -1820,6 +2574,178 @@ function AvailabilityBadge({ availability }: { availability: EffectiveAvailabili
   )
 }
 
+function ProductAdministrativeBadge({ product }: { product: StructuredMenuProduct }) {
+  if (product.administrative_status === 'legacy') {
+    return (
+      <Badge size="sm" tone="neutral">
+        Legado
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge size="sm" tone={product.administrative_status === 'active' ? 'success' : 'danger'}>
+      {product.administrative_status === 'active' ? 'Ativo' : 'Inativo'}
+    </Badge>
+  )
+}
+
+function productMatchesAdminFilter(product: StructuredMenuProduct, filter: ProductAdminFilter): boolean {
+  switch (filter) {
+    case 'active':
+      return product.administrative_status === 'active'
+    case 'inactive':
+      return product.administrative_status === 'inactive'
+    case 'legacy':
+      return product.administrative_status === 'legacy'
+    case 'all':
+      return true
+  }
+}
+
+function productPriceCents(product: StructuredMenuProduct): number {
+  return product.base_price_cents ?? 0
+}
+
+function componentDisplayName(component: StructuredMenuComponentSummary): string {
+  return component.display_name || component.name
+}
+
+function componentSupportingName(component: StructuredMenuComponentSummary): string | null {
+  if (!component.supporting_name || component.supporting_name === componentDisplayName(component)) {
+    return null
+  }
+
+  return component.supporting_name
+}
+
+function componentOptionLabel(component: StructuredMenuComponentSummary): string {
+  const supportingName = componentSupportingName(component)
+
+  return supportingName ? `${componentDisplayName(component)} - ${supportingName}` : componentDisplayName(component)
+}
+
+function componentSearchText(component: AdminMenuComponent): string {
+  return normalizeSearch([
+    component.name,
+    component.display_name,
+    component.supporting_name ?? '',
+    component.slug,
+    ...component.search_aliases,
+  ].join(' '))
+}
+
+function componentMatchesAdminFilter(component: AdminMenuComponent, filter: ComponentAdminFilter): boolean {
+  if (filter === 'all') {
+    return true
+  }
+
+  if (filter === 'active') {
+    return component.is_active
+  }
+
+  if (filter === 'inactive') {
+    return !component.is_active
+  }
+
+  if (filter === 'without_days') {
+    return component.weekly_menu_items.length === 0
+  }
+
+  return component.component_type === filter
+}
+
+function componentTypeLabel(type: MenuComponentTypeKey | string): string {
+  return componentTypeLabels[normalizeComponentType(type)]
+}
+
+function formatWeeklyComponentDays(component: AdminMenuComponent): string {
+  const days = component.weekly_menu_items
+    .map((item) => item.service_day)
+    .filter((day, index, allDays) => allDays.indexOf(day) === index)
+    .sort((first, second) => weeklyDayOrder.indexOf(first) - weeklyDayOrder.indexOf(second))
+
+  return days.length > 0 ? days.map((day) => serviceDayLabels[day]).join(', ') : 'Sem dia fixo'
+}
+
+function sectionForComponentType(type: MenuComponentTypeKey | string): DailyMenuSectionKey {
+  switch (normalizeComponentType(type)) {
+    case 'meat':
+      return 'meat'
+    case 'salad':
+      return 'salad'
+    case 'base':
+    case 'hot':
+      return 'hot'
+    case 'addon':
+    case 'extra':
+    case 'juice_flavor':
+      return 'extra'
+  }
+}
+
+function dailyItemFromComponent(component: AdminMenuComponent): DailyMenuComponent {
+  return {
+    id: component.id,
+    source: 'daily_adjustment',
+    section: sectionForComponentType(component.component_type),
+    display_order: component.display_order,
+    notes: component.description,
+    component: {
+      id: component.id,
+      slug: component.slug,
+      name: component.name,
+      display_name: component.display_name,
+      supporting_name: component.supporting_name,
+      search_aliases: component.search_aliases,
+      component_type: component.component_type,
+    },
+    availability: component.availability,
+    available: component.availability.available,
+  }
+}
+
+function toggleWeeklyServiceDay(current: ComponentDaysFormState, day: WeeklyMenuServiceDayKey): ComponentDaysFormState {
+  const serviceDays = current.service_days.includes(day)
+    ? current.service_days.filter((serviceDay) => serviceDay !== day)
+    : [...current.service_days, day].sort((first, second) => weeklyDayOrder.indexOf(first) - weeklyDayOrder.indexOf(second))
+
+  return {
+    ...current,
+    service_days: serviceDays,
+  }
+}
+
+function pendingComponentOption(product: StructuredMenuProduct): StructuredComponentOption | null {
+  for (const group of product.groups) {
+    const pendingOption = group.component_options.find((option) => !option.link_active && option.requires_confirmation)
+
+    if (pendingOption) {
+      return pendingOption
+    }
+  }
+
+  return null
+}
+
+function beefRulesFormFromProduct(product: StructuredMenuProduct): BeefRulesFormState | null {
+  if (!product.meat_configuration) {
+    return null
+  }
+
+  const extraBeef = product.additions.find((addition) => addition.code === 'extra_beef')
+
+  return {
+    beef_only_enabled: product.meat_configuration.beef_only.enabled,
+    beef_only_final_price: product.meat_configuration.beef_only.final_price_cents !== null
+      ? centsToInput(product.meat_configuration.beef_only.final_price_cents)
+      : '',
+    extra_beef_enabled: extraBeef?.enabled ?? false,
+    extra_beef_price: extraBeef ? centsToInput(extraBeef.price_cents) : '',
+    extra_beef_max_quantity: String(extraBeef?.max_quantity ?? 1),
+  }
+}
+
 function productInsights(product: StructuredMenuProduct): string[] {
   const insights: string[] = []
 
@@ -1827,11 +2753,17 @@ function productInsights(product: StructuredMenuProduct): string[] {
     insights.push('Usa o cardapio do dia para quentes, saladas, carnes e extras.')
   }
 
+  beefRuleInsights(product).forEach((insight) => insights.push(insight))
+
   product.combo_items.forEach((item) => {
     insights.push(`Inclui ${item.quantity}x ${item.included_product.name} no preco fechado.`)
   })
 
   product.groups.forEach((group) => {
+    if (product.meat_configuration && ['variacao_bife', 'bife_adicional'].includes(group.code)) {
+      return
+    }
+
     const summary = summarizeGroup(group)
 
     if (summary) {
@@ -1844,7 +2776,42 @@ function productInsights(product: StructuredMenuProduct): string[] {
   }
 
   if (product.configuration_pending) {
-    insights.push('Ha uma configuracao pendente de confirmacao operacional.')
+    const pendingOption = pendingComponentOption(product)
+
+    insights.push(
+      pendingOption
+        ? `Configuracao pendente: decidir se ${componentDisplayName(pendingOption)} sera oferecido e qual sera o preco final.`
+        : 'Ha uma configuracao pendente de confirmacao operacional.',
+    )
+  }
+
+  return insights
+}
+
+function beefRuleInsights(product: StructuredMenuProduct): string[] {
+  if (!product.meat_configuration) {
+    return []
+  }
+
+  const basePrice = product.meat_configuration.traditional.base_price_cents ?? productPriceCents(product)
+  const beefOnly = product.meat_configuration.beef_only
+  const extraBeef = product.additions.find((addition) => addition.code === 'extra_beef')
+  const insights = [`Preco padrao: ${formatCurrency(centsToCurrency(basePrice))}.`]
+
+  if (beefOnly.enabled && beefOnly.final_price_cents !== null) {
+    insights.push(`Somente bife: ${formatCurrency(centsToCurrency(beefOnly.final_price_cents))}; substitui as carnes tradicionais.`)
+  } else {
+    insights.push('Somente bife: inativo.')
+  }
+
+  if (extraBeef?.enabled) {
+    const total = basePrice + extraBeef.price_cents
+
+    insights.push(
+      `Adicionar bife as carnes escolhidas: + ${formatCurrency(centsToCurrency(extraBeef.price_cents))}; total ${formatCurrency(centsToCurrency(total))}.`,
+    )
+  } else {
+    insights.push('Bife adicional: inativo.')
   }
 
   return insights
@@ -1909,7 +2876,9 @@ function bifeVariationSummary(group: StructuredProductOptionGroup): string | nul
 }
 
 function optionNameWithState(option: StructuredComponentOption): string {
-  return option.available ? option.name : `${option.name} (${statusLabels[option.availability.status].toLowerCase()})`
+  const name = componentDisplayName(option)
+
+  return option.available ? name : `${name} (${statusLabels[option.availability.status].toLowerCase()})`
 }
 
 function productOptionNameWithState(option: StructuredProductOption): string {
@@ -1946,6 +2915,10 @@ function modalTitle(modal: Exclude<ModalState, null>): string {
       return modal.item ? 'Editar item semanal' : 'Adicionar item semanal'
     case 'weekly-delete':
       return 'Remover item semanal'
+    case 'pending-configuration':
+      return 'Resolver configuracao pendente'
+    case 'component-days':
+      return 'Definir dias da semana'
   }
 }
 
@@ -1961,6 +2934,10 @@ function modalPrimaryLabel(modal: Exclude<ModalState, null>, isMutating: boolean
       return 'Limpar ajuste'
     case 'availability':
       return modal.action === 'clear' ? 'Restaurar' : 'Salvar disponibilidade'
+    case 'pending-configuration':
+      return 'Resolver configuracao'
+    case 'component-days':
+      return 'Salvar dias'
     default:
       return 'Salvar'
   }
@@ -1972,6 +2949,26 @@ function updateProductForm<Key extends keyof ProductFormState>(
   value: ProductFormState[Key],
 ) {
   setForm((current) => (current ? { ...current, [key]: value } : current))
+}
+
+function updateBeefRulesForm<Key extends keyof BeefRulesFormState>(
+  setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void,
+  key: Key,
+  value: BeefRulesFormState[Key],
+) {
+  setForm((current) => {
+    if (!current?.beef_rules) {
+      return current
+    }
+
+    return {
+      ...current,
+      beef_rules: {
+        ...current.beef_rules,
+        [key]: value,
+      },
+    }
+  })
 }
 
 function updateComponentForm<Key extends keyof ComponentFormState>(
@@ -2012,6 +3009,24 @@ function adminComponentFor(item: AdminWeeklyMenuItem, components: AdminMenuCompo
       display_order: item.display_order,
       product_group_links_count: 0,
       weekly_menu_items_count: 0,
+      weekly_menu_items: [
+        {
+          id: item.id,
+          service_day: item.service_day,
+          section: item.section,
+          display_order: item.display_order,
+          is_active: item.is_active,
+          notes: item.notes,
+        },
+      ],
+      availability: {
+        status: 'available',
+        available: true,
+        source: 'component_default',
+        reason: null,
+        availability_date: todayDateString(),
+        replacement: null,
+      },
     }
   )
 }
@@ -2031,6 +3046,15 @@ function emptyDailyAdjustmentForm(): DailyAdjustmentFormState {
     action: 'include',
     display_order: '',
     notes: '',
+    search: '',
+  }
+}
+
+function emptyComponentDaysForm(): ComponentDaysFormState {
+  return {
+    service_days: [],
+    section: 'meat',
+    display_order: '',
   }
 }
 
@@ -2103,6 +3127,19 @@ function normalizeSearch(value: string): string {
 
 function normalizeComponentType(value: string): MenuComponentTypeKey {
   return componentTypes.includes(value as MenuComponentTypeKey) ? (value as MenuComponentTypeKey) : 'extra'
+}
+
+function componentTypeForSection(section: DailyMenuSectionKey): MenuComponentTypeKey {
+  switch (section) {
+    case 'hot':
+      return 'hot'
+    case 'salad':
+      return 'salad'
+    case 'meat':
+      return 'meat'
+    case 'extra':
+      return 'extra'
+  }
 }
 
 function parseDateString(value: string): Date | null {
@@ -2196,6 +3233,21 @@ function formatDateLabel(date: string): string {
   const [year, month, day] = date.split('-')
 
   return `${day}/${month}/${year}`
+}
+
+function formatDateTimeLabel(value: string): string {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: '2-digit',
+  }).format(date)
 }
 
 function friendlyError(error: unknown, fallback: string): string {

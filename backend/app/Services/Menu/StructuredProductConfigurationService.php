@@ -16,7 +16,10 @@ class StructuredProductConfigurationService
      */
     private array $dailyProductOverrideCache = [];
 
-    public function __construct(private readonly ComponentAvailabilityResolver $availabilityResolver) {}
+    public function __construct(
+        private readonly ComponentAvailabilityResolver $availabilityResolver,
+        private readonly MenuComponentPresentation $components,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -63,6 +66,8 @@ class StructuredProductConfigurationService
             'allows_item_notes' => (bool) $product->allows_item_notes,
             'notes_hint' => $product->notes_hint,
             'configuration_pending' => $this->hasPendingConfiguration($product),
+            'meat_configuration' => $this->meatConfiguration($product, $groups),
+            'additions' => $this->additionSummaries($groups),
             'groups' => $groups,
             'combo_items' => $product->comboItems
                 ->sortBy([['display_order', 'asc'], ['id', 'asc']])
@@ -112,6 +117,9 @@ class StructuredProductConfigurationService
             'currency' => $product->currency,
             'is_active' => (bool) $product->is_active,
             'is_available_by_default' => (bool) $product->is_available_by_default,
+            'administrative_status' => $this->administrativeStatus($product),
+            'is_legacy' => $this->isLegacyProduct($product),
+            'legacy_reason' => $this->legacyReason($product),
             'display_order' => $product->display_order,
             'availability' => $this->productAvailability($product, $company, $date),
             'service_days' => $this->serviceDays($product),
@@ -234,11 +242,9 @@ class StructuredProductConfigurationService
             ->toArray();
 
         return [
+            ...$this->components->summary($component),
             'id' => $link->id,
             'component_id' => $component->id,
-            'slug' => $component->slug,
-            'name' => $component->name,
-            'component_type' => $component->component_type->value,
             'price_delta_cents' => $link->price_delta_cents,
             'final_price_cents' => $link->final_price_cents,
             'included_quantity' => $link->included_quantity,
@@ -281,6 +287,137 @@ class StructuredProductConfigurationService
         }
 
         return (bool) data_get($product->composition_rules, 'uses_weekly_menu', false);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<string, mixed>|null
+     */
+    private function meatConfiguration(Product $product, array $groups): ?array
+    {
+        if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
+            return null;
+        }
+
+        $beefOnly = $this->componentOptionFromGroup($groups, 'variacao_bife', 'bife');
+
+        return [
+            'traditional' => [
+                'enabled' => true,
+                'base_price_cents' => $product->base_price_cents,
+                'selection_rules' => [
+                    'min' => 2,
+                    'max' => 2,
+                    'same_component_only' => false,
+                ],
+            ],
+            'beef_only' => [
+                'enabled' => $this->componentOptionIsConfigured($beefOnly),
+                'final_price_cents' => $beefOnly['final_price_cents'] ?? null,
+                'price_delta_cents' => $beefOnly['price_delta_cents'] ?? null,
+                'replaces_traditional_meats' => true,
+                'option_id' => $beefOnly['id'] ?? null,
+                'component' => $beefOnly ? $this->componentOptionSummary($beefOnly) : null,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<int, array<string, mixed>>
+     */
+    private function additionSummaries(array $groups): array
+    {
+        return collect($groups)
+            ->filter(fn (array $group): bool => $group['code'] === 'bife_adicional')
+            ->flatMap(function (array $group): array {
+                return collect($group['component_options'])
+                    ->filter(fn (array $option): bool => $option['slug'] === 'bife')
+                    ->map(fn (array $option): array => [
+                        'code' => 'extra_beef',
+                        'group_code' => $group['code'],
+                        'name' => 'Bife adicional',
+                        'enabled' => $this->componentOptionIsConfigured($option),
+                        'price_cents' => $option['price_delta_cents'],
+                        'price_delta_cents' => $option['price_delta_cents'],
+                        'max_quantity' => $group['max_quantity'] ?? 1,
+                        'requires_traditional_meats' => true,
+                        'option_id' => $option['id'],
+                        'component' => $this->componentOptionSummary($option),
+                    ])
+                    ->all();
+            })
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $groups
+     * @return array<string, mixed>|null
+     */
+    private function componentOptionFromGroup(array $groups, string $groupCode, string $componentSlug): ?array
+    {
+        $group = collect($groups)->firstWhere('code', $groupCode);
+
+        if (! is_array($group)) {
+            return null;
+        }
+
+        $option = collect($group['component_options'])->firstWhere('slug', $componentSlug);
+
+        return is_array($option) ? $option : null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $option
+     */
+    private function componentOptionIsConfigured(?array $option): bool
+    {
+        return is_array($option)
+            && (bool) $option['link_active']
+            && ! (bool) $option['requires_confirmation'];
+    }
+
+    /**
+     * @param  array<string, mixed>  $option
+     * @return array<string, mixed>
+     */
+    private function componentOptionSummary(array $option): array
+    {
+        return [
+            'id' => $option['component_id'],
+            'slug' => $option['slug'],
+            'name' => $option['name'],
+            'display_name' => $option['display_name'],
+            'supporting_name' => $option['supporting_name'],
+            'search_aliases' => $option['search_aliases'],
+            'component_type' => $option['component_type'],
+        ];
+    }
+
+    private function administrativeStatus(Product $product): string
+    {
+        if ($this->isLegacyProduct($product)) {
+            return 'legacy';
+        }
+
+        return $product->is_active ? 'active' : 'inactive';
+    }
+
+    private function isLegacyProduct(Product $product): bool
+    {
+        return (bool) data_get($product->metadata, 'official_price_pending', false)
+            && ! $product->is_active
+            && $product->base_price_cents === null;
+    }
+
+    private function legacyReason(Product $product): ?string
+    {
+        if (! $this->isLegacyProduct($product)) {
+            return null;
+        }
+
+        return 'Registro legado preservado para historico; nao representa uma feijoada oficial vendavel.';
     }
 
     private function hasPendingConfiguration(Product $product): bool

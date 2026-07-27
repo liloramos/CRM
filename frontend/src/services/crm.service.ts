@@ -142,6 +142,17 @@ export type UpdateMenuProductPayload = {
   is_available_by_default: boolean
   display_order: number
   service_days: ProductServiceDayKey[]
+  beef_rules?: {
+    beef_only: {
+      enabled: boolean
+      final_price_cents: number | null
+    }
+    extra_beef: {
+      enabled: boolean
+      price_cents: number | null
+      max_quantity: number | null
+    }
+  }
 }
 
 export type SaveMenuComponentPayload = {
@@ -157,6 +168,12 @@ export type UpdateComponentAvailabilityPayload = {
   status: EffectiveAvailabilityStatus
   reason?: string | null
   replacement_component_id?: number | null
+}
+
+export type UpdateProductComponentOptionPayload = {
+  date?: string
+  resolution: 'offered' | 'not_offered'
+  final_price_cents?: number | null
 }
 
 export type UpsertWeeklyMenuComponentPayload = {
@@ -465,8 +482,8 @@ export async function getAdminMenuProducts(date?: string): Promise<AdminMenuProd
   return response.data
 }
 
-export async function getAdminMenuComponents(): Promise<AdminMenuComponentsResponse> {
-  const response = await requestJson<ApiEnvelope<AdminMenuComponentsResponse>>('/api/app/menu/admin/components')
+export async function getAdminMenuComponents(date?: string): Promise<AdminMenuComponentsResponse> {
+  const response = await requestJson<ApiEnvelope<AdminMenuComponentsResponse>>(`/api/app/menu/admin/components${dateQuery(date)}`)
 
   return response.data
 }
@@ -493,6 +510,21 @@ export async function updateMenuProduct(
     body: JSON.stringify(payload),
     method: 'PATCH',
   })
+
+  return response.data
+}
+
+export async function updateProductComponentOption(
+  optionId: number | string,
+  payload: UpdateProductComponentOptionPayload,
+): Promise<StructuredMenuProduct> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(
+    `/api/app/menu/product-component-options/${optionId}`,
+    {
+      body: JSON.stringify(payload),
+      method: 'PATCH',
+    },
+  )
 
   return response.data
 }
@@ -658,7 +690,7 @@ function mapStructuredProduct(product: StructuredMenuProduct, categoryName: stri
     category: product.category?.name ?? categoryName,
     name: product.name,
     description: product.description ?? product.notes_hint ?? '',
-    price: product.base_price_cents / 100,
+    price: (product.base_price_cents ?? 0) / 100,
     available: product.availability.available,
     tags: [],
     options: [],

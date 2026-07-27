@@ -4,6 +4,7 @@ namespace App\Data\Menu;
 
 use App\Enums\MenuAvailabilityStatus;
 use App\Models\MenuComponent;
+use App\Services\Menu\MenuComponentPresentation;
 
 class ComponentAvailabilityResult
 {
@@ -44,11 +45,6 @@ class ComponentAvailabilityResult
      */
     private function componentPayload(MenuComponent $component): array
     {
-        return [
-            'id' => $component->id,
-            'slug' => $component->slug,
-            'name' => $component->name,
-            'component_type' => $component->component_type->value,
-        ];
+        return app(MenuComponentPresentation::class)->summary($component);
     }
 }

@@ -15,7 +15,11 @@ use Carbon\CarbonInterface;
 
 class AdminMenuReadService
 {
-    public function __construct(private readonly StructuredProductConfigurationService $products) {}
+    public function __construct(
+        private readonly StructuredProductConfigurationService $products,
+        private readonly ComponentAvailabilityResolver $availabilityResolver,
+        private readonly MenuComponentPresentation $components,
+    ) {}
 
     /**
      * @return array<string, mixed>
@@ -58,26 +62,45 @@ class AdminMenuReadService
     /**
      * @return array<string, mixed>
      */
-    public function components(Company $company): array
+    public function components(Company $company, CarbonInterface $date): array
     {
         $components = MenuComponent::query()
             ->where('company_id', $company->id)
-            ->withCount(['productGroupLinks', 'weeklyMenuItems'])
+            ->with([
+                'weeklyMenuItems' => fn ($query) => $query
+                    ->where('is_active', true)
+                    ->orderBy('service_day')
+                    ->orderBy('section')
+                    ->orderBy('display_order'),
+            ])
+            ->withCount([
+                'productGroupLinks',
+                'weeklyMenuItems as weekly_menu_items_count' => fn ($query) => $query->where('is_active', true),
+            ])
             ->orderBy('component_type')
             ->orderBy('display_order')
             ->orderBy('name')
             ->get()
             ->map(fn (MenuComponent $component): array => [
-                'id' => $component->id,
-                'slug' => $component->slug,
-                'name' => $component->name,
-                'component_type' => $component->component_type->value,
+                ...$this->components->summary($component),
                 'description' => $component->description,
                 'default_price_delta_cents' => $component->default_price_delta_cents,
                 'is_active' => (bool) $component->is_active,
                 'display_order' => $component->display_order,
                 'product_group_links_count' => $component->product_group_links_count,
                 'weekly_menu_items_count' => $component->weekly_menu_items_count,
+                'weekly_menu_items' => $component->weeklyMenuItems
+                    ->map(fn (WeeklyMenuComponentItem $item): array => [
+                        'id' => $item->id,
+                        'service_day' => $item->service_day->value,
+                        'section' => $item->section->value,
+                        'display_order' => $item->display_order,
+                        'is_active' => (bool) $item->is_active,
+                        'notes' => $item->notes,
+                    ])
+                    ->values()
+                    ->all(),
+                'availability' => $this->availabilityResolver->resolve($company, $component, $date)->toArray(),
             ])
             ->values()
             ->all();
@@ -146,7 +169,7 @@ class AdminMenuReadService
     public function dayAdjustments(Company $company, CarbonInterface $date): array
     {
         $adjustments = DailyMenuComponentAdjustment::query()
-            ->with('component')
+            ->with(['component', 'markedBy'])
             ->where('company_id', $company->id)
             ->whereDate('availability_date', $date->toDateString())
             ->orderBy('section')
@@ -160,12 +183,12 @@ class AdminMenuReadService
                 'action' => $adjustment->action->value,
                 'display_order' => $adjustment->display_order,
                 'notes' => $adjustment->notes,
-                'component' => [
-                    'id' => $adjustment->component->id,
-                    'slug' => $adjustment->component->slug,
-                    'name' => $adjustment->component->name,
-                    'component_type' => $adjustment->component->component_type->value,
-                ],
+                'updated_at' => $adjustment->updated_at?->toIso8601String(),
+                'marked_by' => $adjustment->markedBy ? [
+                    'id' => $adjustment->markedBy->id,
+                    'name' => $adjustment->markedBy->name,
+                ] : null,
+                'component' => $this->components->summary($adjustment->component),
             ])
             ->values()
             ->all();
@@ -188,12 +211,7 @@ class AdminMenuReadService
             'display_order' => $item->display_order,
             'is_active' => (bool) $item->is_active,
             'notes' => $item->notes,
-            'component' => [
-                'id' => $item->component->id,
-                'slug' => $item->component->slug,
-                'name' => $item->component->name,
-                'component_type' => $item->component->component_type->value,
-            ],
+            'component' => $this->components->summary($item->component),
         ];
     }
 }

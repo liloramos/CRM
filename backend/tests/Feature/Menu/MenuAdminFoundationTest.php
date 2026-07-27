@@ -12,7 +12,9 @@ use App\Models\DailyMenuOverride;
 use App\Models\MenuComponent;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductGroupComponent;
 use App\Models\ProductOption;
+use App\Models\ProductOptionGroup;
 use App\Models\ProductServiceDay as ProductServiceDayModel;
 use App\Models\Role;
 use App\Models\User;
@@ -91,6 +93,105 @@ class MenuAdminFoundationTest extends TestCase
             ->assertOk();
 
         $this->assertFalse($this->catalogHasProduct('2026-07-23', 'n5-casa'));
+    }
+
+    public function test_n8_traditional_beef_rules_are_resolved_in_the_baseline(): void
+    {
+        $this->seedAdminMenu();
+
+        $admin = $this->adminUser();
+        $beefOnly = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $extraBeef = $this->componentOptionLink('n8-tradicional', 'bife_adicional', 'bife');
+
+        $this->assertTrue($beefOnly->is_active);
+        $this->assertFalse($beefOnly->requires_confirmation);
+        $this->assertSame(2000, $beefOnly->final_price_cents);
+        $this->assertSame(400, $beefOnly->price_delta_cents);
+        $this->assertTrue($extraBeef->is_active);
+        $this->assertSame(700, $extraBeef->price_delta_cents);
+
+        $this->actingAs($admin)
+            ->getJson("/api/app/menu/products/{$this->product('n8-tradicional')->id}/configuration?date=2026-07-23")
+            ->assertOk()
+            ->assertJsonPath('data.slug', 'n8-tradicional')
+            ->assertJsonPath('data.configuration_pending', false)
+            ->assertJsonPath('data.meat_configuration.beef_only.final_price_cents', 2000)
+            ->assertJsonPath('data.additions.0.code', 'extra_beef')
+            ->assertJsonPath('data.additions.0.price_cents', 700);
+    }
+
+    public function test_admin_can_update_distinct_beef_rules_without_duplicate_groups(): void
+    {
+        $this->seedAdminMenu();
+
+        $admin = $this->adminUser();
+        $product = $this->product('n8-tradicional');
+        $payload = [
+            ...$this->productPayload($product),
+            'beef_rules' => [
+                'beef_only' => [
+                    'enabled' => true,
+                    'final_price_cents' => 2050,
+                ],
+                'extra_beef' => [
+                    'enabled' => true,
+                    'price_cents' => 750,
+                    'max_quantity' => 1,
+                ],
+            ],
+        ];
+
+        $this->actingAs($admin)
+            ->patchJson($this->productUrl($product), $payload)
+            ->assertOk()
+            ->assertJsonPath('data.slug', 'n8-tradicional')
+            ->assertJsonPath('data.configuration_pending', false)
+            ->assertJsonPath('data.meat_configuration.beef_only.final_price_cents', 2050)
+            ->assertJsonPath('data.additions.0.price_cents', 750);
+
+        $beefOnly = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+        $extraBeef = $this->componentOptionLink('n8-tradicional', 'bife_adicional', 'bife');
+
+        $this->assertSame(2050, $beefOnly->final_price_cents);
+        $this->assertSame(450, $beefOnly->price_delta_cents);
+        $this->assertSame(750, $extraBeef->price_delta_cents);
+        $this->assertSame(1, $extraBeef->group->max_quantity);
+        $this->assertSame(2, ProductOptionGroup::query()
+            ->where('product_id', $product->id)
+            ->whereIn('code', ['variacao_bife', 'bife_adicional'])
+            ->count());
+    }
+
+    public function test_beef_rules_reject_invalid_prices_and_preserve_existing_values(): void
+    {
+        $this->seedAdminMenu();
+
+        $admin = $this->adminUser();
+        $product = $this->product('n8-tradicional');
+        $payload = [
+            ...$this->productPayload($product),
+            'beef_rules' => [
+                'beef_only' => [
+                    'enabled' => true,
+                    'final_price_cents' => 1500,
+                ],
+                'extra_beef' => [
+                    'enabled' => true,
+                    'price_cents' => 700,
+                    'max_quantity' => 1,
+                ],
+            ],
+        ];
+
+        $this->actingAs($admin)
+            ->patchJson($this->productUrl($product), $payload)
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('beef_rules.beef_only.final_price_cents');
+
+        $beefOnly = $this->componentOptionLink('n8-tradicional', 'variacao_bife', 'bife');
+
+        $this->assertSame(2000, $beefOnly->final_price_cents);
+        $this->assertSame(400, $beefOnly->price_delta_cents);
     }
 
     public function test_product_schedule_filters_feijoadas_and_legacy_confirmed_products_by_day(): void
@@ -396,6 +497,7 @@ class MenuAdminFoundationTest extends TestCase
         $this->assertSame(1, DB::table('daily_menu_component_adjustments')->where('menu_component_id', $bisteca->id)->count());
         $this->assertContains('bisteca-de-porco-na-chapa', $this->sectionSlugs('2026-07-23', WeeklyMenuSection::Meat));
         $this->assertNotContains('bisteca-de-porco-na-chapa', $this->sectionSlugs('2026-07-30', WeeklyMenuSection::Meat));
+        $this->assertSame([], $this->weeklyMeatDays('bisteca-de-porco-na-chapa'));
 
         $this->actingAs($admin)
             ->patchJson($this->dailyAdjustmentUrl($porco), [
@@ -417,6 +519,17 @@ class MenuAdminFoundationTest extends TestCase
             ->assertJsonPath('data.cleared', true);
 
         $this->assertContains('porco', $this->sectionSlugs('2026-07-23', WeeklyMenuSection::Meat));
+
+        $this->actingAs($admin)
+            ->deleteJson($this->dailyAdjustmentUrl($bisteca), [
+                'date' => '2026-07-23',
+                'section' => WeeklyMenuSection::Meat->value,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.cleared', true);
+
+        $this->assertNotContains('bisteca-de-porco-na-chapa', $this->sectionSlugs('2026-07-23', WeeklyMenuSection::Meat));
+        $this->assertSame([], $this->weeklyMeatDays('bisteca-de-porco-na-chapa'));
 
         $this->actingAs($admin)
             ->patchJson($this->dailyAdjustmentUrl($bisteca), [
@@ -483,9 +596,26 @@ class MenuAdminFoundationTest extends TestCase
             ->firstOrFail();
     }
 
+    private function componentOptionLink(string $productSlug, string $groupCode, string $componentSlug): ProductGroupComponent
+    {
+        return ProductGroupComponent::query()
+            ->whereHas('group', function ($query) use ($groupCode, $productSlug): void {
+                $query->where('company_id', $this->company()->id)
+                    ->where('code', $groupCode)
+                    ->whereHas('product', fn ($productQuery) => $productQuery->where('slug', $productSlug));
+            })
+            ->whereHas('component', fn ($query) => $query->where('slug', $componentSlug))
+            ->firstOrFail();
+    }
+
     private function productUrl(Product $product): string
     {
         return "/api/app/menu/products/{$product->id}";
+    }
+
+    private function componentOptionUrl(ProductGroupComponent $option): string
+    {
+        return "/api/app/menu/product-component-options/{$option->id}";
     }
 
     private function dailyAdjustmentUrl(MenuComponent $component): string

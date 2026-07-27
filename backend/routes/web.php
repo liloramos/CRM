@@ -51,6 +51,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::patch('menu/products/{product}', [MenuProductAdminController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.update');
+        Route::patch('menu/product-component-options/{option}', [MenuProductAdminController::class, 'updateComponentOption'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.product-component-options.update');
         Route::post('menu/components', [MenuComponentAdminController::class, 'store'])
             ->middleware('permission:menu.manage')
             ->name('menu.components.store');

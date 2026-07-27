@@ -211,6 +211,9 @@ export type StructuredMenuComponentSummary = {
   id: number
   slug: string
   name: string
+  display_name: string
+  supporting_name: string | null
+  search_aliases: string[]
   component_type: MenuComponentTypeKey | string
 }
 
@@ -219,10 +222,13 @@ export type StructuredMenuProductSummary = {
   slug: string
   name: string
   product_type: string
-  base_price_cents: number
+  base_price_cents: number | null
   currency: string
   is_active: boolean
   is_available_by_default: boolean
+  administrative_status: 'active' | 'inactive' | 'legacy'
+  is_legacy: boolean
+  legacy_reason: string | null
   display_order: number
   availability: EffectiveAvailability
   service_days: ProductServiceDayKey[]
@@ -238,6 +244,9 @@ export type StructuredComponentOption = {
   component_id: number
   slug: string
   name: string
+  display_name: string
+  supporting_name: string | null
+  search_aliases: string[]
   component_type: MenuComponentTypeKey | string
   price_delta_cents: number
   final_price_cents: number | null
@@ -292,6 +301,39 @@ export type StructuredComboItem = {
   display_order: number
 }
 
+export type StructuredMeatConfiguration = {
+  traditional: {
+    enabled: boolean
+    base_price_cents: number | null
+    selection_rules: {
+      min: number | null
+      max: number | null
+      same_component_only: boolean
+    }
+  }
+  beef_only: {
+    enabled: boolean
+    final_price_cents: number | null
+    price_delta_cents: number | null
+    replaces_traditional_meats: boolean
+    option_id: number | null
+    component: StructuredMenuComponentSummary | null
+  }
+}
+
+export type StructuredProductAddition = {
+  code: 'extra_beef' | string
+  group_code: string
+  name: string
+  enabled: boolean
+  price_cents: number
+  price_delta_cents: number
+  max_quantity: number | null
+  requires_traditional_meats: boolean
+  option_id: number
+  component: StructuredMenuComponentSummary
+}
+
 export type StructuredMenuProduct = StructuredMenuProductSummary & {
   description: string | null
   menu_rule_code: string | null
@@ -299,6 +341,8 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
   allows_item_notes: boolean
   notes_hint: string | null
   configuration_pending: boolean
+  meat_configuration: StructuredMeatConfiguration | null
+  additions: StructuredProductAddition[]
   groups: StructuredProductOptionGroup[]
   combo_items: StructuredComboItem[]
 }
@@ -352,6 +396,15 @@ export type AdminMenuComponent = StructuredMenuComponentSummary & {
   display_order: number
   product_group_links_count: number
   weekly_menu_items_count: number
+  weekly_menu_items: Array<{
+    id: number
+    service_day: WeeklyMenuServiceDayKey
+    section: DailyMenuSectionKey
+    display_order: number
+    is_active: boolean
+    notes: string | null
+  }>
+  availability: EffectiveAvailability
 }
 
 export type AdminMenuComponentsResponse = {
@@ -387,6 +440,11 @@ export type AdminDailyMenuAdjustment = {
   action: DailyMenuAdjustmentAction
   display_order: number | null
   notes: string | null
+  updated_at: string | null
+  marked_by: {
+    id: number
+    name: string
+  } | null
   component: StructuredMenuComponentSummary
 }
 
