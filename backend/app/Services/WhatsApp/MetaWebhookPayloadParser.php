@@ -55,6 +55,7 @@ class MetaWebhookPayloadParser
                 safeMetadata: [
                     'source' => 'simple_payload',
                     'phone_number_id' => $payload['phone_number_id'] ?? null,
+                    ...$this->messageMetadata($message, $message['type'] ?? 'text'),
                 ],
             );
         }
@@ -101,14 +102,69 @@ class MetaWebhookPayloadParser
             to: $metadata['display_phone_number'] ?? ($metadata['phone_number_id'] ?? null),
             senderName: $from !== null ? ($contacts[$from] ?? null) : null,
             messageType: $type,
-            text: $type === 'text' ? ($message['text']['body'] ?? null) : null,
+            text: $this->messageText($message, $type),
             sentAt: isset($message['timestamp']) ? CarbonImmutable::createFromTimestamp((int) $message['timestamp']) : null,
             rawPayload: $message,
             safeMetadata: [
                 'source' => 'meta_cloud_webhook',
                 'phone_number_id' => $metadata['phone_number_id'] ?? null,
                 'display_phone_number_present' => isset($metadata['display_phone_number']),
+                ...$this->messageMetadata($message, $type),
             ],
         );
+    }
+
+    private function messageText(array $message, string $type): ?string
+    {
+        return match ($type) {
+            'text' => $message['text']['body'] ?? null,
+            'button' => $message['button']['text'] ?? null,
+            'interactive' => $message['interactive']['button_reply']['title']
+                ?? $message['interactive']['list_reply']['title']
+                ?? null,
+            'image' => $message['image']['caption'] ?? null,
+            'document' => $message['document']['caption'] ?? null,
+            'location' => isset($message['location'])
+                ? 'Localizacao compartilhada'
+                : null,
+            default => null,
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function messageMetadata(array $message, string $type): array
+    {
+        $media = $message[$type] ?? [];
+
+        if (in_array($type, ['image', 'document', 'audio', 'video', 'sticker'], true) && is_array($media)) {
+            return [
+                'media_id' => $media['id'] ?? null,
+                'mime_type' => $media['mime_type'] ?? null,
+                'sha256' => $media['sha256'] ?? null,
+                'filename' => $media['filename'] ?? null,
+                'caption_present' => isset($media['caption']),
+            ];
+        }
+
+        if ($type === 'location' && isset($message['location']) && is_array($message['location'])) {
+            return [
+                'location_present' => true,
+                'latitude_present' => isset($message['location']['latitude']),
+                'longitude_present' => isset($message['location']['longitude']),
+            ];
+        }
+
+        if ($type === 'interactive' && isset($message['interactive']) && is_array($message['interactive'])) {
+            return [
+                'interactive_type' => $message['interactive']['type'] ?? null,
+                'reply_id' => $message['interactive']['button_reply']['id']
+                    ?? $message['interactive']['list_reply']['id']
+                    ?? null,
+            ];
+        }
+
+        return [];
     }
 }

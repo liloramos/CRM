@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\WhatsApp;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWhatsAppWebhookEvent;
 use App\Services\WhatsApp\WhatsAppService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +27,12 @@ class MetaWhatsAppWebhookController extends Controller
 
     public function receive(Request $request, WhatsAppService $whatsapp): JsonResponse
     {
+        if (! $whatsapp->signatureIsValid($request->getContent(), $request->headers->all())) {
+            return response()->json([
+                'message' => 'Assinatura do WhatsApp invalida.',
+            ], Response::HTTP_FORBIDDEN);
+        }
+
         $event = $whatsapp->storeWebhookEvent(
             payload: $request->all(),
             headers: $request->headers->all(),
@@ -33,7 +40,9 @@ class MetaWhatsAppWebhookController extends Controller
             sourceIp: $request->ip(),
         );
 
-        $event = $whatsapp->processWebhookEvent($event);
+        if ($event->status === 'received') {
+            ProcessWhatsAppWebhookEvent::dispatch($event->id)->afterResponse();
+        }
 
         return response()->json([
             'status' => $event->status,

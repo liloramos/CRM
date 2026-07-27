@@ -12,8 +12,11 @@ class Customer extends Model
         'company_id',
         'name',
         'phone',
+        'whatsapp_id',
+        'whatsapp_profile_name',
         'email',
         'notes',
+        'source_channel',
         'credit_balance_cents',
         'credit_currency',
     ];

@@ -4,6 +4,7 @@ use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AdminMenuReadController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\ConversationOperationsController;
 use App\Http\Controllers\Api\CustomerOperationsController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
@@ -110,6 +111,33 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('orders/{order}/payments/confirm', [OrderOperationsController::class, 'confirmPayment'])->name('orders.payments.confirm');
         Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
+        Route::get('conversations', [ConversationOperationsController::class, 'index'])
+            ->middleware('permission:whatsapp.view')
+            ->name('conversations.index');
+        Route::get('conversations/{conversation}', [ConversationOperationsController::class, 'show'])
+            ->middleware('permission:whatsapp.view')
+            ->name('conversations.show');
+        Route::post('conversations/{conversation}/messages', [ConversationOperationsController::class, 'sendMessage'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.messages.store');
+        Route::post('conversations/{conversation}/mode', [ConversationOperationsController::class, 'setMode'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.mode');
+        Route::post('conversations/{conversation}/alerts/{alert}/acknowledge', [ConversationOperationsController::class, 'acknowledgeAlert'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.alerts.acknowledge');
+        Route::post('conversations/{conversation}/alerts/{alert}/resolve', [ConversationOperationsController::class, 'resolveAlert'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.alerts.resolve');
+        Route::post('conversations/{conversation}/payment-proofs/{proof}/approve', [ConversationOperationsController::class, 'approvePaymentProof'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.payment-proofs.approve');
+        Route::post('conversations/{conversation}/payment-proofs/{proof}/reject', [ConversationOperationsController::class, 'rejectPaymentProof'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.payment-proofs.reject');
+        Route::get('conversations/media/{media}', [ConversationOperationsController::class, 'showMedia'])
+            ->middleware('permission:whatsapp.view')
+            ->name('conversations.media.show');
     });
 });
 

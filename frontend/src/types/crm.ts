@@ -133,19 +133,68 @@ export type Order = {
 export type ConversationMessage = {
   id: string
   sender: 'customer' | 'attendant' | 'ai'
+  direction?: 'inbound' | 'outbound'
+  type?: 'text' | 'image' | 'document' | 'audio' | 'location' | 'interactive' | 'unsupported' | string
   body: string
   timeLabel: string
+  status?: string | null
+  media?: Array<{
+    id: string
+    type: string
+    name: string
+    mimeType: string | null
+    sizeBytes: number | null
+    url: string | null
+  }>
 }
+
+export type ConversationAlert = {
+  id: string
+  type: string
+  severity: 'info' | 'warning' | 'critical'
+  status: 'open' | 'acknowledged' | 'resolved'
+  title: string
+  message: string
+  createdAt: string | null
+  acknowledgedAt?: string | null
+  resolvedAt?: string | null
+  paymentProofId?: string | null
+  orderId?: string | null
+}
+
+export type ConversationPaymentReview = {
+  proofId: string
+  orderId: string
+  orderCode: string
+  customerName: string
+  expectedTotal: number
+  amountCents: number | null
+  status: string
+  receivedAt: string | null
+  fileName: string | null
+  mimeType: string | null
+  mediaUrl: string | null
+} | null
 
 export type Conversation = {
   id: string
   customer: CustomerSummary
   mode: AutomationMode
+  automationMode?: 'assisted' | 'automatic' | 'manual'
+  automationStatus?: string
+  automationVersion?: number
   unread: number
   statusLabel: string
   lastMessage: string
   messages: ConversationMessage[]
   linkedOrderId?: string
+  activeOrder?: Order | null
+  assignedUser?: { id: string; name: string } | null
+  manualTakeoverBy?: { id: string; name: string } | null
+  handoffReason?: string | null
+  lastMessageAt?: string | null
+  alerts?: ConversationAlert[]
+  paymentReview?: ConversationPaymentReview
 }
 
 export type Product = {

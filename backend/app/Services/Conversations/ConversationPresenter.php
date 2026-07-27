@@ -1,0 +1,239 @@
+<?php
+
+namespace App\Services\Conversations;
+
+use App\Models\Conversation;
+use App\Models\ConversationAlert;
+use App\Models\Message;
+use App\Models\Order;
+use App\Models\Payment;
+use App\Models\PaymentProof;
+use App\Models\WhatsAppMediaFile;
+use App\Services\Operational\OperationalCrmPresenter;
+use Illuminate\Support\Collection;
+
+class ConversationPresenter
+{
+    public function __construct(private readonly OperationalCrmPresenter $operational) {}
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function conversation(Conversation $conversation): array
+    {
+        $conversation->loadMissing([
+            'customer',
+            'assignedUser',
+            'manualTakeoverBy',
+            'activeOrder.payerCustomer',
+            'activeOrder.items.options',
+            'activeOrder.statusHistories',
+            'activeOrder.latestPrintJob',
+            'activeOrder.payments.proofs',
+            'messages.mediaFiles',
+            'whatsappMessageDeliveries',
+            'alerts.payment',
+            'alerts.paymentProof',
+        ]);
+
+        $messages = $conversation->messages
+            ->sortBy('created_at')
+            ->map(fn (Message $message): array => $this->message($message))
+            ->values();
+
+        $alerts = $conversation->alerts
+            ->sortByDesc('created_at')
+            ->map(fn (ConversationAlert $alert): array => $this->alert($alert))
+            ->values();
+
+        $activeOrder = $conversation->activeOrder ?: $conversation->orders()->latest('id')->first();
+
+        return [
+            'id' => (string) $conversation->id,
+            'customer' => $this->customer($conversation),
+            'mode' => $this->modeFor($conversation),
+            'automationMode' => $conversation->automation_mode,
+            'automationStatus' => $conversation->automation_status,
+            'automationVersion' => (int) ($conversation->automation_version ?? 0),
+            'unread' => (int) ($conversation->unread_count ?? 0),
+            'statusLabel' => $this->statusLabel($conversation),
+            'lastMessage' => (string) ($messages->last()['body'] ?? 'Sem mensagens recentes.'),
+            'messages' => $messages,
+            'linkedOrderId' => $activeOrder?->id ? (string) $activeOrder->id : null,
+            'activeOrder' => $activeOrder instanceof Order ? $this->operational->order($activeOrder) : null,
+            'assignedUser' => $conversation->assignedUser ? [
+                'id' => (string) $conversation->assignedUser->id,
+                'name' => $conversation->assignedUser->name,
+            ] : null,
+            'manualTakeoverBy' => $conversation->manualTakeoverBy ? [
+                'id' => (string) $conversation->manualTakeoverBy->id,
+                'name' => $conversation->manualTakeoverBy->name,
+            ] : null,
+            'handoffReason' => $conversation->handoff_reason ?? $conversation->manual_takeover_reason,
+            'lastMessageAt' => $conversation->last_message_at?->toIso8601String(),
+            'alerts' => $alerts,
+            'paymentReview' => $this->paymentReview($activeOrder),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function alert(ConversationAlert $alert): array
+    {
+        return [
+            'id' => (string) $alert->id,
+            'type' => $alert->type,
+            'severity' => $alert->severity,
+            'title' => $alert->title,
+            'message' => $alert->message,
+            'status' => $alert->status,
+            'conversationId' => $alert->conversation_id ? (string) $alert->conversation_id : null,
+            'orderId' => $alert->order_id ? (string) $alert->order_id : null,
+            'paymentId' => $alert->payment_id ? (string) $alert->payment_id : null,
+            'paymentProofId' => $alert->payment_proof_id ? (string) $alert->payment_proof_id : null,
+            'createdAt' => $alert->created_at?->toIso8601String(),
+            'acknowledgedAt' => $alert->acknowledged_at?->toIso8601String(),
+            'resolvedAt' => $alert->resolved_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function message(Message $message): array
+    {
+        return [
+            'id' => (string) $message->id,
+            'sender' => $this->senderFor($message),
+            'direction' => $message->direction ?: ($message->sender === 'customer' ? 'inbound' : 'outbound'),
+            'type' => $message->type,
+            'body' => $message->content,
+            'timeLabel' => $message->created_at?->format('H:i') ?? '',
+            'createdAt' => $message->created_at?->toIso8601String(),
+            'status' => $message->delivery_status ?: 'received',
+            'media' => $message->mediaFiles
+                ->map(fn (WhatsAppMediaFile $media): array => [
+                    'id' => (string) $media->id,
+                    'type' => $media->media_type,
+                    'name' => $media->original_filename ?: 'Arquivo recebido',
+                    'mimeType' => $media->mime_type,
+                    'filename' => $media->original_filename,
+                    'sizeBytes' => $media->size_bytes,
+                    'status' => $media->status,
+                    'url' => route('api.app.conversations.media.show', ['media' => $media->id], false),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    private function senderFor(Message $message): string
+    {
+        return match ($message->sender_type ?: $message->sender) {
+            'human', 'attendant', 'agent', 'user' => 'attendant',
+            'ai', 'assistant' => 'ai',
+            default => 'customer',
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function customer(Conversation $conversation): array
+    {
+        $customer = $conversation->customer;
+
+        return [
+            'id' => (string) $customer->id,
+            'name' => $customer->name,
+            'phoneLabel' => $customer->phone ?: $conversation->whatsapp_identifier ?: 'Sem telefone cadastrado',
+            'tags' => array_values(array_filter([
+                'WhatsApp',
+                $customer->source_channel === 'whatsapp' ? 'Criado pelo WhatsApp' : null,
+            ])),
+            'creditBalance' => round(((int) $customer->credit_balance_cents) / 100, 2),
+            'notes' => $customer->notes ? [$customer->notes] : [],
+            'preferences' => [],
+        ];
+    }
+
+    private function modeFor(Conversation $conversation): string
+    {
+        if ((bool) $conversation->human_review_required) {
+            return 'atencao';
+        }
+
+        return $conversation->automation_mode === Conversation::AUTOMATION_MODE_MANUAL ? 'manual' : 'ia';
+    }
+
+    private function statusLabel(Conversation $conversation): string
+    {
+        if ($conversation->automation_mode === Conversation::AUTOMATION_MODE_MANUAL) {
+            return 'Atendimento manual';
+        }
+
+        if ((bool) $conversation->human_review_required) {
+            return 'Aguardando revisao humana';
+        }
+
+        return $conversation->status === 'open' ? 'Em atendimento' : 'Encerrada';
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function paymentReview(?Order $order): ?array
+    {
+        if (! $order instanceof Order) {
+            return null;
+        }
+
+        $payments = $order->relationLoaded('payments') ? $order->payments : $order->payments()->with('proofs')->get();
+        $payment = $payments
+            ->sortByDesc('id')
+            ->first(fn (Payment $candidate): bool => in_array($candidate->status, [
+                Payment::STATUS_AWAITING_PROOF,
+                Payment::STATUS_PROOF_RECEIVED,
+                Payment::STATUS_PENDING,
+            ], true));
+
+        if (! $payment instanceof Payment) {
+            return null;
+        }
+
+        /** @var Collection<int, PaymentProof> $proofs */
+        $proofs = $payment->relationLoaded('proofs') ? $payment->proofs : $payment->proofs()->get();
+        $proof = $proofs
+            ->sortByDesc('id')
+            ->first();
+        $mediaId = $proof?->metadata['whatsapp_media_file_id'] ?? null;
+
+        return [
+            'paymentId' => (string) $payment->id,
+            'proofId' => $proof?->id ? (string) $proof->id : '',
+            'orderId' => (string) $order->id,
+            'orderCode' => $order->code,
+            'customerName' => $this->orderCustomerName($order),
+            'status' => $payment->status,
+            'expectedTotal' => round((int) $order->total_cents / 100, 2),
+            'amountCents' => $proof?->amount_cents,
+            'method' => $payment->method,
+            'receivedAt' => $proof?->received_at?->toIso8601String(),
+            'fileName' => $proof?->original_filename,
+            'mimeType' => $proof?->mime_type,
+            'mediaUrl' => $mediaId ? route('api.app.conversations.media.show', ['media' => $mediaId], false) : null,
+        ];
+    }
+
+    private function orderCustomerName(Order $order): string
+    {
+        $snapshot = trim((string) $order->customer_name_snapshot);
+
+        if ($snapshot !== '') {
+            return $snapshot;
+        }
+
+        return $order->payerCustomer?->name ?: 'Cliente avulso';
+    }
+}

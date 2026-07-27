@@ -25,8 +25,12 @@ class WhatsAppMediaFile extends Model
         'media_type',
         'mime_type',
         'sha256',
+        'original_filename',
+        'size_bytes',
+        'checksum',
         'storage_disk',
         'file_path',
+        'url_expires_at',
         'status',
         'metadata',
     ];
@@ -35,6 +39,8 @@ class WhatsAppMediaFile extends Model
     {
         return [
             'metadata' => 'array',
+            'size_bytes' => 'integer',
+            'url_expires_at' => 'datetime',
         ];
     }
 

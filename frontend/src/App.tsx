@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { AppShell } from './components/layout/AppShell'
 import { Modal } from './components/ui/Modal'
@@ -27,9 +27,15 @@ import {
   deleteOrdersPermanently,
   deleteOrderPermanently,
   generateTicketPreview,
+  acknowledgeConversationAlert,
+  approveConversationPaymentProof,
+  getConversations,
   getOrderTicketPreviewUrl,
   getOperationalSnapshot,
+  rejectConversationPaymentProof,
+  resolveConversationAlert,
   searchCustomers,
+  sendConversationMessage,
   setConversationAutomationMode,
   updateOrderStatus,
   ApiError,
@@ -39,6 +45,8 @@ import type {
   AppModal,
   AuthUser,
   BackendOrderStatus,
+  Conversation,
+  ConversationAlert,
   CustomerSummary,
   FulfillmentApiType,
   OperationalSnapshot,
@@ -93,6 +101,12 @@ function App() {
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false)
   const [snapshotError, setSnapshotError] = useState<string | null>(null)
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
+  const [isLoadingConversations, setIsLoadingConversations] = useState(false)
+  const [conversationError, setConversationError] = useState<string | null>(null)
+  const [conversationAlerts, setConversationAlerts] = useState<ConversationAlert[]>([])
+  const [conversationSyncAt, setConversationSyncAt] = useState<string | null>(null)
+  const conversationSyncAtRef = useRef<string | null>(null)
+  const conversationPollingBusyRef = useRef(false)
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [activeModal, setActiveModal] = useState<AppModal>(null)
@@ -161,6 +175,71 @@ function App() {
     }
   }, [user])
 
+  const replaceConversation = useCallback((conversation: Conversation) => {
+    setSnapshot((current) => {
+      if (!current) {
+        return current
+      }
+
+      return {
+        ...current,
+        conversations: mergeConversations(current.conversations, [conversation]),
+      }
+    })
+    setSelectedConversationId(conversation.id)
+  }, [])
+
+  const loadConversations = useCallback(async (incremental = false) => {
+    if (!user?.permissions.includes('whatsapp.view') || conversationPollingBusyRef.current) {
+      return
+    }
+
+    conversationPollingBusyRef.current = true
+    setIsLoadingConversations(!incremental)
+    setConversationError(null)
+
+    try {
+      const response = await getConversations({
+        since: incremental ? conversationSyncAtRef.current : null,
+      })
+
+      setConversationAlerts(response.alerts)
+      conversationSyncAtRef.current = response.generatedAt ?? new Date().toISOString()
+      setConversationSyncAt(conversationSyncAtRef.current)
+      setSnapshot((current) => {
+        if (!current) {
+          return current
+        }
+
+        const conversations = incremental
+          ? mergeConversations(current.conversations, response.conversations)
+          : response.conversations
+
+        return {
+          ...current,
+          conversations,
+        }
+      })
+      setSelectedConversationId((current) => {
+        const candidateIds = new Set(response.conversations.map((conversation) => conversation.id))
+        if (current && (incremental || candidateIds.has(current))) {
+          return current
+        }
+
+        return response.conversations[0]?.id ?? (incremental ? current : null)
+      })
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) {
+        setConversationError('Seu usuario nao tem permissao para visualizar conversas do WhatsApp.')
+      } else {
+        setConversationError(error instanceof Error ? error.message : 'Nao foi possivel carregar as conversas.')
+      }
+    } finally {
+      conversationPollingBusyRef.current = false
+      setIsLoadingConversations(false)
+    }
+  }, [user])
+
   useEffect(() => {
     if (authStatus === 'authenticated') {
       const timeout = window.setTimeout(() => {
@@ -172,6 +251,24 @@ function App() {
 
     return undefined
   }, [authStatus, loadSnapshot])
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated' || activeRoute !== 'conversas') {
+      return undefined
+    }
+
+    void loadConversations(false)
+
+    const interval = window.setInterval(() => {
+      if (document.hidden) {
+        return
+      }
+
+      void loadConversations(true)
+    }, 3000)
+
+    return () => window.clearInterval(interval)
+  }, [activeRoute, authStatus, loadConversations])
 
   useEffect(() => {
     if (activeModal !== 'new-order' || newCustomerMode) {
@@ -211,9 +308,10 @@ function App() {
     return snapshot.conversations.find((conversation) => conversation.id === selectedConversationId) ?? snapshot.conversations[0]
   }, [selectedConversationId, snapshot])
 
-  const linkedOrder = selectedConversation?.linkedOrderId
-    ? snapshot?.orders.find((order) => order.id === selectedConversation.linkedOrderId)
-    : undefined
+  const linkedOrder = selectedConversation?.activeOrder
+    ?? (selectedConversation?.linkedOrderId
+      ? snapshot?.orders.find((order) => order.id === selectedConversation.linkedOrderId)
+      : undefined)
   const canManageOrders = user?.permissions.includes('orders.manage') ?? false
   const canPermanentlyDeleteOrders = snapshot?.capabilities.can_permanently_delete_orders ?? canManageOrders
   const canRunDestructiveTestCleanup = snapshot?.capabilities.can_run_destructive_test_cleanup ?? false
@@ -731,6 +829,107 @@ function App() {
     }
   }
 
+  async function handleConversationModeChange(conversationId: string, mode: 'assisted' | 'automatic' | 'manual') {
+    setIsActionBusy(true)
+    setConversationError(null)
+
+    try {
+      const conversation = await setConversationAutomationMode(conversationId, {
+        mode,
+        reason:
+          mode === 'manual'
+            ? 'Atendimento manual assumido pela interface operacional.'
+            : 'Automacao reativada pela interface operacional.',
+      })
+      replaceConversation(conversation)
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel alterar o modo da conversa.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleConversationSendMessage(conversationId: string, body: string) {
+    setIsActionBusy(true)
+    setConversationError(null)
+
+    try {
+      const conversation = await sendConversationMessage(conversationId, body)
+      replaceConversation(conversation)
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel enviar a mensagem.')
+      throw error
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleConversationAlertAction(conversationId: string, alertId: string, action: 'acknowledge' | 'resolve') {
+    setConversationError(null)
+
+    try {
+      const alert = action === 'acknowledge'
+        ? await acknowledgeConversationAlert(conversationId, alertId)
+        : await resolveConversationAlert(conversationId, alertId)
+
+      setConversationAlerts((current) => mergeConversationAlerts(current, [alert]))
+      setSnapshot((current) => {
+        if (!current) {
+          return current
+        }
+
+        return {
+          ...current,
+          conversations: current.conversations.map((conversation) => {
+            if (conversation.id !== conversationId) {
+              return conversation
+            }
+
+            return {
+              ...conversation,
+              alerts: mergeConversationAlerts(conversation.alerts ?? [], [alert]),
+            }
+          }),
+        }
+      })
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o alerta.')
+    }
+  }
+
+  async function handleApproveConversationPayment(conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) {
+    setIsActionBusy(true)
+    setConversationError(null)
+
+    try {
+      const conversation = await approveConversationPaymentProof(conversationId, proofId, {
+        confirmed_amount_cents: confirmedAmountCents,
+        notes,
+      })
+      replaceConversation(conversation)
+      await loadSnapshot()
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel aprovar o pagamento.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleRejectConversationPayment(conversationId: string, proofId: string, reason: string) {
+    setIsActionBusy(true)
+    setConversationError(null)
+
+    try {
+      const conversation = await rejectConversationPaymentProof(conversationId, proofId, { reason })
+      replaceConversation(conversation)
+      await loadSnapshot()
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel rejeitar o comprovante.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
   function openModal(modal: AppModal) {
     setActionError(null)
     if (modal === 'new-order') {
@@ -920,12 +1119,24 @@ function App() {
       case 'conversas':
         return (
           <ConversationsPage
+            alerts={conversationAlerts}
             conversations={snapshot.conversations}
+            error={conversationError}
+            isActionBusy={isActionBusy}
+            isLoading={isLoadingConversations}
             linkedOrder={linkedOrder}
-            onOpenModal={openModal}
+            onAcknowledgeAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'acknowledge')}
+            onApprovePayment={handleApproveConversationPayment}
+            onChangeMode={handleConversationModeChange}
+            onOpenOrders={() => setActiveRoute('pedidos')}
             onPreviewTicket={handleTicketPreview}
+            onRefresh={() => void loadConversations(false)}
+            onRejectPayment={handleRejectConversationPayment}
+            onResolveAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'resolve')}
             onSelectConversation={setSelectedConversationId}
+            onSendMessage={handleConversationSendMessage}
             selectedConversation={selectedConversation}
+            syncLabel={conversationSyncAt ? new Date(conversationSyncAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null}
           />
         )
       case 'pedidos':
@@ -1397,6 +1608,42 @@ function emptyOperationalSnapshot(user: AuthUser | null): OperationalSnapshot {
     paymentMethods: [],
     integrations: [],
   }
+}
+
+function mergeConversations(current: Conversation[], incoming: Conversation[]): Conversation[] {
+  const byId = new Map<string, Conversation>()
+
+  current.forEach((conversation) => {
+    byId.set(conversation.id, conversation)
+  })
+  incoming.forEach((conversation) => {
+    byId.set(conversation.id, conversation)
+  })
+
+  return Array.from(byId.values()).sort((first, second) => {
+    const firstTime = first.lastMessageAt ? Date.parse(first.lastMessageAt) : 0
+    const secondTime = second.lastMessageAt ? Date.parse(second.lastMessageAt) : 0
+
+    return secondTime - firstTime
+  })
+}
+
+function mergeConversationAlerts(current: ConversationAlert[], incoming: ConversationAlert[]): ConversationAlert[] {
+  const byId = new Map<string, ConversationAlert>()
+
+  current.forEach((alert) => {
+    byId.set(alert.id, alert)
+  })
+  incoming.forEach((alert) => {
+    byId.set(alert.id, alert)
+  })
+
+  return Array.from(byId.values()).sort((first, second) => {
+    const firstTime = first.createdAt ? Date.parse(first.createdAt) : 0
+    const secondTime = second.createdAt ? Date.parse(second.createdAt) : 0
+
+    return secondTime - firstTime
+  })
 }
 
 export default App

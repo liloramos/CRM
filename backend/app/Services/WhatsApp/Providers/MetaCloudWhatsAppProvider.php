@@ -5,6 +5,7 @@ namespace App\Services\WhatsApp\Providers;
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Data\WhatsApp\WhatsAppConnectionStatus;
+use App\Data\WhatsApp\WhatsAppDownloadedMedia;
 use App\Data\WhatsApp\WhatsAppSendResult;
 use App\Services\WhatsApp\MetaWebhookPayloadParser;
 use Illuminate\Support\Facades\Http;
@@ -95,6 +96,53 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                 'recipient_present' => $message->to !== '',
                 'body_length' => strlen($message->body),
                 'provider_message_id_present' => $providerMessageId !== null,
+            ],
+        );
+    }
+
+    public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia
+    {
+        if (! $this->isConfigured() || $mediaId === '') {
+            return null;
+        }
+
+        $metadataUrl = rtrim($this->graphUrl(), '/').'/'.$this->apiVersion().'/'.$mediaId;
+        $metadataResponse = Http::withToken($this->token())
+            ->acceptJson()
+            ->get($metadataUrl);
+
+        if (! $metadataResponse->successful()) {
+            return null;
+        }
+
+        $metadata = $metadataResponse->json();
+        $downloadUrl = is_array($metadata) ? ($metadata['url'] ?? null) : null;
+
+        if (! is_string($downloadUrl) || $downloadUrl === '') {
+            return null;
+        }
+
+        $mediaResponse = Http::withToken($this->token())
+            ->get($downloadUrl);
+
+        if (! $mediaResponse->successful()) {
+            return null;
+        }
+
+        $contents = $mediaResponse->body();
+
+        return new WhatsAppDownloadedMedia(
+            contents: $contents,
+            mimeType: is_array($metadata) ? ($metadata['mime_type'] ?? $mediaResponse->header('Content-Type')) : $mediaResponse->header('Content-Type'),
+            filename: $mediaId,
+            sizeBytes: strlen($contents),
+            sha256: hash('sha256', $contents),
+            safePayload: [
+                'http_status' => $mediaResponse->status(),
+                'metadata_status' => $metadataResponse->status(),
+                'media_id_present' => true,
+                'url_received' => true,
+                'token_exposed' => false,
             ],
         );
     }

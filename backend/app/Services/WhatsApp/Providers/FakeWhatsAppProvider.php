@@ -5,6 +5,7 @@ namespace App\Services\WhatsApp\Providers;
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Data\WhatsApp\WhatsAppConnectionStatus;
+use App\Data\WhatsApp\WhatsAppDownloadedMedia;
 use App\Data\WhatsApp\WhatsAppSendResult;
 use App\Services\WhatsApp\MetaWebhookPayloadParser;
 use Illuminate\Support\Str;
@@ -67,6 +68,28 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
                 'transport' => 'local_fake',
                 'recipient_present' => $message->to !== '',
                 'body_length' => strlen($message->body),
+            ],
+        );
+    }
+
+    public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia
+    {
+        if ($mediaId === '') {
+            return null;
+        }
+
+        $contents = "Arquivo ficticio de desenvolvimento para {$mediaId}.\n";
+
+        return new WhatsAppDownloadedMedia(
+            contents: $contents,
+            mimeType: 'text/plain',
+            filename: $mediaId.'.txt',
+            sizeBytes: strlen($contents),
+            sha256: hash('sha256', $contents),
+            safePayload: [
+                'transport' => 'local_fake',
+                'external_api_called' => false,
+                'media_id_present' => true,
             ],
         );
     }

@@ -20,6 +20,8 @@ import type {
   AuthUser,
   BackendOrderStatus,
   ComponentAvailabilityMutationResponse,
+  Conversation,
+  ConversationAlert,
   CustomerSummary,
   DailyMenuAdjustmentMutationResponse,
   DailyMenuAdjustmentAction,
@@ -136,8 +138,29 @@ type UpdateMenuOptionAvailabilityPayload = {
 }
 
 type AutomationModePayload = {
-  mode: 'assisted' | 'manual'
+  mode: 'assisted' | 'automatic' | 'manual'
   reason?: string
+}
+
+type ConversationListParams = {
+  search?: string
+  mode?: 'all' | 'automatic' | 'manual' | 'attention' | 'unread' | 'alerts'
+  since?: string | null
+}
+
+export type ConversationListResponse = {
+  conversations: Conversation[]
+  alerts: ConversationAlert[]
+  generatedAt: string | null
+}
+
+export type ApproveConversationPaymentPayload = {
+  confirmed_amount_cents: number
+  notes?: string
+}
+
+export type RejectConversationPaymentPayload = {
+  reason: string
 }
 
 export type UpdateMenuProductPayload = {
@@ -441,15 +464,104 @@ export function getOrderTicketPreviewUrl(orderId: string, autoprint = false): st
 }
 
 export async function setConversationAutomationMode(conversationId: string, payload: AutomationModePayload) {
-  return requestJson<{
-    id: string | number
-    automation_mode: string
-    automation_status: string
-    human_review_required: boolean
-  }>(`/api/app/conversations/${conversationId}/automation/mode`, {
+  const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/mode`, {
     body: JSON.stringify(payload),
     method: 'POST',
   })
+
+  return response.data
+}
+
+export async function getConversations(params: ConversationListParams = {}): Promise<ConversationListResponse> {
+  const searchParams = new URLSearchParams()
+
+  if (params.search?.trim()) {
+    searchParams.set('search', params.search.trim())
+  }
+
+  if (params.mode && params.mode !== 'all') {
+    searchParams.set('mode', params.mode)
+  }
+
+  if (params.since) {
+    searchParams.set('since', params.since)
+  }
+
+  const query = searchParams.toString()
+  const response = await requestJson<ApiEnvelope<{ conversations: Conversation[]; alerts: ConversationAlert[] }>>(
+    `/api/app/conversations${query ? `?${query}` : ''}`,
+  )
+
+  return {
+    conversations: response.data.conversations,
+    alerts: response.data.alerts,
+    generatedAt: typeof response.meta?.generated_at === 'string' ? response.meta.generated_at : null,
+  }
+}
+
+export async function getConversation(conversationId: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}`)
+
+  return response.data
+}
+
+export async function sendConversationMessage(conversationId: string, body: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/messages`, {
+    body: JSON.stringify({ body }),
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function acknowledgeConversationAlert(conversationId: string, alertId: string): Promise<ConversationAlert> {
+  const response = await requestJson<ApiEnvelope<ConversationAlert>>(
+    `/api/app/conversations/${conversationId}/alerts/${alertId}/acknowledge`,
+    { method: 'POST' },
+  )
+
+  return response.data
+}
+
+export async function resolveConversationAlert(conversationId: string, alertId: string): Promise<ConversationAlert> {
+  const response = await requestJson<ApiEnvelope<ConversationAlert>>(
+    `/api/app/conversations/${conversationId}/alerts/${alertId}/resolve`,
+    { method: 'POST' },
+  )
+
+  return response.data
+}
+
+export async function approveConversationPaymentProof(
+  conversationId: string,
+  proofId: string,
+  payload: ApproveConversationPaymentPayload,
+): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(
+    `/api/app/conversations/${conversationId}/payment-proofs/${proofId}/approve`,
+    {
+      body: JSON.stringify(payload),
+      method: 'POST',
+    },
+  )
+
+  return response.data
+}
+
+export async function rejectConversationPaymentProof(
+  conversationId: string,
+  proofId: string,
+  payload: RejectConversationPaymentPayload,
+): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(
+    `/api/app/conversations/${conversationId}/payment-proofs/${proofId}/reject`,
+    {
+      body: JSON.stringify(payload),
+      method: 'POST',
+    },
+  )
+
+  return response.data
 }
 
 export async function updateMenuOptionAvailability(optionId: string, payload: UpdateMenuOptionAvailabilityPayload) {

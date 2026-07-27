@@ -1723,10 +1723,64 @@ label textarea {
   animation: spin 1s linear infinite;
 }
 
-.conversation-layout {
+.conversation-layout,
+.conversation-workspace {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr) 340px;
   gap: 16px;
+}
+
+.conversation-workspace {
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(300px, 380px);
+  align-items: start;
+}
+
+.conversation-header-actions,
+.conversation-mode-actions,
+.conversation-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.conversation-error {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.conversation-search {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.conversation-search label,
+.payment-review-card label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.conversation-search input,
+.payment-review-card input,
+.payment-review-card textarea,
+.composer textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.conversation-search input,
+.payment-review-card input {
+  min-height: 40px;
+  padding: 0 12px;
 }
 
 .tabs {
@@ -1760,6 +1814,27 @@ label textarea {
   grid-template-columns: auto 1fr auto;
 }
 
+.conversation-item__content {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.conversation-item__content strong,
+.conversation-item__content small,
+.conversation-item__content span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-item__badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  max-width: 120px;
+}
+
 .conversation-item p {
   margin: 4px 0 0;
   overflow: hidden;
@@ -1772,6 +1847,12 @@ label textarea {
   display: grid;
   grid-template-rows: auto 1fr auto auto;
   gap: 14px;
+}
+
+.conversation-workspace .chat-panel {
+  min-height: min(72vh, 760px);
+  min-width: 0;
+  grid-template-rows: auto auto minmax(280px, 1fr) auto;
 }
 
 .chat-panel__header,
@@ -1799,6 +1880,7 @@ label textarea {
   padding: 14px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
 }
 
 .message-bubble {
@@ -1807,6 +1889,65 @@ label textarea {
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-surface-raised);
+  overflow-wrap: anywhere;
+}
+
+.message-bubble p {
+  margin: 6px 0;
+}
+
+.message-bubble__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.message-media-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.message-media {
+  display: grid;
+  gap: 6px;
+  color: var(--color-brand);
+  text-decoration: none;
+}
+
+.message-media img {
+  max-width: 180px;
+  border-radius: 8px;
+}
+
+.conversation-alert-strip,
+.conversation-global-alerts,
+.conversation-context-block,
+.payment-review-card {
+  display: grid;
+  gap: 10px;
+}
+
+.conversation-alert {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.conversation-alert--warning {
+  border-color: rgba(251, 191, 36, 0.42);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.conversation-alert--critical {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: rgba(248, 113, 113, 0.08);
 }
 
 .message-bubble--customer {
@@ -1850,8 +1991,65 @@ label textarea {
   gap: 10px;
 }
 
-.composer input {
-  padding: 0 14px;
+.composer textarea {
+  min-height: 54px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.conversation-context-panel {
+  min-width: 0;
+}
+
+.conversation-customer-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.conversation-customer-card div,
+.conversation-context-block,
+.current-order {
+  min-width: 0;
+}
+
+.conversation-customer-card span,
+.conversation-context-block p,
+.current-order__items span,
+.current-order__items small {
+  overflow-wrap: anywhere;
+}
+
+.payment-review-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.payment-review-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.payment-review-card dt {
+  color: var(--color-text-secondary);
+}
+
+.payment-review-card dd {
+  margin: 0;
+  text-align: right;
+}
+
+.payment-review-card label {
+  display: grid;
+  gap: 6px;
 }
 
 .current-order {
@@ -5782,6 +5980,14 @@ button.dashboard-chart__legend-row:active {
   .weekly-menu-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .conversation-workspace {
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  }
+
+  .conversation-context-panel {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 1180px) {
@@ -5795,6 +6001,7 @@ button.dashboard-chart__legend-row:active {
 
   .orders-layout,
   .conversation-layout,
+  .conversation-workspace,
   .dashboard-grid,
   .dashboard-ops-grid,
   .finance-dashboard-grid,

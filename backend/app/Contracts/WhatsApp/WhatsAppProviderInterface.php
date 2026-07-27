@@ -5,6 +5,7 @@ namespace App\Contracts\WhatsApp;
 use App\Data\WhatsApp\IncomingWhatsAppMessage;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Data\WhatsApp\WhatsAppConnectionStatus;
+use App\Data\WhatsApp\WhatsAppDownloadedMedia;
 use App\Data\WhatsApp\WhatsAppSendResult;
 
 interface WhatsAppProviderInterface
@@ -23,4 +24,6 @@ interface WhatsAppProviderInterface
     public function parseWebhookPayload(array $payload): array;
 
     public function sendTextMessage(OutgoingWhatsAppMessage $message): WhatsAppSendResult;
+
+    public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia;
 }

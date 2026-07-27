@@ -18,3 +18,7 @@ Route::get('/webhooks/whatsapp/meta', [MetaWhatsAppWebhookController::class, 've
     ->name('api.webhooks.whatsapp.meta.verify');
 Route::post('/webhooks/whatsapp/meta', [MetaWhatsAppWebhookController::class, 'receive'])
     ->name('api.webhooks.whatsapp.meta.receive');
+Route::get('/webhooks/whatsapp', [MetaWhatsAppWebhookController::class, 'verify'])
+    ->name('api.webhooks.whatsapp.verify');
+Route::post('/webhooks/whatsapp', [MetaWhatsAppWebhookController::class, 'receive'])
+    ->name('api.webhooks.whatsapp.receive');

@@ -29,6 +29,7 @@ class WhatsAppWebhookEvent extends Model
         'provider',
         'event_type',
         'provider_event_id',
+        'deduplication_key',
         'status',
         'request_method',
         'signature_present',

@@ -11,16 +11,23 @@ class Message extends Model
     protected $fillable = [
         'conversation_id',
         'sender',
+        'direction',
+        'sender_type',
         'content',
         'type',
         'provider',
         'external_message_id',
         'external_sender_id',
         'external_recipient_id',
+        'reply_to_message_id',
         'delivery_status',
         'metadata',
         'received_at',
         'sent_at',
+        'delivered_at',
+        'read_at',
+        'failed_at',
+        'error_code',
     ];
 
     protected function casts(): array
@@ -29,12 +36,20 @@ class Message extends Model
             'metadata' => 'array',
             'received_at' => 'datetime',
             'sent_at' => 'datetime',
+            'delivered_at' => 'datetime',
+            'read_at' => 'datetime',
+            'failed_at' => 'datetime',
         ];
     }
 
     public function conversation(): BelongsTo
     {
         return $this->belongsTo(Conversation::class);
+    }
+
+    public function replyTo(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reply_to_message_id');
     }
 
     public function orderFragments(): HasMany
@@ -55,5 +70,15 @@ class Message extends Model
     public function automationEvents(): HasMany
     {
         return $this->hasMany(AutomationEvent::class);
+    }
+
+    public function mediaFiles(): HasMany
+    {
+        return $this->hasMany(WhatsAppMediaFile::class);
+    }
+
+    public function alerts(): HasMany
+    {
+        return $this->hasMany(ConversationAlert::class);
     }
 }
