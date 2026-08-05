@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Champs\Contracts\LeadProviderInterface;
+use App\Champs\Providers\GooglePlacesLeadProvider;
 use App\Contracts\Ai\AiProviderInterface;
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Models\Permission;
@@ -24,6 +26,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(LeadProviderInterface::class, GooglePlacesLeadProvider::class);
+
         $this->app->bind(AiProviderInterface::class, function ($app): AiProviderInterface {
             $provider = (string) config('chatbotcrm.ai.provider', config('chatbotcrm.providers.ai', 'fake'));
 
