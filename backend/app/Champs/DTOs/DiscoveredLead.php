@@ -15,6 +15,7 @@ final readonly class DiscoveredLead
         public ?string $city = null,
         public ?string $state = null,
         public ?string $phone = null,
+        public ?string $email = null,
         public ?string $website = null,
         public ?float $rating = null,
         public int $userRatingCount = 0,

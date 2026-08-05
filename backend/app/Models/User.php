@@ -134,6 +134,11 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(AutomationEvent::class, 'created_by_user_id');
     }
 
+    public function champsSearches(): HasMany
+    {
+        return $this->hasMany(ChampsSearch::class);
+    }
+
     public function assignRole(Role|string $role): void
     {
         $roleModel = $role instanceof Role

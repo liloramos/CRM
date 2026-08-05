@@ -147,4 +147,14 @@ class Company extends Model
     {
         return $this->hasMany(AutomationEvent::class);
     }
+
+    public function champsSearches(): HasMany
+    {
+        return $this->hasMany(ChampsSearch::class);
+    }
+
+    public function champsLeads(): HasMany
+    {
+        return $this->hasMany(ChampsLead::class);
+    }
 }

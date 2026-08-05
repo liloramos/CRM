@@ -3,6 +3,8 @@
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\Champs\ChampsLeadController;
+use App\Http\Controllers\Api\Champs\ChampsSearchController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
@@ -31,6 +33,15 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
     });
+});
+
+Route::prefix('api/champs')->name('api.champs.')->middleware('auth')->group(function () {
+    Route::post('searches', [ChampsSearchController::class, 'store'])->name('searches.store');
+    Route::get('searches', [ChampsSearchController::class, 'index'])->name('searches.index');
+    Route::get('searches/{search}', [ChampsSearchController::class, 'show'])
+        ->whereNumber('search')
+        ->name('searches.show');
+    Route::get('leads', [ChampsLeadController::class, 'index'])->name('leads.index');
 });
 
 Route::middleware(['auth', 'verified'])->group(function () {
