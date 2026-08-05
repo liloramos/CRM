@@ -15,7 +15,7 @@ type MenuPageProps = {
   onToggleOptionAvailability: (optionId: string, availableToday: boolean) => void
 }
 
-const groupOrder = ['Bases/guarnicoes', 'Saladas', 'Carnes', 'Bebidas', 'Adicionais', 'Componentes']
+const groupOrder = ['Segmentos', 'Serviços', 'Campanhas', 'Canais', 'Extras', 'Componentes']
 
 export function MenuPage({ isUpdating, onOpenModal, onToggleOptionAvailability, products, source }: MenuPageProps) {
   const categories = Array.from(new Set(products.map((product) => product.category)))
@@ -37,23 +37,23 @@ export function MenuPage({ isUpdating, onOpenModal, onToggleOptionAvailability, 
       <PageHeader
         actions={
           <Button icon="plus" onClick={() => onOpenModal('add-product')} variant="primary">
-            Adicionar item ao pedido
+            Adicionar item comercial
           </Button>
         }
         description={
           source === 'api'
-            ? 'Produtos e componentes carregados do Laravel. Marmitas continuam vendaveis quando apenas uma opcao acaba.'
-            : 'Fallback local de desenvolvimento; use a API para operacao real.'
+            ? 'Itens e componentes carregados do Laravel para operação comercial.'
+            : 'Fallback local de desenvolvimento; use a API para operação real.'
         }
-        title="Cardapio"
+        title="Catálogo comercial"
       />
 
       <div className="catalog-layout">
         {groupedComponents.length > 0 ? (
           <Card className="availability-card">
-            <SectionTitle eyebrow="Operacao do dia" title="Disponibilidade por componente" />
+            <SectionTitle eyebrow="Operação do dia" title="Disponibilidade por componente" />
             <p className="muted-text">
-              Marque apenas a opcao que acabou. A marmita continua no cardapio, mas o componente indisponivel sai da selecao do pedido.
+              Marque apenas o componente indisponível. O item principal continua no catálogo, mas a opção sai da seleção comercial.
             </p>
             <div className="availability-groups">
               {groupedComponents.map((group) => (
@@ -135,8 +135,8 @@ export function MenuPage({ isUpdating, onOpenModal, onToggleOptionAvailability, 
 
         {products.length === 0 ? (
           <EmptyState
-            description="Estado vazio para cardapio sem itens cadastrados."
-            title="Nenhum produto cadastrado"
+            description="Estado vazio para catálogo sem itens cadastrados."
+            title="Nenhum item cadastrado"
           />
         ) : null}
       </div>

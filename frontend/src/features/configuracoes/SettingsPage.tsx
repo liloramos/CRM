@@ -38,21 +38,21 @@ export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }:
   if (variant === 'perfil') {
     return (
       <PageContainer>
-        <PageHeader description="Preferencias do usuario, sessoes e seguranca de acesso." title="Perfil do usuario" />
+        <PageHeader description="Preferências do usuário, sessões e segurança de acesso." title="Perfil do usuário" />
         <div className="split-grid">
           <Card>
             <SectionTitle title="Administrador" />
             <div className="profile-summary">
               <span className="avatar avatar--lg">AD</span>
               <div>
-                <h2>Usuario administrativo</h2>
-                <p>Perfil demo para pre-visualizacao do CRM.</p>
+                <h2>Usuário administrativo</h2>
+                <p>Perfil demonstrativo para operação do CRM de prospecção.</p>
               </div>
             </div>
           </Card>
           <Card>
             <SectionTitle title="Seguranca" />
-            <p className="muted-text">Sessao local, senha forte e 2FA podem ser configurados pelo backend.</p>
+            <p className="muted-text">Sessão local, senha forte e 2FA podem ser configurados pelo backend.</p>
             <Button icon="settings" variant="secondary">
               Revisar seguranca
             </Button>
@@ -70,18 +70,18 @@ export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }:
             Adicionar usuario
           </Button>
         }
-        description="Hub de configuracoes gerais, usuarios, marca, impressao, WhatsApp e IA."
-        title="Configuracoes"
+        description="Hub de configurações gerais, usuários, marca, integrações e IA."
+        title="Configurações"
       />
 
       <div className="settings-grid">
         {[
-          ['Geral', 'Horario, operacao e padroes do restaurante.'],
-          ['Usuarios e permissoes', 'Perfis, papeis e acesso por modulo.'],
-          ['Aparencia e marca', 'Cores, logo e textos principais.'],
-          ['Impressao', 'Impressora, fila e previa HTML.'],
-          ['Pagamentos', 'Pix, comprovantes e credito do cliente.'],
-          ['Seguranca', 'Senha, sessoes e boas praticas.'],
+          ['Geral', 'Horário, operação e padrões comerciais.'],
+          ['Usuários e permissões', 'Perfis, papéis e acesso por módulo.'],
+          ['Aparência e marca', 'Cores, logo e textos principais.'],
+          ['Integrações', 'Providers, webhooks e automações.'],
+          ['Performance', 'Metas, conversões e indicadores de prospecção.'],
+          ['Segurança', 'Senha, sessões e boas práticas.'],
         ].map(([title, description]) => (
           <Card className="settings-card" key={title}>
             <SectionTitle title={title} />

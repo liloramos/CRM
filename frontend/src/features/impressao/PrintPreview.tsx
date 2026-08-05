@@ -14,18 +14,18 @@ export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
     <Card className="print-panel">
       <SectionTitle
         action={<StatusBadge status={order.printStatus} type="print" />}
-        eyebrow="Fluxo obrigatorio"
-        title="Comanda / previa de impressao"
+        eyebrow="Fluxo obrigatório"
+        title="Registro / prévia operacional"
       />
 
       <div className="print-panel__layout">
-        <div className="receipt-preview" aria-label="Previa visual da comanda">
+        <div className="receipt-preview" aria-label="Prévia visual operacional">
           <div className="receipt-preview__brand">
-            <strong>SOL RESTAURANTE</strong>
-            <span>COMANDA DE PEDIDO</span>
+            <strong>MARCELO QUESSADA</strong>
+            <span>REGISTRO OPERACIONAL</span>
           </div>
           <div className="receipt-row">
-            <span>Pedido</span>
+            <span>Operação</span>
             <strong>{order.code}</strong>
           </div>
           <div className="receipt-row">
@@ -87,37 +87,37 @@ export function PrintPreview({ onPreviewTicket, order }: PrintPreviewProps) {
             <strong>{formatCurrency(order.total)}</strong>
           </div>
           <p className="receipt-note">{order.generalNotes}</p>
-          <p className="receipt-note">Previa HTML. Impressao fisica real depende de confirmacao/configuracao.</p>
+          <p className="receipt-note">Prévia HTML. Emissão final depende de confirmação/configuração.</p>
         </div>
 
         <div className="print-panel__side">
           <div className="print-step is-current">
             <span>1</span>
             <div>
-              <strong>Conferir pedido</strong>
-              <p>Itens, beneficiarios, retirada/entrega e pagamento.</p>
+              <strong>Conferir operação</strong>
+              <p>Itens, beneficiários, responsável e status financeiro.</p>
             </div>
           </div>
           <div className="print-step is-current">
             <span>2</span>
             <div>
-              <strong>Gerar comanda</strong>
-              <p>Previa HTML antes da impressao termica.</p>
+              <strong>Gerar registro</strong>
+              <p>Prévia HTML antes da emissão final.</p>
             </div>
           </div>
           <div className={order.printStatus === 'impresso' ? 'print-step is-done' : 'print-step'}>
             <span>3</span>
             <div>
-              <strong>Imprimir antes do preparo</strong>
-              <p>Bloqueio operacional ate impressao ou autorizacao manual.</p>
+              <strong>Emitir antes da conclusão</strong>
+              <p>Bloqueio operacional até emissão ou autorização manual.</p>
             </div>
           </div>
           <div className="print-actions">
             <Button icon="printer" onClick={() => onPreviewTicket(order.id)} variant="primary">
-              Gerar previa HTML
+              Gerar prévia HTML
             </Button>
             <Button icon="arrow" onClick={() => onPreviewTicket(order.id)} variant="secondary">
-              Regerar previa
+              Regerar prévia
             </Button>
           </div>
         </div>

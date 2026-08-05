@@ -14,9 +14,9 @@ import {
 const LOCAL_DEMO_EMAIL = 'admin.gerente@example.test'
 const LOCAL_DEMO_PASSWORD = 'password'
 const ACCESS_ROLE_OPTIONS = [
-  { label: 'Atendimento', value: 'atendente' },
-  { label: 'Gerencia', value: 'gerente' },
-  { label: 'Cozinha / impressao', value: 'cozinha' },
+  { label: 'Prospecção', value: 'atendente' },
+  { label: 'Gestão', value: 'gerente' },
+  { label: 'Operação comercial', value: 'cozinha' },
 ]
 
 export function LoginPage() {
@@ -56,7 +56,7 @@ export function LoginPage() {
       </div>
 
       <div className="auth-shell">
-        <section className="login-auth-panel auth-form-panel" aria-label="Acesso ao ChatBot CRM">
+        <section className="login-auth-panel auth-form-panel" aria-label="Acesso ao CRM de prospecção">
           <div className="login-auth-panel__inner">
             <BrandLogo />
 
@@ -64,8 +64,8 @@ export function LoginPage() {
               <h1>{mode === 'login' ? 'Bem-vindo de volta.' : 'Solicitar acesso'}</h1>
               <p>
                 {mode === 'login'
-                  ? 'Acesse sua conta para continuar.'
-                  : 'Solicite liberacao ao gerente para acessar o sistema com o perfil adequado.'}
+                  ? 'Acesse sua central estratégica de prospecção.'
+                  : 'Solicite liberação para acessar o sistema com o perfil adequado.'}
               </p>
             </div>
 
@@ -126,7 +126,7 @@ export function LoginPage() {
                       className="auth-link"
                       onClick={() => {
                         setFormError(null)
-                        setFormNotice('Redefinicao de senha deve ser solicitada ao gerente neste MVP.')
+                        setFormNotice('Redefinição de senha deve ser solicitada ao administrador neste MVP.')
                       }}
                       type="button"
                     >
@@ -175,7 +175,7 @@ export function LoginPage() {
                   />
                   <div className="auth-note">
                     <strong>Cadastro controlado</strong>
-                    <p>Nenhum usuario e criado automaticamente por esta tela. A liberacao real fica com perfil administrativo.</p>
+                    <p>Nenhum usuário é criado automaticamente por esta tela. A liberação real fica com perfil administrativo.</p>
                   </div>
                   <Button onClick={() => setMode('login')} variant="secondary">
                     Voltar ao login

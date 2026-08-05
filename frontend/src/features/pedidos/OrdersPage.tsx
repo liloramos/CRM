@@ -55,17 +55,17 @@ export function OrdersPage({
               {selectedOrder ? 'Novo item' : 'Criar rascunho'}
             </Button>
             <Button disabled={!selectedOrder} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="primary">
-              Previa da comanda
+              Prévia operacional
             </Button>
           </>
         }
-        description="Fila de pedidos com conferencia humana, pagamento e impressao antes do preparo."
-        title="Pedidos"
+        description="Fila de operações comerciais com conferência humana e revisão antes da conclusão."
+        title="Operações"
       />
 
       <div className="orders-layout">
         <Card className="orders-list-card">
-          <SectionTitle eyebrow="Fila operacional" title="Pedidos ativos" />
+          <SectionTitle eyebrow="Fila operacional" title="Operações ativas" />
           <div className="orders-list">
             {orders.map((order) => (
               <button
@@ -84,7 +84,7 @@ export function OrdersPage({
             {orders.length === 0 ? (
               <EmptyState
                 actionLabel="Criar rascunho"
-                description="Nenhum pedido veio da API ainda. Crie um rascunho manual para iniciar a fila local."
+                description="Nenhuma operação veio da API ainda. Crie um rascunho manual para iniciar a fila local."
                 onAction={onNewOrder}
                 title="Fila vazia"
               />
@@ -93,7 +93,7 @@ export function OrdersPage({
         </Card>
 
         <div className="orders-main">
-          {isLoading ? <LoadingState description="Atualizando fila pelo backend..." title="Sincronizando pedidos" /> : null}
+          {isLoading ? <LoadingState description="Atualizando fila pelo backend..." title="Sincronizando operações" /> : null}
 
           {selectedOrder ? (
             <>
@@ -111,7 +111,7 @@ export function OrdersPage({
                   <strong>{formatCurrency(selectedOrder.total)}</strong>
                 </Card>
                 <Card>
-                  <span className="mini-label">Comanda</span>
+                  <span className="mini-label">Registro</span>
                   <StatusBadge status={selectedOrder.printStatus} type="print" />
                 </Card>
               </div>
@@ -123,15 +123,15 @@ export function OrdersPage({
                       Adicionar item
                     </Button>
                   }
-                  title="Itens do pedido"
+                  title="Itens da operação"
                 />
                 <DataTable columns={itemColumns} data={selectedOrder.items} getRowKey={(item) => item.id} />
                 {selectedOrder.items.length === 0 ? (
                   <EmptyState
                     actionLabel="Adicionar item"
-                    description="Rascunho criado. Escolha um produto do cardapio para montar o pedido."
+                    description="Rascunho criado. Escolha um item do catálogo para montar a operação."
                     onAction={() => onOpenModal('add-product')}
-                    title="Pedido sem itens"
+                    title="Operação sem itens"
                   />
                 ) : null}
               </Card>
@@ -171,9 +171,9 @@ export function OrdersPage({
           ) : (
             <EmptyState
               actionLabel="Criar primeiro rascunho"
-              description="A tela esta conectada ao backend. Crie um rascunho para iniciar um pedido manual seguro."
+              description="A tela está conectada ao backend. Crie um rascunho para iniciar uma operação manual segura."
               onAction={onNewOrder}
-              title="Nenhum pedido selecionado"
+              title="Nenhuma operação selecionada"
             />
           )}
         </div>
@@ -188,7 +188,7 @@ export function OrdersPage({
               Alterar status
             </Button>
             <Button disabled={!selectedOrder} icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
-              Cancelar pedido
+              Cancelar operação
             </Button>
           </div>
           <div className="attention-box">

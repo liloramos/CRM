@@ -11,14 +11,14 @@ export function CustomerCreditPanel({ summary }: CustomerCreditPanelProps) {
     <Card className="credit-card">
       <SectionTitle title="Credito de clientes" />
       <strong>{formatCurrency(summary.customerCreditBalance)}</strong>
-      <p>Saldo e uso de credito ficam destacados para conferencia manual antes de aplicar em novos pedidos.</p>
+      <p>Saldo e uso de crédito ficam destacados para conferência manual antes de aplicar em novas operações.</p>
       <div className="finance-meta-grid">
         <div>
           <span>Usado hoje</span>
           <strong>{formatCurrency(summary.creditUsed)}</strong>
         </div>
         <div>
-          <span>Pedidos pagos</span>
+          <span>Operações pagas</span>
           <strong>{summary.paidOrders}</strong>
         </div>
       </div>

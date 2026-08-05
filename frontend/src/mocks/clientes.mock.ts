@@ -16,8 +16,8 @@ export const customersMock: CustomerSummary[] = [
     phoneLabel: '(00) 00000-0000',
     tags: ['retirada por terceiro'],
     creditBalance: 0,
-    notes: ['Costuma enviar pedido em mensagens separadas.'],
-    preferences: ['Separar marmita por beneficiario'],
+    notes: ['Costuma enviar informações em mensagens separadas.'],
+    preferences: ['Separar análise por responsável'],
   },
   {
     id: 'cliente-cerrado',

@@ -276,9 +276,9 @@ async function getAvailableMenu(companySlug: string, fallbackProducts: Product[]
 function mapBackendProduct(product: BackendProduct): Product {
   return {
     id: String(product.id),
-    category: product.category?.name ?? 'Cardapio',
+    category: product.category?.name ?? 'Catálogo',
     name: product.name,
-    description: product.description ?? product.notes_hint ?? 'Produto cadastrado no cardapio operacional.',
+    description: product.description ?? product.notes_hint ?? 'Item cadastrado no catálogo operacional.',
     price: (product.base_price_cents ?? 0) / 100,
     available: Boolean(product.is_active ?? true) && Boolean(product.is_available_by_default ?? true),
     tags: [product.product_type, product.menu_rule_code, 'api'].filter(Boolean) as string[],

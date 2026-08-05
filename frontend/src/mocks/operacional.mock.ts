@@ -29,7 +29,7 @@ export const deliveryTasksMock: DeliveryTask[] = [
 export const financeEntriesMock: FinanceEntry[] = [
   {
     id: 'fin-001',
-    label: 'Pedido com credito usado',
+    label: 'Operação com crédito usado',
     orderCode: '#S-1042',
     status: 'revisao_humana',
     amount: 48,
@@ -39,11 +39,11 @@ export const financeEntriesMock: FinanceEntry[] = [
     method: 'Pix + credito',
     paymentMethod: 'misto',
     createdLabel: 'Hoje, atendimento atual',
-    description: 'Comprovante em conferencia humana antes de liberar preparo.',
+    description: 'Comprovante em conferência humana antes de liberar conclusão.',
   },
   {
     id: 'fin-002',
-    label: 'Pedido pago e impresso',
+    label: 'Operação paga e emitida',
     orderCode: '#S-1041',
     status: 'pago',
     amount: 36,
@@ -53,7 +53,7 @@ export const financeEntriesMock: FinanceEntry[] = [
     method: 'Pix',
     paymentMethod: 'pix',
     createdLabel: 'Hoje, fila do almoco',
-    description: 'Pagamento confirmado e comanda ja impressa.',
+    description: 'Pagamento confirmado e registro já emitido.',
   },
   {
     id: 'fin-003',
@@ -67,7 +67,7 @@ export const financeEntriesMock: FinanceEntry[] = [
     method: 'A confirmar',
     paymentMethod: 'a_confirmar',
     createdLabel: 'Hoje, balcao',
-    description: 'Pedido manual aguardando definicao de pagamento.',
+    description: 'Operação manual aguardando definição de pagamento.',
   },
 ]
 
@@ -150,6 +150,6 @@ export const integrationsMock: IntegrationStatus[] = [
     id: 'impressao',
     title: 'Impressao HTML',
     status: 'warning',
-    description: 'Comanda deve ser impressa antes do preparo.',
+    description: 'Registro deve ser emitido antes da conclusão.',
   },
 ]

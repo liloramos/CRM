@@ -7,22 +7,22 @@ export function ReportsPage() {
   return (
     <PageContainer>
       <PageHeader
-        description="Indicadores para acompanhar atendimento, pedidos, impressao e pagamentos."
-        title="Relatorios"
+        description="Indicadores para acompanhar atendimento comercial, prospecção e performance."
+        title="Relatórios"
       />
       <div className="stats-grid">
         <StatCard icon="chat" label="Tempo de resposta" tone="info" value="2m 45s" />
-        <StatCard icon="orders" label="Pedidos conferidos" tone="success" value="86%" />
-        <StatCard icon="printer" label="Falhas de impressao" tone="warning" value="3" />
-        <StatCard icon="payment" label="Pix em revisao" tone="warning" value="4" />
+        <StatCard icon="orders" label="Leads revisados" tone="success" value="86%" />
+        <StatCard icon="printer" label="Exportações pendentes" tone="warning" value="3" />
+        <StatCard icon="payment" label="Oportunidades em revisão" tone="warning" value="4" />
       </div>
       <Card>
         <SectionTitle title="Leitura operacional" />
         <div className="report-bars">
-          <span style={{ width: '86%' }}>Pedidos conferidos</span>
+          <span style={{ width: '86%' }}>Leads revisados</span>
           <span style={{ width: '64%' }}>Conversas resolvidas</span>
-          <span style={{ width: '52%' }}>Comandas impressas no prazo</span>
-          <span style={{ width: '38%' }}>Pagamentos com revisao humana</span>
+          <span style={{ width: '52%' }}>Exportações entregues no prazo</span>
+          <span style={{ width: '38%' }}>Oportunidades com revisão humana</span>
         </div>
       </Card>
     </PageContainer>

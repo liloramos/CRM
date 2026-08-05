@@ -137,7 +137,7 @@ function App() {
 
   async function handleAddItem() {
     if (!selectedOrder || !selectedProductId) {
-      setActionError('Selecione um pedido e um produto antes de adicionar item.')
+      setActionError('Selecione uma operação e um item antes de adicionar.')
       return
     }
 
@@ -205,7 +205,7 @@ function App() {
       setPrintPreview(response.data.preview)
       await loadSnapshot()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel gerar a previa da comanda.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível gerar a prévia operacional.')
     } finally {
       setIsActionBusy(false)
     }
@@ -365,7 +365,7 @@ function App() {
   if (!snapshot && isLoadingSnapshot) {
     return (
       <main className="center-screen">
-        <LoadingState description="Atualizando pedidos, pagamentos e atendimento..." title="Sincronizando operação" />
+        <LoadingState description="Atualizando leads, indicadores e perfil..." title="Sincronizando CRM" />
       </main>
     )
   }
@@ -426,9 +426,9 @@ function App() {
 function primaryLabelForModal(modal: AppModal): string {
   switch (modal) {
     case 'cancel-order':
-      return 'Cancelar pedido'
+      return 'Cancelar operação'
     case 'add-product':
-      return 'Adicionar item ao pedido'
+      return 'Adicionar item à operação'
     case 'toggle-ai':
       return 'Confirmar alteracao'
     default:

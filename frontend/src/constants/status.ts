@@ -6,9 +6,9 @@ export const orderStatusConfig = {
   aguardando_pagamento: { label: 'Aguardando pagamento', tone: 'warning' },
   comprovante_recebido: { label: 'Comprovante recebido', tone: 'info' },
   pagamento_confirmado: { label: 'Pagamento confirmado', tone: 'success' },
-  pronto_para_imprimir: { label: 'Pronto para imprimir', tone: 'brand' },
-  impresso: { label: 'Impresso', tone: 'success' },
-  em_preparo: { label: 'Em preparo', tone: 'warning' },
+  pronto_para_imprimir: { label: 'Pronto para emitir', tone: 'brand' },
+  impresso: { label: 'Emitido', tone: 'success' },
+  em_preparo: { label: 'Em revisão', tone: 'warning' },
   pronto: { label: 'Pronto', tone: 'success' },
   saiu_para_entrega: { label: 'Saiu para entrega', tone: 'info' },
   finalizado: { label: 'Finalizado', tone: 'success' },
@@ -17,11 +17,11 @@ export const orderStatusConfig = {
 } satisfies Record<string, { label: string; tone: BadgeTone }>
 
 export const printStatusConfig = {
-  aguardando: { label: 'Aguardando impressao', tone: 'warning' },
-  imprimindo: { label: 'Imprimindo', tone: 'info' },
-  impresso: { label: 'Impresso', tone: 'success' },
-  reimpressao: { label: 'Reimpressao solicitada', tone: 'manual' },
-  erro: { label: 'Falha na impressao', tone: 'danger' },
+  aguardando: { label: 'Aguardando emissão', tone: 'warning' },
+  imprimindo: { label: 'Emitindo', tone: 'info' },
+  impresso: { label: 'Emitido', tone: 'success' },
+  reimpressao: { label: 'Reemissão solicitada', tone: 'manual' },
+  erro: { label: 'Falha na emissão', tone: 'danger' },
 } satisfies Record<string, { label: string; tone: BadgeTone }>
 
 export const conversationModeConfig = {

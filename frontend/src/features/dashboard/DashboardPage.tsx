@@ -69,8 +69,8 @@ const STATUS_GROUPS: Array<{ status: OrderStatus; label: string }> = [
   { status: 'comprovante_recebido', label: 'Comprovante recebido' },
   { status: 'pagamento_confirmado', label: 'Pagamento confirmado' },
   { status: 'pronto_para_imprimir', label: 'Pronto para imprimir' },
-  { status: 'impresso', label: 'Comanda impressa' },
-  { status: 'em_preparo', label: 'Em preparo' },
+  { status: 'impresso', label: 'Registro emitido' },
+  { status: 'em_preparo', label: 'Em revisão' },
   { status: 'pronto', label: 'Pronto' },
   { status: 'saiu_para_entrega', label: 'Saiu para entrega' },
   { status: 'finalizado', label: 'Finalizado' },
@@ -147,7 +147,7 @@ export function DashboardPage({
       ? {
           id: 'payments',
           title: 'Pagamentos aguardando conferência',
-          description: `${paymentAttentionOrders.length} pedido(s) com valor ou status financeiro pendente.`,
+          description: `${paymentAttentionOrders.length} operação(ões) com valor ou status financeiro pendente.`,
           tone: 'warning',
           actionLabel: 'Ver pagamentos',
           route: 'pagamentos',
@@ -156,8 +156,8 @@ export function DashboardPage({
     waitingPrintOrders.length > 0
       ? {
           id: 'print',
-          title: 'Comandas aguardando impressão',
-          description: `${waitingPrintOrders.length} pedido(s) em fluxo ainda sem impressão concluída.`,
+          title: 'Registros aguardando emissão',
+          description: `${waitingPrintOrders.length} operação(ões) em fluxo ainda sem registro concluído.`,
           tone: printErrorOrders.length > 0 ? 'danger' : 'warning',
           actionLabel: 'Abrir fila',
           route: 'pedidos',
@@ -247,8 +247,8 @@ export function DashboardPage({
       {!hasAnyOperation ? (
         <Card className="dashboard-state-card">
           <EmptyState
-            actionLabel="Criar novo pedido"
-            description="A operação ainda não registrou pedidos, conversas ou pagamentos no período atual."
+            actionLabel="Criar nova operação"
+            description="A operação ainda não registrou leads, conversas ou oportunidades no período atual."
             onAction={onNewOrder}
             title="Sem movimentações operacionais"
           />
@@ -267,12 +267,12 @@ export function DashboardPage({
           value={`${safeConversations.length}`}
         />
         <StatCard
-          detailLabel="Ver pedidos"
+          detailLabel="Ver operações"
           icon="orders"
-          label="Pedidos em fluxo"
+          label="Operações em fluxo"
           onClick={operationalOrders.length > 0 ? () => setActiveDetail('orders') : undefined}
           showDecoration={false}
-          trend={operationalOrders.length > 0 ? 'Exclui finalizados e cancelados' : 'Nenhum pedido em andamento'}
+          trend={operationalOrders.length > 0 ? 'Exclui finalizados e cancelados' : 'Nenhuma operação em andamento'}
           value={`${operationalOrders.length}`}
         />
         <StatCard
@@ -292,17 +292,17 @@ export function DashboardPage({
           onClick={paymentAttentionOrders.length > 0 ? () => setActiveDetail('payment-pending') : undefined}
           showDecoration={false}
           tone={financialSummary.pendingAmount > 0 ? 'warning' : 'info'}
-          trend={financialSummary.pendingAmount > 0 ? `${paymentAttentionOrders.length} pedido(s) para conferir` : 'Nenhum pagamento pendente'}
+          trend={financialSummary.pendingAmount > 0 ? `${paymentAttentionOrders.length} operação(ões) para conferir` : 'Nenhum valor pendente'}
           value={formatCurrency(financialSummary.pendingAmount)}
         />
         <StatCard
-          detailLabel="Ver comandas"
+          detailLabel="Ver registros"
           icon="printer"
           label="Comandas pendentes"
           onClick={waitingPrintOrders.length > 0 ? () => setActiveDetail('prints') : undefined}
           showDecoration={false}
           tone={waitingPrintOrders.length > 0 ? 'warning' : 'info'}
-          trend={waitingPrintOrders.length > 0 ? 'Impressão necessária antes do preparo' : 'Nenhuma comanda aguardando impressão'}
+          trend={waitingPrintOrders.length > 0 ? 'Registro necessário antes da conclusão' : 'Nenhum registro aguardando emissão'}
           value={`${waitingPrintOrders.length}`}
         />
       </div>
@@ -353,7 +353,7 @@ export function DashboardPage({
             </div>
           ) : (
             <DashboardEmptyMessage
-              description="Nenhum pagamento, comanda ou conversa exige ação imediata no momento."
+              description="Nenhuma oportunidade, registro ou conversa exige ação imediata no momento."
               title="Operação sem alertas"
             />
           )}
@@ -381,7 +381,7 @@ export function DashboardPage({
               ))}
             </div>
           ) : (
-            <DashboardEmptyMessage description="Nenhum pedido em andamento." title="Fila vazia" />
+            <DashboardEmptyMessage description="Nenhuma operação em andamento." title="Fila vazia" />
           )}
         </Card>
 
@@ -458,7 +458,7 @@ function DashboardHeader({ onNavigate, onNewOrder }: Pick<DashboardPageProps, 'o
       actions={
         <div className="inline-actions">
           <Button icon="plus" onClick={onNewOrder} variant="primary">
-            Novo pedido
+            Nova operação
           </Button>
           <Button icon="orders" onClick={() => onNavigate('pedidos')} variant="secondary">
             Abrir fila
@@ -468,7 +468,7 @@ function DashboardHeader({ onNavigate, onNewOrder }: Pick<DashboardPageProps, 'o
           </Button>
         </div>
       }
-      description="Acompanhe pedidos, pagamentos e atendimento em tempo real."
+      description="Acompanhe leads, oportunidades e atendimento comercial em tempo real."
       eyebrow="Painel operacional"
       title="Dashboard"
     />
@@ -568,13 +568,13 @@ function DashboardDetailDrawer({
                 value: group.count,
                 tone: group.tone,
               }))}
-              title="Distribuição dos pedidos"
-              valueFormatter={(value) => `${value} pedido(s)`}
+              title="Distribuição das operações"
+              valueFormatter={(value) => `${value} operação(ões)`}
             />
           ) : (
             <DashboardEmptyMessage
-              description="Os pedidos aparecerão aqui assim que forem criados."
-              title="Ainda não há pedidos suficientes para gerar esta análise."
+              description="As operações aparecerão aqui assim que forem criadas."
+              title="Ainda não há operações suficientes para gerar esta análise."
             />
           )}
           {confirmedPaymentMethods.length > 0 ? (
@@ -587,7 +587,7 @@ function DashboardDetailDrawer({
 
       {activeDetail === 'orders' ? (
         <DetailList
-          emptyDescription="Nenhum pedido em andamento para detalhar."
+          emptyDescription="Nenhuma operação em andamento para detalhar."
           items={orders.slice(0, 12).map((order) => ({
             id: order.id,
             title: `${order.code} · ${order.customer.name}`,
@@ -613,7 +613,7 @@ function DashboardDetailDrawer({
                 onSelect={(status) => setSelectedStatus(status as OrderStatus)}
                 selectedId={selectedStatus}
                 title="Pedidos por status"
-                valueFormatter={(value) => `${value} pedido(s)`}
+                valueFormatter={(value) => `${value} operação(ões)`}
               />
               {selectedStatus ? (
                 <Button icon="close" onClick={() => setSelectedStatus(null)} size="sm" variant="secondary">
@@ -621,7 +621,7 @@ function DashboardDetailDrawer({
                 </Button>
               ) : null}
               <DetailList
-                emptyDescription="Nenhum pedido encontrado para o status selecionado."
+                emptyDescription="Nenhuma operação encontrada para o status selecionado."
                 items={statusOrders.slice(0, 12).map((order) => ({
                   id: order.id,
                   title: `${order.code} · ${order.customer.name}`,
@@ -634,8 +634,8 @@ function DashboardDetailDrawer({
             </>
           ) : (
             <DashboardEmptyMessage
-              description="Os pedidos aparecerão na análise quando houver movimentação real."
-              title="Ainda não há pedidos suficientes para gerar esta análise."
+              description="As operações aparecerão na análise quando houver movimentação real."
+              title="Ainda não há operações suficientes para gerar esta análise."
             />
           )}
         </div>
@@ -696,7 +696,7 @@ function DashboardDetailDrawer({
                 onSelect={(status) => setSelectedPaymentStatus(status as PaymentStatus)}
                 selectedId={selectedPaymentStatus}
                 title="Por situação"
-                valueFormatter={(value) => `${value} pedido(s)`}
+                valueFormatter={(value) => `${value} operação(ões)`}
               />
               {selectedPaymentStatus ? (
                 <Button icon="close" onClick={() => setSelectedPaymentStatus(null)} size="sm" variant="secondary">
@@ -767,18 +767,18 @@ function DashboardDetailDrawer({
             ))}
           </div>
         ) : (
-          <DashboardEmptyMessage description="As movimentações dos pedidos aparecerão aqui." title="Sem atividades recentes" />
+          <DashboardEmptyMessage description="As movimentações comerciais aparecerão aqui." title="Sem atividades recentes" />
         )
       ) : null}
 
       {activeDetail === 'prints' ? (
         <DetailList
-          emptyDescription="Nenhuma comanda pendente para detalhar."
+          emptyDescription="Nenhum registro pendente para detalhar."
           items={waitingPrintOrders.slice(0, 12).map((order) => ({
             id: order.id,
             title: `${order.code} · ${order.customer.name}`,
             meta: order.createdLabel,
-            description: `Status de impressão: ${order.printStatus}.`,
+            description: `Status de emissão: ${order.printStatus}.`,
             badge: order.printStatus,
             badgeTone: order.printStatus === 'erro' ? 'danger' : 'warning',
           }))}
@@ -798,7 +798,7 @@ function dashboardDetailConfig(detail: DashboardDetail): { title: string; descri
     case 'summary':
       return {
         title: 'Resumo operacional',
-        description: 'Visão consolidada dos pedidos, pagamentos e comandas do período.',
+        description: 'Visão consolidada de leads, oportunidades e registros do período.',
       }
     case 'orders':
       return {
@@ -807,8 +807,8 @@ function dashboardDetailConfig(detail: DashboardDetail): { title: string; descri
       }
     case 'status':
       return {
-        title: 'Pedidos por status',
-        description: 'Distribuição real dos pedidos carregados no painel.',
+        title: 'Operações por status',
+        description: 'Distribuição real das operações carregadas no painel.',
       }
     case 'revenue':
       return {
@@ -833,12 +833,12 @@ function dashboardDetailConfig(detail: DashboardDetail): { title: string; descri
     case 'activity':
       return {
         title: 'Atividades recentes',
-        description: 'Linha do tempo das últimas mudanças registradas nos pedidos.',
+        description: 'Linha do tempo das últimas mudanças registradas nas operações.',
       }
     case 'prints':
       return {
         title: 'Comandas pendentes',
-        description: 'Pedidos que ainda não concluíram o fluxo de impressão.',
+        description: 'Operações que ainda não concluíram o fluxo de emissão.',
       }
   }
 }
@@ -912,7 +912,7 @@ function DashboardDrawerFooter({
   if (activeDetail === 'orders' || activeDetail === 'status' || activeDetail === 'prints') {
     return (
       <Button icon="arrow" onClick={() => navigate('pedidos')} variant="primary">
-        Abrir pedidos
+        Abrir operações
       </Button>
     )
   }
@@ -921,7 +921,7 @@ function DashboardDrawerFooter({
     return (
       <div className="drawer-actions">
         <Button icon="orders" onClick={() => navigate('pedidos')} variant="secondary">
-          Abrir pedidos
+          Abrir operações
         </Button>
         <Button icon="finance" onClick={() => navigate('pagamentos')} variant="primary">
           Abrir pagamentos
@@ -933,7 +933,7 @@ function DashboardDrawerFooter({
   return (
     <div className="drawer-actions">
       <Button icon="orders" onClick={() => navigate('pedidos')} variant="secondary">
-        Abrir pedidos
+        Abrir operações
       </Button>
       <Button icon="finance" onClick={() => navigate('financeiro')} variant="primary">
         Abrir financeiro

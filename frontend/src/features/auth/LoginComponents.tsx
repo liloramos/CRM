@@ -3,14 +3,14 @@ import {
   Bell,
   Check,
   ChevronDown,
-  ClipboardList,
   Eye,
   EyeOff,
   LayoutDashboard,
   Lock,
   LogIn,
   Mail,
-  MessageCircle,
+  Target,
+  TrendingUp,
   User,
   Users,
   type LucideIcon,
@@ -18,8 +18,8 @@ import {
 import { Button } from '../../components/ui/Button'
 
 const AUTH_ICON_STROKE = 1.85
-const AUTH_BRAND_ICON_SRC = '/imgs/logo-cores-invertidas-square-login.png'
-const HERO_BRAND_LOGO_SRC = '/imgs/logo-sol-transparent.png'
+const AUTH_BRAND_ICON_SRC = '/favicon.png'
+const HERO_BRAND_LOGO_SRC = '/imgs/logo.png'
 
 const authIcons = {
   lock: Lock,
@@ -41,11 +41,11 @@ export function BrandLogo({ compact = false }: BrandLogoProps) {
   return (
     <div className={compact ? 'auth-brand auth-brand--compact' : 'auth-brand'}>
       <span className="auth-brand__halo">
-        <img alt="" aria-hidden="true" decoding="async" src={AUTH_BRAND_ICON_SRC} />
+        <img alt="Monograma MQ" decoding="async" src={AUTH_BRAND_ICON_SRC} />
       </span>
       <div>
-        <strong>Sol Restaurante</strong>
-        <small>CRM operacional</small>
+        <strong>Marcelo Quessada</strong>
+        <small>CRM DE PROSPECÇÃO</small>
       </div>
     </div>
   )
@@ -305,9 +305,9 @@ type LoginHeroPanelProps = {
 
 export function LoginHeroPanel({ children }: LoginHeroPanelProps) {
   return (
-    <section className="login-hero-panel auth-hero-panel" aria-label="Resumo visual do CRM operacional">
+    <section className="login-hero-panel auth-hero-panel" aria-label="Resumo visual do CRM de prospecção">
       <div className="login-hero-panel__glow" />
-      <div className="login-brand-composition" aria-hidden="true">
+      <div className="login-brand-composition">
         <div className="login-brand-composition__mesh" />
         <div className="login-brand-composition__halo" />
         <svg className="login-brand-composition__lines" fill="none" viewBox="0 0 560 520" xmlns="http://www.w3.org/2000/svg">
@@ -319,7 +319,7 @@ export function LoginHeroPanel({ children }: LoginHeroPanelProps) {
           <circle cx="432" cy="348" r="4" />
         </svg>
         <img
-          alt=""
+          alt="Marcelo Quessada"
           className="login-brand-composition__logo"
           decoding="async"
           src={HERO_BRAND_LOGO_SRC}
@@ -330,12 +330,12 @@ export function LoginHeroPanel({ children }: LoginHeroPanelProps) {
           <span />
         </div>
         <div className="login-brand-composition__panel login-brand-composition__panel--chat">
-          <LoginIcon IconComponent={MessageCircle} size={16} />
+          <LoginIcon IconComponent={TrendingUp} size={16} />
           <span />
           <span />
         </div>
         <div className="login-brand-composition__panel login-brand-composition__panel--order">
-          <LoginIcon IconComponent={ClipboardList} size={16} />
+          <LoginIcon IconComponent={Target} size={16} />
           <span />
           <span />
         </div>
@@ -368,12 +368,12 @@ export function LoginHeroPanel({ children }: LoginHeroPanelProps) {
       </div>
 
       <div className="login-hero-panel__copy">
-        <span className="eyebrow">Gestao operacional</span>
+        <span className="eyebrow">INTELIGÊNCIA COMERCIAL</span>
         <h1>
-          <span>Operacao mais clara.</span>
-          <strong>Atendimento mais rapido.</strong>
+          <span>Prospecção mais precisa.</span>
+          <strong>Decisões mais estratégicas.</strong>
         </h1>
-        <p>Organize pedidos, cardapio e comandas em uma rotina mais simples e visual.</p>
+        <p>Centralize, qualifique e priorize oportunidades para transformar dados em novas vendas.</p>
         <span className="login-hero-panel__accent" />
       </div>
 

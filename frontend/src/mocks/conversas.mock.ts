@@ -7,14 +7,14 @@ export const conversationsMock: Conversation[] = [
     customer: customersMock[0],
     mode: 'atencao',
     unread: 2,
-    statusLabel: 'Precisa confirmar pedido',
-    lastMessage: 'Quero igual ao ultimo, mas muda uma marmita.',
-    linkedOrderId: 'pedido-001',
+    statusLabel: 'Precisa confirmar oportunidade',
+    lastMessage: 'Quero seguir com o mesmo plano, mas mudar a prioridade.',
+    linkedOrderId: 'operacao-001',
     messages: [
       {
         id: 'msg-1',
         sender: 'customer',
-        body: 'Quero duas marmitas, uma com pouca massa.',
+        body: 'Quero duas frentes de prospecção, uma com foco em clínicas.',
         timeLabel: 'agora',
       },
       {
@@ -38,12 +38,12 @@ export const conversationsMock: Conversation[] = [
     unread: 0,
     statusLabel: 'Aguardando cliente',
     lastMessage: 'Pode deixar separado para retirada.',
-    linkedOrderId: 'pedido-002',
+    linkedOrderId: 'operacao-002',
     messages: [
       {
         id: 'msg-4',
         sender: 'attendant',
-        body: 'Pedido conferido. Vamos avisar quando estiver pronto.',
+        body: 'Operação conferida. Vamos avisar quando estiver pronta.',
         timeLabel: 'ha 5 min',
       },
     ],
@@ -54,13 +54,13 @@ export const conversationsMock: Conversation[] = [
     mode: 'manual',
     unread: 1,
     statusLabel: 'Atendente assumiu',
-    lastMessage: 'Ainda nao sei se vou retirar ou comer no local.',
-    linkedOrderId: 'pedido-003',
+    lastMessage: 'Ainda não sei se sigo com SP ou RJ primeiro.',
+    linkedOrderId: 'operacao-003',
     messages: [
       {
         id: 'msg-5',
         sender: 'customer',
-        body: 'Ainda nao sei se vou retirar ou comer no local.',
+        body: 'Ainda não sei se sigo com SP ou RJ primeiro.',
         timeLabel: 'agora',
       },
     ],

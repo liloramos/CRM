@@ -56,14 +56,14 @@ export function OperationalModalContent({
       <div className="modal-fields">
         {selectedOrder ? (
           <p>
-            Pedido <strong>{selectedOrder.code}</strong>. O item sera adicionado como edicao operacional enquanto o pedido ainda
+            Operação <strong>{selectedOrder.code}</strong>. O item será adicionado como edição operacional enquanto o registro ainda
             estiver aberto.
           </p>
         ) : (
-          <p>Crie ou selecione um pedido antes de adicionar itens.</p>
+          <p>Crie ou selecione uma operação antes de adicionar itens.</p>
         )}
         <label>
-          Produto
+          Item
           <select onChange={(event) => onProductChange(event.target.value)} value={selectedProductId}>
             {products.map((product) => (
               <option key={product.id} value={product.id}>
@@ -76,7 +76,7 @@ export function OperationalModalContent({
           <div className="option-picker">
             <div>
               <strong>Componentes e opcoes</strong>
-              <p>A opcao esgotada hoje fica bloqueada, mas o produto continua vendavel.</p>
+              <p>A opção indisponível hoje fica bloqueada, mas o item principal continua disponível.</p>
             </div>
             {optionGroups.map((group) => (
               <div className="option-picker__group" key={group.groupLabel}>
@@ -146,7 +146,7 @@ export function OperationalModalContent({
           Observacao por item
           <textarea
             onChange={(event) => onItemNotesChange(event.target.value)}
-            placeholder="Ex.: sem salada, retirar cebola, separar para retirada."
+            placeholder="Ex.: observação específica para revisão comercial."
             value={itemNotes}
           />
         </label>
@@ -157,16 +157,16 @@ export function OperationalModalContent({
 
   if (modal === 'print-preview') {
     if (isActionBusy && !printPreview) {
-      return <LoadingState description="Renderizando comanda HTML pelo Laravel..." title="Gerando previa" />
+      return <LoadingState description="Renderizando prévia HTML pelo Laravel..." title="Gerando prévia" />
     }
 
     return (
       <div className="modal-fields">
         {actionError ? <p className="form-error">{actionError}</p> : null}
         {printPreview?.html ? (
-          <iframe className="ticket-frame" srcDoc={printPreview.html} title="Previa HTML da comanda" />
+          <iframe className="ticket-frame" srcDoc={printPreview.html} title="Prévia HTML operacional" />
         ) : (
-          <EmptyState description="A previa sera exibida aqui quando o backend gerar o ticket." title="Sem previa carregada" />
+          <EmptyState description="A prévia será exibida aqui quando o backend gerar o registro." title="Sem prévia carregada" />
         )}
       </div>
     )
@@ -249,10 +249,10 @@ export function OperationalModalContent({
   if (modal === 'print-error') {
     return (
       <div className="modal-fields">
-        <p>Opcoes previstas: tentar novamente, reimprimir, copiar comanda ou marcar impresso manualmente.</p>
+        <p>Opções previstas: tentar novamente, reemitir, copiar registro ou marcar como emitido manualmente.</p>
         <label>
           Motivo operacional
-          <textarea placeholder="Descreva a falha de impressao de forma objetiva." />
+          <textarea placeholder="Descreva a falha de emissão de forma objetiva." />
         </label>
       </div>
     )
@@ -285,7 +285,7 @@ export function OperationalModalContent({
 }
 
 function groupOptions(options: MenuOption[]): Array<{ groupLabel: string; options: MenuOption[] }> {
-  const orderedLabels = ['Bases/guarnicoes', 'Saladas', 'Carnes', 'Bebidas', 'Adicionais', 'Componentes']
+  const orderedLabels = ['Segmentos', 'Serviços', 'Campanhas', 'Canais', 'Extras', 'Componentes']
 
   return orderedLabels
     .map((groupLabel) => ({

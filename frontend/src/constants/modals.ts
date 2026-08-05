@@ -5,11 +5,11 @@ export function modalTitle(modal: AppModal): string {
     case 'confirm-payment':
       return 'Confirmar pagamento Pix'
     case 'cancel-order':
-      return 'Cancelar pedido'
+      return 'Cancelar operação'
     case 'change-status':
-      return 'Alterar status do pedido'
+      return 'Alterar status da operação'
     case 'edit-item':
-      return 'Editar item do pedido'
+      return 'Editar item da operação'
     case 'mark-unavailable':
       return 'Marcar item indisponivel'
     case 'add-product':
@@ -19,9 +19,9 @@ export function modalTitle(modal: AppModal): string {
     case 'toggle-ai':
       return 'Alternar IA/manual da conversa'
     case 'print-preview':
-      return 'Previa de comanda'
+      return 'Prévia operacional'
     case 'print-error':
-      return 'Erro de impressao'
+      return 'Erro de emissão'
     case 'whatsapp-error':
       return 'Erro de WhatsApp/API'
     default:
@@ -32,7 +32,7 @@ export function modalTitle(modal: AppModal): string {
 export function modalDescription(modal: AppModal): string {
   switch (modal) {
     case 'confirm-payment':
-      return 'Comprovantes e credito precisam de conferencia humana antes de liberar o pedido.'
+      return 'Comprovantes e crédito precisam de conferência humana antes de liberar a operação.'
     case 'cancel-order':
       return 'Esta acao altera o fluxo operacional e deve registrar motivo.'
     case 'toggle-ai':
@@ -40,7 +40,7 @@ export function modalDescription(modal: AppModal): string {
     case 'print-preview':
       return 'Previa HTML gerada pelo backend. Impressao fisica real ainda depende de configuracao local.'
     case 'print-error':
-      return 'A comanda nao deve liberar preparo sem impressao ou autorizacao manual.'
+      return 'O registro não deve liberar a conclusão sem emissão ou autorização manual.'
     case 'whatsapp-error':
       return 'Configuracao tecnica; nao e tela operacional de conversa.'
     default:

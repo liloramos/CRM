@@ -19,7 +19,7 @@ export function AuthPreviewPage({ mode }: AuthPreviewPageProps) {
       />
       <div className="auth-preview">
         <Card className="auth-panel" tone="glow">
-          <span className="eyebrow">Sol Restaurante</span>
+          <span className="eyebrow">Marcelo Quessada</span>
           <h2>{isSignup ? 'Criar acesso operacional' : 'Entrar no CRM'}</h2>
           <label>
             Nome
@@ -44,11 +44,11 @@ export function AuthPreviewPage({ mode }: AuthPreviewPageProps) {
         </Card>
         <Card className="auth-side">
           <h2>Operacao sem ruído</h2>
-          <p>Atendimento, pedidos, pagamento e impressao em um fluxo unico para a equipe.</p>
+          <p>Captação, qualificação e priorização em um fluxo único para a equipe comercial.</p>
           <div className="auth-side__steps">
-            <span>Atendimento</span>
-            <span>Conferencia</span>
-            <span>Comanda</span>
+            <span>Leads</span>
+            <span>Score</span>
+            <span>Exportação</span>
           </div>
         </Card>
       </div>

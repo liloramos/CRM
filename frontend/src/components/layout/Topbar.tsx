@@ -15,7 +15,7 @@ type TopbarProps = {
 export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: TopbarProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const companyName = user?.company?.name ?? 'Restaurante atual'
+  const companyName = user?.company?.name ?? 'Conta comercial atual'
   const roleLabel = formatRole(user?.roles[0])
   const syncedLabel = lastSyncedAt
     ? `Atualizado ${lastSyncedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
@@ -124,9 +124,9 @@ function formatRole(role?: string): string {
     case 'admin_gerente':
       return 'Gerência'
     case 'atendente':
-      return 'Atendimento'
+      return 'Prospecção'
     case 'cozinha':
-      return 'Cozinha'
+      return 'Operação comercial'
     default:
       return 'Operação'
   }

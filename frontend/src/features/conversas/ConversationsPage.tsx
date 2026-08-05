@@ -36,7 +36,7 @@ export function ConversationsPage({
             Alternar IA/manual
           </Button>
         }
-        description="Atendimento com pedido em montagem, sugestoes de IA e confirmacao humana."
+        description="Atendimento comercial com oportunidade em análise, sugestões de IA e confirmação humana."
         title="Conversas"
       />
 
@@ -69,7 +69,7 @@ export function ConversationsPage({
             ))}
           </div>
           {conversations.length === 0 ? (
-            <EmptyState description="Nenhuma conversa foi retornada pelo backend para este restaurante." title="Sem conversas ativas" />
+            <EmptyState description="Nenhuma conversa foi retornada pelo backend para esta conta." title="Sem conversas ativas" />
           ) : null}
         </Card>
 
@@ -97,8 +97,8 @@ export function ConversationsPage({
               <div className="ai-assist-card">
                 <Badge tone="manual">Revisao humana</Badge>
                 <p>
-                  A IA pode sugerir resposta e apontar duvidas, mas nao confirma pedido ambiguo, credito,
-                  pagamento ou entrega sem o atendente.
+                  A IA pode sugerir resposta e apontar dúvidas, mas não confirma oportunidade ambígua, crédito,
+                  pagamento ou entrega sem revisão humana.
                 </p>
               </div>
               <div className="composer">
@@ -114,7 +114,7 @@ export function ConversationsPage({
         </Card>
 
         <Card className="current-order-panel">
-          <SectionTitle title="Pedido atual" />
+          <SectionTitle title="Operação atual" />
           {linkedOrder ? (
             <div className="current-order">
               <div className="current-order__header">
@@ -133,15 +133,15 @@ export function ConversationsPage({
               </div>
               <div className="current-order__checks">
                 <span>Pagamento: {linkedOrder.paymentStatus}</span>
-                <span>Comanda: {linkedOrder.printStatus}</span>
+                <span>Registro: {linkedOrder.printStatus}</span>
                 <span>Retirada: {linkedOrder.pickupPerson ?? 'A confirmar'}</span>
               </div>
               <Button icon="printer" onClick={() => onPreviewTicket(linkedOrder.id)} variant="primary">
-                Previa da comanda
+                Prévia operacional
               </Button>
             </div>
           ) : (
-            <EmptyState description="Conversa sem pedido vinculado." title="Nenhum pedido em montagem" />
+            <EmptyState description="Conversa sem operação vinculada." title="Nenhuma operação em análise" />
           )}
         </Card>
       </div>
