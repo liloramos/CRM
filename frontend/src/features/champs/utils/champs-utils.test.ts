@@ -4,7 +4,7 @@ import { filterLeads } from './champs-filters'
 import { enrichLead, mergeLeads, type RawLead } from './champs-leads'
 import { normalizeState, normalizeUsername, parseBoolean } from './champs-normalizers'
 import { calculateScore, classifyScore } from './champs-score'
-import { readStoredLeads, writeStoredLeads } from './champs-storage'
+import { readChampsPreferences, STORAGE_KEY, writeChampsPreferences } from './champs-storage'
 
 const emptyScoreInput: RawLead = {
   instagramUsername: 'empresa-zero',
@@ -294,11 +294,44 @@ describe('storage Champs', () => {
       setItem: () => undefined,
     }
 
-    expect(readStoredLeads(storage)).toEqual([])
+    expect(readChampsPreferences(storage)).toEqual({
+      stateFilter: 'TODOS',
+      qualificationFilter: 'TODOS',
+      minimumScore: 0,
+      query: '',
+      order: 'SCORE_DESC',
+      lastSearchId: null,
+    })
   })
 
   it('retorna falso quando storage nao esta disponivel para gravacao', () => {
-    expect(writeStoredLeads([], null)).toBe(false)
+    expect(writeChampsPreferences({
+      stateFilter: 'SP',
+      qualificationFilter: 'QUALIFICADOS',
+      minimumScore: 70,
+      query: 'empresa',
+      order: 'RATING_DESC',
+      lastSearchId: 10,
+    }, null)).toBe(false)
+  })
+
+  it('grava somente preferencias visuais na chave atual', () => {
+    const entries = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+    }
+
+    expect(writeChampsPreferences({
+      stateFilter: 'RJ',
+      qualificationFilter: 'NAO_QUALIFICADOS',
+      minimumScore: 40,
+      query: '',
+      order: 'SCORE_ASC',
+      lastSearchId: 22,
+    }, storage)).toBe(true)
+    expect(entries.has(STORAGE_KEY)).toBe(true)
+    expect(entries.get(STORAGE_KEY)).not.toContain('leads')
   })
 })
 

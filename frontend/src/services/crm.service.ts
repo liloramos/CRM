@@ -320,7 +320,7 @@ function groupLabel(groupCode?: string | null): string {
   }
 }
 
-async function requestJson<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+export async function requestJson<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
   const method = (init.method ?? 'GET').toUpperCase()
   const headers = new Headers(init.headers)
 

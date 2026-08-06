@@ -80,12 +80,19 @@
 }
 
 .champs-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 42px;
   padding: 0 16px;
   border: 1px solid transparent;
   border-radius: 9px;
+  box-sizing: border-box;
   font: inherit;
   font-weight: 750;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   transition:
     transform 0.18s ease,
@@ -511,6 +518,467 @@
   color: var(--color-muted);
 }
 
+.champs-search-panel,
+.champs-history {
+  margin-top: 18px;
+}
+
+.champs-section-kicker {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--gold-primary);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+}
+
+.champs-search-form {
+  padding: 22px 24px 24px;
+}
+
+.champs-form-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.champs-field {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.champs-field > span {
+  justify-self: end;
+  margin-top: -22px;
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.champs-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-text);
+  background: var(--color-bg-soft);
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.champs-field input::placeholder {
+  color: var(--color-muted);
+}
+
+.champs-field input:hover:not(:disabled) {
+  border-color: rgba(201, 165, 90, 0.3);
+}
+
+.champs-field input:focus {
+  border-color: var(--gold-primary);
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(201, 165, 90, 0.16);
+}
+
+.champs-field input[aria-invalid='true'] {
+  border-color: rgba(210, 103, 111, 0.72);
+}
+
+.champs-field input:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.champs-field small {
+  color: #f0a6ad;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.champs-field--name,
+.champs-field--niche,
+.champs-field--city {
+  grid-column: span 4;
+}
+
+.champs-field--state,
+.champs-field--limit,
+.champs-field--score {
+  grid-column: span 4;
+}
+
+.champs-field--state .champs-filter-field {
+  gap: 8px;
+}
+
+.champs-field--state .filter-select__trigger {
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.champs-search-form__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+
+.champs-search-form__footer p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.champs-search-submit {
+  min-width: 172px;
+  min-height: 46px;
+}
+
+.champs-results {
+  scroll-margin-top: 18px;
+}
+
+.champs-results-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.champs-status,
+.champs-local-badge,
+.champs-qualified {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.champs-status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.champs-status--neutral {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.champs-status--processing {
+  color: var(--gold-light);
+  border-color: rgba(201, 165, 90, 0.3);
+  background: rgba(201, 165, 90, 0.1);
+}
+
+.champs-status--success {
+  color: #73d2a4;
+  border-color: rgba(79, 175, 131, 0.34);
+  background: rgba(79, 175, 131, 0.12);
+}
+
+.champs-status--warning {
+  color: #e4bf71;
+  border-color: rgba(213, 168, 74, 0.34);
+  background: rgba(213, 168, 74, 0.12);
+}
+
+.champs-status--danger {
+  color: #f0a6ad;
+  border-color: rgba(210, 103, 111, 0.34);
+  background: rgba(210, 103, 111, 0.12);
+}
+
+.champs-local-badge {
+  color: var(--gold-light);
+  border-color: rgba(201, 165, 90, 0.28);
+  background: rgba(201, 165, 90, 0.1);
+}
+
+.champs-filters--api {
+  grid-template-columns: minmax(230px, 1fr) 190px 155px 125px 180px auto;
+  align-items: end;
+}
+
+.champs-filter-reset,
+.champs-table-action,
+.champs-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.025);
+  box-sizing: border-box;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+  transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
+}
+
+.champs-filter-reset {
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.champs-filter-reset:hover,
+.champs-table-action:hover,
+.champs-icon-button:hover:not(:disabled) {
+  border-color: rgba(201, 165, 90, 0.36);
+  color: var(--gold-light);
+  background: rgba(201, 165, 90, 0.07);
+}
+
+.champs-filter-reset:focus-visible,
+.champs-table-action:focus-visible,
+.champs-icon-button:focus-visible {
+  outline: 2px solid rgba(201, 165, 90, 0.55);
+  outline-offset: 2px;
+}
+
+.champs-icon-button {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 9px;
+}
+
+.champs-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.champs-results-count {
+  padding: 11px 24px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.01);
+  font-size: 12px;
+}
+
+.champs-table--api {
+  min-width: 1280px;
+}
+
+.champs-table--api tbody tr.is-qualified {
+  box-shadow: inset 3px 0 0 rgba(79, 175, 131, 0.72);
+}
+
+.champs-position {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--color-text);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.champs-qualified {
+  min-height: 23px;
+  padding: 0 7px;
+  font-size: 9px;
+}
+
+.champs-qualified--yes {
+  color: #73d2a4;
+  border-color: rgba(79, 175, 131, 0.3);
+  background: rgba(79, 175, 131, 0.1);
+}
+
+.champs-qualified--no {
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.champs-profile a,
+.champs-contact a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+}
+
+.champs-location,
+.champs-rating {
+  display: grid;
+  gap: 5px;
+}
+
+.champs-location {
+  max-width: 300px;
+}
+
+.champs-location span {
+  line-height: 1.45;
+}
+
+.champs-rating strong {
+  color: var(--gold-light);
+  font-size: 17px;
+}
+
+.champs-muted {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.champs-history-table {
+  width: 100%;
+  min-width: 930px;
+  border-collapse: collapse;
+}
+
+.champs-history-table th,
+.champs-history-table td {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.champs-history-table th {
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.022);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.champs-history-table tbody tr {
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.champs-history-table tbody tr:hover {
+  background: rgba(201, 165, 90, 0.035);
+}
+
+.champs-history-table tbody tr.is-active {
+  background: rgba(201, 165, 90, 0.06);
+  box-shadow: inset 3px 0 0 var(--gold-primary);
+}
+
+.champs-history-table td strong,
+.champs-history-table td small {
+  display: block;
+}
+
+.champs-history-table td strong {
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.champs-history-table td small {
+  margin-top: 4px;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.champs-table-action {
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.champs-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 14px 18px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.champs-inline-error,
+.champs-loading-state,
+.champs-error-state,
+.champs-empty-state,
+.champs-search-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px 24px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+.champs-inline-error {
+  justify-content: space-between;
+  border-bottom: 1px solid rgba(210, 103, 111, 0.25);
+  color: #f0a6ad;
+  background: rgba(210, 103, 111, 0.08);
+  text-align: left;
+}
+
+.champs-error-state,
+.champs-empty-state,
+.champs-search-failed {
+  min-height: 150px;
+  flex-direction: column;
+}
+
+.champs-error-state,
+.champs-empty-state--results {
+  margin-top: 18px;
+}
+
+.champs-error-state strong,
+.champs-empty-state strong,
+.champs-search-failed strong {
+  color: var(--color-text);
+  font-size: 16px;
+}
+
+.champs-error-state span,
+.champs-empty-state span,
+.champs-search-failed span {
+  max-width: 620px;
+  color: var(--color-muted);
+  line-height: 1.5;
+}
+
+.champs-search-failed {
+  background: rgba(210, 103, 111, 0.035);
+}
+
+.champs-spin {
+  animation: champs-spin 0.85s linear infinite;
+}
+
+@keyframes champs-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 1180px) {
   .champs-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -519,6 +987,10 @@
   .champs-hero {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .champs-filters--api {
+    grid-template-columns: minmax(220px, 1fr) 190px 160px;
   }
 }
 
@@ -547,6 +1019,40 @@
 
   .champs-filters {
     grid-template-columns: 1fr;
+  }
+
+  .champs-field--name,
+  .champs-field--niche,
+  .champs-field--city,
+  .champs-field--state,
+  .champs-field--limit,
+  .champs-field--score {
+    grid-column: 1 / -1;
+  }
+
+  .champs-search-form,
+  .champs-panel__header {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .champs-search-form__footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .champs-search-submit {
+    width: 100%;
+  }
+
+  .champs-results-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .champs-inline-error {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 
