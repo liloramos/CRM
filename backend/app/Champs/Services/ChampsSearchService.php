@@ -15,6 +15,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use RuntimeException;
 use Throwable;
 
 final class ChampsSearchService
@@ -22,6 +23,7 @@ final class ChampsSearchService
     public function __construct(
         private readonly LeadProviderInterface $provider,
         private readonly ChampsLeadScoringService $scoring,
+        private readonly ChampsLeadEnrichmentService $enrichment,
     ) {}
 
     public function execute(
@@ -61,6 +63,7 @@ final class ChampsSearchService
             $providerLeads = $this->provider->discover($discoveryRequest);
             $totalDiscovered = count($providerLeads);
             $discoveredLeads = $this->uniqueDiscoveries($providerLeads, $providerName);
+            $savedLeadIds = [];
 
             DB::transaction(function () use (
                 $search,
@@ -69,6 +72,7 @@ final class ChampsSearchService
                 $providerName,
                 $companyId,
                 $minimumScore,
+                &$savedLeadIds,
             ): void {
                 $saved = 0;
                 $qualifiedCount = 0;
@@ -101,17 +105,22 @@ final class ChampsSearchService
 
                     $saved++;
                     $qualifiedCount += $qualified ? 1 : 0;
+                    $savedLeadIds[] = (int) $lead->id;
                 }
 
                 $search->update([
-                    'status' => ChampsSearch::STATUS_COMPLETED,
                     'total_discovered' => $totalDiscovered,
                     'total_saved' => $saved,
                     'total_qualified' => $qualifiedCount,
                     'error_message' => null,
-                    'completed_at' => now(),
                 ]);
             });
+
+            $this->enrichLeads($companyId, $savedLeadIds);
+            $search->update([
+                'status' => ChampsSearch::STATUS_COMPLETED,
+                'completed_at' => now(),
+            ]);
         } catch (Throwable $exception) {
             $safeMessage = $this->safeFailureMessage($exception);
             $this->markFailed($search, $safeMessage);
@@ -259,5 +268,30 @@ final class ChampsSearchService
             'error_message' => $message,
             'completed_at' => now(),
         ]);
+    }
+
+    /**
+     * @param  list<int>  $leadIds
+     */
+    private function enrichLeads(int $companyId, array $leadIds): void
+    {
+        foreach (array_unique($leadIds) as $leadId) {
+            $lead = ChampsLead::query()
+                ->forCompany($companyId)
+                ->whereKey($leadId)
+                ->first();
+
+            if ($lead === null || trim((string) $lead->website) === '') {
+                continue;
+            }
+
+            try {
+                $this->enrichment->enrich($lead);
+            } catch (Throwable) {
+                report(new RuntimeException(
+                    "Instagram enrichment failed for Champs lead {$leadId}.",
+                ));
+            }
+        }
     }
 }

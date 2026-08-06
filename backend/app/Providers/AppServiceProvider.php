@@ -2,8 +2,12 @@
 
 namespace App\Providers;
 
+use App\Champs\Contracts\InstagramEnricherInterface;
+use App\Champs\Contracts\InstagramResolverInterface;
 use App\Champs\Contracts\LeadProviderInterface;
 use App\Champs\Providers\GooglePlacesLeadProvider;
+use App\Champs\Providers\MetaInstagramEnricher;
+use App\Champs\Services\WebsiteInstagramResolver;
 use App\Contracts\Ai\AiProviderInterface;
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Models\Permission;
@@ -27,6 +31,8 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(LeadProviderInterface::class, GooglePlacesLeadProvider::class);
+        $this->app->bind(InstagramResolverInterface::class, WebsiteInstagramResolver::class);
+        $this->app->bind(InstagramEnricherInterface::class, MetaInstagramEnricher::class);
 
         $this->app->bind(AiProviderInterface::class, function ($app): AiProviderInterface {
             $provider = (string) config('chatbotcrm.ai.provider', config('chatbotcrm.providers.ai', 'fake'));

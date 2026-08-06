@@ -10,4 +10,13 @@ return [
         'timeout' => (int) env('GOOGLE_PLACES_TIMEOUT', 15),
         'max_results' => (int) env('GOOGLE_PLACES_MAX_RESULTS', 20),
     ],
+
+    'meta' => [
+        'enabled' => env('CHAMPS_META_ENABLED', false),
+        'graph_base_url' => env('META_GRAPH_BASE_URL', 'https://graph.facebook.com'),
+        'api_version' => env('META_GRAPH_API_VERSION'),
+        'access_token' => env('META_GRAPH_ACCESS_TOKEN'),
+        'instagram_account_id' => env('META_INSTAGRAM_ACCOUNT_ID'),
+        'timeout' => (int) env('META_GRAPH_TIMEOUT', 15),
+    ],
 ];
