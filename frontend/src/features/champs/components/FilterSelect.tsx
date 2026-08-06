@@ -7,13 +7,15 @@ export type FilterSelectOption = {
 }
 
 type FilterSelectProps = {
+  disabled?: boolean
+  hint?: string
   label: string
   onChange: (value: string) => void
   options: FilterSelectOption[]
   value: string
 }
 
-export function FilterSelect({ label, onChange, options, value }: FilterSelectProps) {
+export function FilterSelect({ disabled = false, hint, label, onChange, options, value }: FilterSelectProps) {
   const generatedId = useId().replace(/:/g, '')
   const labelId = `filter-select-${generatedId}-label`
   const listboxId = `filter-select-${generatedId}-listbox`
@@ -137,7 +139,8 @@ export function FilterSelect({ label, onChange, options, value }: FilterSelectPr
       ref={rootRef}
     >
       <span className="champs-filter-field__label" id={labelId}>
-        {label}
+        <span>{label}</span>
+        {hint ? <small>{hint}</small> : null}
       </span>
       <button
         aria-activedescendant={isOpen ? `${listboxId}-option-${activeIndex}` : undefined}
@@ -146,6 +149,7 @@ export function FilterSelect({ label, onChange, options, value }: FilterSelectPr
         aria-haspopup="listbox"
         aria-labelledby={labelId}
         className={isOpen ? 'filter-select__trigger is-open' : 'filter-select__trigger'}
+        disabled={disabled}
         onClick={() => {
           if (isOpen) {
             setIsOpen(false)
@@ -161,7 +165,7 @@ export function FilterSelect({ label, onChange, options, value }: FilterSelectPr
         <ChevronDown aria-hidden="true" className="filter-select__chevron" size={17} strokeWidth={2.2} />
       </button>
 
-      {isOpen ? (
+      {isOpen && !disabled ? (
         <div aria-labelledby={labelId} className="filter-select__menu" id={listboxId} role="listbox">
           {options.map((option, index) => (
             <button

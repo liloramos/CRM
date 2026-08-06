@@ -1,6 +1,9 @@
 .champs-page {
   min-height: 100%;
   padding: 28px;
+  container-name: champs-page;
+  container-type: inline-size;
+  overflow-x: clip;
   color: var(--color-text);
   background:
     radial-gradient(circle at 86% 6%, rgba(201, 165, 90, 0.14), transparent 30%),
@@ -190,6 +193,9 @@
 
 .champs-stat {
   position: relative;
+  display: grid;
+  min-height: 112px;
+  align-content: space-between;
   overflow: hidden;
   padding: 18px;
   border: 1px solid var(--color-border);
@@ -212,6 +218,7 @@
   display: block;
   color: var(--color-text-secondary);
   font-size: 13px;
+  line-height: 1.35;
 }
 
 .champs-stat strong {
@@ -219,6 +226,7 @@
   margin-top: 8px;
   color: var(--color-text);
   font-size: 27px;
+  line-height: 1;
   letter-spacing: 0;
 }
 
@@ -254,7 +262,18 @@
 }
 
 .champs-filter-field__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   color: var(--color-text-secondary);
+}
+
+.champs-field .champs-filter-field__label small,
+.champs-filter-field__label small {
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .champs-filters input {
@@ -318,6 +337,11 @@
   border-color: var(--gold-primary);
   outline: 0;
   box-shadow: 0 0 0 3px rgba(201, 165, 90, 0.22);
+}
+
+.filter-select__trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .filter-select__trigger span {
@@ -392,6 +416,7 @@
 }
 
 .champs-table-wrap {
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -615,14 +640,28 @@
   grid-column: span 4;
 }
 
-.champs-field--state .champs-filter-field {
+.champs-field--state .champs-filter-field,
+.champs-field--limit .champs-filter-field {
   gap: 8px;
 }
 
-.champs-field--state .filter-select__trigger {
+.champs-field--state .filter-select__trigger,
+.champs-field--limit .filter-select__trigger {
   min-height: 44px;
   font-size: 14px;
   font-weight: 650;
+}
+
+.champs-field input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.champs-field input[type='number']::-webkit-inner-spin-button,
+.champs-field input[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
 }
 
 .champs-search-form__footer {
@@ -782,7 +821,39 @@
 }
 
 .champs-table--api {
-  min-width: 1280px;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.champs-table--api th,
+.champs-table--api td {
+  min-width: 0;
+  padding: 14px 12px;
+}
+
+.champs-lead-column--position {
+  width: 13%;
+}
+
+.champs-lead-column--lead {
+  width: 18%;
+}
+
+.champs-lead-column--location {
+  width: 22%;
+}
+
+.champs-lead-column--contact {
+  width: 15%;
+}
+
+.champs-lead-column--rating,
+.champs-lead-column--score {
+  width: 9%;
+}
+
+.champs-lead-column--action {
+  width: 14%;
 }
 
 .champs-table--api tbody tr.is-qualified {
@@ -795,6 +866,14 @@
   color: var(--color-text);
   font-size: 15px;
   font-weight: 850;
+}
+
+.champs-lead-position,
+.champs-lead-score {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  min-width: 0;
 }
 
 .champs-qualified {
@@ -822,6 +901,26 @@
   width: fit-content;
 }
 
+.champs-profile {
+  min-width: 0;
+}
+
+.champs-profile > strong {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.champs-profile a,
+.champs-contact a,
+.champs-contact span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .champs-location,
 .champs-rating {
   display: grid;
@@ -829,16 +928,162 @@
 }
 
 .champs-location {
-  max-width: 300px;
+  min-width: 0;
 }
 
 .champs-location span {
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .champs-rating strong {
   color: var(--gold-light);
   font-size: 17px;
+}
+
+.champs-table-action svg {
+  flex: 0 0 auto;
+  transition: transform 0.18s ease;
+}
+
+.champs-table-action.is-expanded svg {
+  transform: rotate(180deg);
+}
+
+.champs-table--api .champs-table-action {
+  width: 100%;
+  min-width: 0;
+}
+
+.champs-lead-details-row,
+.champs-lead-details-row:hover {
+  background: rgba(201, 165, 90, 0.035) !important;
+}
+
+.champs-lead-details-row > td {
+  padding: 0 !important;
+}
+
+.champs-lead-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 24px;
+  padding: 22px 24px 24px;
+  border-top: 1px solid rgba(201, 165, 90, 0.14);
+  background: rgba(7, 7, 8, 0.46);
+}
+
+.champs-lead-details section {
+  min-width: 0;
+}
+
+.champs-lead-details h3 {
+  margin: 0 0 12px;
+  color: var(--color-text);
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.champs-criteria,
+.champs-detail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.champs-criteria li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--color-muted);
+  font-size: 11px;
+}
+
+.champs-criteria li.is-met {
+  color: var(--color-text-secondary);
+}
+
+.champs-criteria strong {
+  flex: 0 0 auto;
+  color: inherit;
+}
+
+.champs-detail-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 8px;
+  font-size: 11px;
+}
+
+.champs-detail-list dt {
+  color: var(--color-muted);
+}
+
+.champs-detail-list dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.champs-detail-list a {
+  color: var(--gold-light);
+  text-decoration: none;
+}
+
+.champs-lead-cards {
+  display: none;
+}
+
+.champs-lead-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.008);
+}
+
+.champs-lead-card.is-qualified {
+  box-shadow: inset 3px 0 0 rgba(79, 175, 131, 0.72);
+}
+
+.champs-lead-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.champs-lead-card__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  padding: 14px 0;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.champs-lead-card > .champs-table-action {
+  width: 100%;
+  min-height: 40px;
+}
+
+.champs-results-empty {
+  min-height: 154px;
+}
+
+.champs-google-attribution {
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.012);
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: right;
 }
 
 .champs-muted {
@@ -848,8 +1093,33 @@
 
 .champs-history-table {
   width: 100%;
-  min-width: 930px;
+  min-width: 0;
   border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.champs-history-table th:nth-child(1) {
+  width: 25%;
+}
+
+.champs-history-table th:nth-child(2) {
+  width: 14%;
+}
+
+.champs-history-table th:nth-child(3) {
+  width: 16%;
+}
+
+.champs-history-table th:nth-child(4) {
+  width: 20%;
+}
+
+.champs-history-table th:nth-child(5) {
+  width: 7%;
+}
+
+.champs-history-table th:nth-child(6) {
+  width: 18%;
 }
 
 .champs-history-table th,
@@ -892,6 +1162,13 @@
   font-size: 13px;
 }
 
+.champs-history-table td:first-child strong,
+.champs-history-table td:first-child small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .champs-history-table td small {
   margin-top: 4px;
   color: var(--color-muted);
@@ -899,11 +1176,15 @@
 }
 
 .champs-table-action {
-  min-height: 34px;
+  min-height: 40px;
   padding: 0 10px;
   border-radius: 8px;
   font-size: 11px;
   white-space: nowrap;
+}
+
+.champs-history-table__action {
+  text-align: right !important;
 }
 
 .champs-pagination {
@@ -979,7 +1260,7 @@
   }
 }
 
-@media (max-width: 1180px) {
+@container champs-page (max-width: 1050px) {
   .champs-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -990,17 +1271,101 @@
   }
 
   .champs-filters--api {
-    grid-template-columns: minmax(220px, 1fr) 190px 160px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .champs-lead-details {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-@media (max-width: 760px) {
-  .champs-page {
-    padding: 16px;
+@container champs-page (max-width: 950px) {
+  .champs-leads-desktop {
+    display: none;
   }
 
+  .champs-lead-cards {
+    display: grid;
+  }
+}
+
+@container champs-page (max-width: 900px) {
+  .champs-field--name,
+  .champs-field--niche,
+  .champs-field--city,
+  .champs-field--state,
+  .champs-field--limit,
+  .champs-field--score {
+    grid-column: span 6;
+  }
+}
+
+@container champs-page (max-width: 760px) {
+  .champs-history .champs-table-wrap {
+    overflow: visible;
+  }
+
+  .champs-history-table,
+  .champs-history-table tbody,
+  .champs-history-table tr,
+  .champs-history-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .champs-history-table {
+    table-layout: auto;
+  }
+
+  .champs-history-table thead {
+    display: none;
+  }
+
+  .champs-history-table tbody {
+    display: grid;
+  }
+
+  .champs-history-table tr {
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .champs-history-table tr.is-active {
+    box-shadow: inset 3px 0 0 var(--gold-primary);
+  }
+
+  .champs-history-table td {
+    display: grid;
+    grid-template-columns: 112px minmax(0, 1fr);
+    gap: 12px;
+    padding: 7px 0;
+    border: 0;
+    text-align: left !important;
+  }
+
+  .champs-history-table td::before {
+    content: attr(data-label);
+    color: var(--color-muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .champs-history-table td:first-child strong,
+  .champs-history-table td:first-child small {
+    white-space: normal;
+  }
+
+  .champs-history-table__action .champs-table-action {
+    width: 100%;
+    min-height: 40px;
+  }
+}
+
+@container champs-page (max-width: 700px) {
   .champs-stats {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .champs-panel__header {
@@ -1017,17 +1382,9 @@
     flex: 1 1 160px;
   }
 
-  .champs-filters {
+  .champs-filters,
+  .champs-filters--api {
     grid-template-columns: 1fr;
-  }
-
-  .champs-field--name,
-  .champs-field--niche,
-  .champs-field--city,
-  .champs-field--state,
-  .champs-field--limit,
-  .champs-field--score {
-    grid-column: 1 / -1;
   }
 
   .champs-search-form,
@@ -1036,7 +1393,8 @@
     padding-left: 18px;
   }
 
-  .champs-search-form__footer {
+  .champs-search-form__footer,
+  .champs-inline-error {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1050,14 +1408,58 @@
     flex-direction: column;
   }
 
-  .champs-inline-error {
+  .champs-lead-card__summary,
+  .champs-lead-details {
+    grid-template-columns: 1fr;
+  }
+
+  .champs-google-attribution {
+    padding-right: 18px;
+    padding-left: 18px;
+    text-align: left;
+  }
+}
+
+@container champs-page (max-width: 580px) {
+  .champs-field--name,
+  .champs-field--niche,
+  .champs-field--city,
+  .champs-field--state,
+  .champs-field--limit,
+  .champs-field--score {
+    grid-column: 1 / -1;
+  }
+
+  .champs-history-table td {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
+@container champs-page (max-width: 320px) {
+  .champs-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .champs-lead-card__header {
     align-items: stretch;
     flex-direction: column;
   }
 }
 
-@media (max-width: 430px) {
-  .champs-stats {
-    grid-template-columns: 1fr;
+@media (max-width: 800px) {
+  .champs-page {
+    padding: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .champs-page *,
+  .champs-page *::before,
+  .champs-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

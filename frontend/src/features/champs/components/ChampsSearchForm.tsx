@@ -37,6 +37,8 @@ const STATE_OPTIONS: FilterSelectOption[] = [
   { label: 'Tocantins (TO)', value: 'TO' },
 ]
 
+const LIMIT_PRESETS = [5, 10, 20]
+
 type ChampsSearchFormProps = {
   isSubmitting: boolean
   maxResults?: number
@@ -55,6 +57,7 @@ export function ChampsSearchForm({
   const [limit, setLimit] = useState(Math.min(20, maxResults))
   const [minimumScore, setMinimumScore] = useState(0)
   const [errors, setErrors] = useState<SearchFormErrors>({})
+  const limitOptions = getLimitOptions(maxResults)
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -139,21 +142,17 @@ export function ChampsSearchForm({
             {errors.state ? <small>{errors.state}</small> : null}
           </div>
 
-          <label className="champs-field champs-field--limit">
-            Quantidade <span>Máx. {maxResults}</span>
-            <input
-              aria-describedby={errors.limit ? 'champs-limit-error' : undefined}
-              aria-invalid={Boolean(errors.limit)}
+          <div className="champs-field champs-field--limit">
+            <FilterSelect
               disabled={isSubmitting}
-              max={maxResults}
-              min={1}
-              onChange={(event) => setLimit(event.target.valueAsNumber)}
-              required
-              type="number"
-              value={Number.isNaN(limit) ? '' : limit}
+              hint={`Máx. ${maxResults}`}
+              label="Quantidade"
+              onChange={(value) => setLimit(Number(value))}
+              options={limitOptions}
+              value={String(limit)}
             />
             {errors.limit ? <small id="champs-limit-error">{errors.limit}</small> : null}
-          </label>
+          </div>
 
           <label className="champs-field champs-field--score">
             Score mínimo
@@ -186,4 +185,16 @@ export function ChampsSearchForm({
       </form>
     </section>
   )
+}
+
+function getLimitOptions(maxResults: number): FilterSelectOption[] {
+  const values = LIMIT_PRESETS.filter((value) => value <= maxResults)
+
+  if (maxResults > 0 && !values.includes(maxResults)) {
+    values.push(maxResults)
+  }
+
+  return values
+    .sort((first, second) => first - second)
+    .map((value) => ({ label: `${value} leads`, value: String(value) }))
 }

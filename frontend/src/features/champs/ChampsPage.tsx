@@ -368,6 +368,11 @@ export function ChampsPage() {
                     }
                     results={filteredResults}
                   />
+                  {resultSource === 'api' && activeSearch?.provider === 'google_places' ? (
+                    <p className="champs-google-attribution">
+                      Dados de estabelecimentos fornecidos por Google Maps
+                    </p>
+                  ) : null}
                 </>
               )}
             </section>

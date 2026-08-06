@@ -46,9 +46,12 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--gold-dark) var(--background-secondary);
+  scrollbar-width: thin;
 }
 
 html {
+  min-height: 100%;
   background: var(--color-bg);
 }
 
@@ -56,6 +59,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  overflow-x: hidden;
   color: var(--color-text);
   background: var(--color-bg);
   font-size: 15px;
@@ -86,5 +90,28 @@ p {
 }
 
 #root {
-  min-height: 100vh;
+  min-height: 100%;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid var(--background-secondary);
+  border-radius: 999px;
+  background: var(--gold-dark);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-primary);
+}
+
+*::-webkit-scrollbar-corner {
+  background: var(--background-secondary);
 }

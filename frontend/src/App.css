@@ -6877,7 +6877,7 @@ button.dashboard-chart__legend-row:active {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 800px) {
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -6976,7 +6976,7 @@ button.dashboard-chart__legend-row:active {
   display: grid;
   grid-template-columns: 1fr;
   place-items: center;
-  padding: clamp(12px, 2vh, 28px) clamp(16px, 3vw, 48px);
+  padding: clamp(20px, 3vh, 32px);
   overflow-x: hidden;
   overflow-y: hidden;
   box-sizing: border-box;
@@ -6986,13 +6986,12 @@ button.dashboard-chart__legend-row:active {
 .auth-shell {
   position: relative;
   z-index: 1;
-  width: min(1088px, calc(100vw - 36px));
-  max-width: 1088px;
-  height: min(604px, calc(100dvh - 48px));
-  max-height: calc(100dvh - 48px);
-  min-height: 540px;
+  width: min(1120px, 100%);
+  max-width: 1120px;
+  height: auto;
+  min-height: clamp(560px, 67dvh, 620px);
   display: grid;
-  grid-template-columns: minmax(420px, 46%) minmax(0, 54%);
+  grid-template-columns: minmax(420px, 44%) minmax(0, 56%);
   align-items: stretch;
   gap: 0;
   overflow: hidden;
@@ -7026,16 +7025,16 @@ button.dashboard-chart__legend-row:active {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: clamp(24px, 2.8vw, 34px);
+  padding: clamp(26px, 2.8vw, 34px);
 }
 
 .login-auth-panel__inner {
-  width: min(390px, 100%);
+  width: min(400px, 100%);
   height: auto;
   min-height: 0;
   display: grid;
   align-content: center;
-  gap: 12px;
+  gap: 11px;
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -7050,11 +7049,11 @@ button.dashboard-chart__legend-row:active {
   display: grid;
   align-content: center;
   justify-items: start;
-  gap: 18px;
+  gap: 14px;
   border: 0;
   border-left: 1px solid var(--border-subtle);
   border-radius: 0;
-  padding: clamp(30px, 3vw, 40px);
+  padding: clamp(32px, 3.2vw, 42px);
   overflow: hidden;
 }
 
@@ -7082,15 +7081,15 @@ button.dashboard-chart__legend-row:active {
 }
 
 .login-hero-panel h1 {
-  max-width: 450px;
-  font-size: clamp(32px, 2.6vw, 44px);
-  line-height: 1.06;
+  max-width: 430px;
+  font-size: clamp(30px, 2.5vw, 39px);
+  line-height: 1.08;
 }
 
 .login-screen .login-hero-panel p,
 .login-hero-panel p {
-  max-width: 380px;
-  font-size: 14px;
+  max-width: 370px;
+  font-size: 13.5px;
   line-height: 1.55;
 }
 
@@ -7159,6 +7158,19 @@ button.dashboard-chart__legend-row:active {
   line-height: 1.1;
 }
 
+.auth-submit > span {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px auto 18px;
+  justify-content: center;
+}
+
+.auth-submit > span::after {
+  content: '';
+  width: 18px;
+  height: 18px;
+}
+
 .auth-submit {
   flex: 1 1 auto;
 }
@@ -7186,9 +7198,9 @@ button.dashboard-chart__legend-row:active {
 .login-brand-composition__logo {
   position: absolute;
   z-index: 1;
-  right: 46px;
-  bottom: 42px;
-  width: min(300px, 48%);
+  right: 38px;
+  bottom: 34px;
+  width: min(280px, 46%);
   height: auto;
   object-fit: contain;
   object-position: center;
@@ -7204,7 +7216,7 @@ button.dashboard-chart__legend-row:active {
   opacity: 0.76;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1100px) {
   .login-screen {
     height: auto;
     min-height: 100dvh;
@@ -7212,14 +7224,42 @@ button.dashboard-chart__legend-row:active {
   }
 
   .auth-shell {
-    width: min(560px, calc(100vw - 32px));
-    max-width: 560px;
+    width: min(680px, 100%);
+    max-width: 680px;
     height: auto;
     min-height: auto;
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(118px, auto);
   }
 
   .login-hero-panel {
+    display: grid;
+    min-height: 118px;
+    align-content: center;
+    padding: 20px 28px;
+    border-top: 1px solid var(--border-subtle);
+    border-left: 0;
+  }
+
+  .login-hero-panel h1 {
+    max-width: 500px;
+    font-size: 25px;
+  }
+
+  .login-hero-panel__copy .eyebrow,
+  .login-screen .login-hero-panel p,
+  .login-hero-panel p,
+  .login-hero-panel__accent {
+    display: none;
+  }
+
+  .login-brand-composition {
+    opacity: 0.48;
+  }
+
+  .login-brand-composition__logo,
+  .login-brand-composition__panel,
+  .login-brand-composition__status {
     display: none;
   }
 
@@ -7228,19 +7268,28 @@ button.dashboard-chart__legend-row:active {
   }
 }
 
-@media (max-width: 540px) {
+@media (max-width: 600px) {
   .login-screen {
-    padding: 12px;
+    padding: 16px;
   }
 
   .auth-shell {
     width: 100%;
     max-width: none;
+    grid-template-rows: auto;
     border-radius: 18px;
   }
 
   .login-auth-panel__inner {
     border-radius: 18px;
+  }
+
+  .auth-form-panel {
+    padding: 22px 18px;
+  }
+
+  .login-hero-panel {
+    display: none;
   }
 
   .auth-brand__halo {
@@ -7255,10 +7304,14 @@ button.dashboard-chart__legend-row:active {
   }
 }
 
-@media (min-width: 1181px) and (max-height: 760px) {
+@media (min-width: 1101px) and (max-height: 720px) {
+  .login-screen {
+    height: auto;
+    overflow-y: auto;
+  }
+
   .auth-shell {
-    height: calc(100dvh - 24px);
-    min-height: 0;
+    min-height: 540px;
   }
 
   .login-auth-panel__inner {
@@ -7266,7 +7319,7 @@ button.dashboard-chart__legend-row:active {
   }
 
   .login-hero-panel h1 {
-    font-size: clamp(32px, 2.7vw, 44px);
+    font-size: clamp(30px, 2.5vw, 38px);
   }
 }
 

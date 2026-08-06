@@ -81,19 +81,23 @@ export function ChampsSearchHistory({
             </thead>
             <tbody>
               {searches.map((search) => (
-                <tr className={search.id === activeSearchId ? 'is-active' : undefined} key={search.id}>
-                  <td>
+                <tr
+                  aria-current={search.id === activeSearchId ? 'true' : undefined}
+                  className={search.id === activeSearchId ? 'is-active' : undefined}
+                  key={search.id}
+                >
+                  <td data-label="Busca">
                     <strong>{search.name}</strong>
                     <small>{search.niche} • {search.city}/{search.state}</small>
                   </td>
-                  <td><ChampsStatusBadge status={search.status} /></td>
-                  <td>{formatDate(search.createdAt)}</td>
-                  <td>
+                  <td data-label="Status"><ChampsStatusBadge status={search.status} /></td>
+                  <td data-label="Data">{formatDate(search.createdAt)}</td>
+                  <td data-label="Resultados">
                     <strong>{search.totalDiscovered} encontrados</strong>
                     <small>{search.totalSaved} salvos • {search.totalQualified} qualificados</small>
                   </td>
-                  <td>{search.minimumScore}+</td>
-                  <td>
+                  <td data-label="Corte">{search.minimumScore}+</td>
+                  <td className="champs-history-table__action" data-label="Ação">
                     <button
                       className="champs-table-action"
                       onClick={() => onOpen(search.id)}
