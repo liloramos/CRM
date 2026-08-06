@@ -39,6 +39,7 @@ class ChampsSearchController extends Controller
                 limit: (int) $validated['limit'],
                 name: $validated['name'] ?? null,
                 minimumScore: (int) ($validated['minimum_score'] ?? 0),
+                excludeSeen: (bool) ($validated['exclude_seen'] ?? true),
             );
         } catch (LeadProviderException $exception) {
             return response()->json([
@@ -59,9 +60,12 @@ class ChampsSearchController extends Controller
     {
         $companyId = $this->champsCompanyId($request);
         $filters = $request->validated();
+        $archived = $filters['archived'] ?? 'active';
 
         $searches = ChampsSearch::query()
             ->forCompany($companyId)
+            ->when($archived === 'active', fn ($query) => $query->active())
+            ->when($archived === 'only', fn ($query) => $query->archived())
             ->when(
                 isset($filters['status']),
                 fn ($query) => $query->where('status', $filters['status']),
@@ -100,5 +104,45 @@ class ChampsSearchController extends Controller
             ->firstOrFail();
 
         return new ChampsSearchResource($champsSearch);
+    }
+
+    public function archive(Request $request, int $search): ChampsSearchResource
+    {
+        $companyId = $this->champsCompanyId($request);
+        $champsSearch = ChampsSearch::query()
+            ->forCompany($companyId)
+            ->whereKey($search)
+            ->firstOrFail();
+
+        $champsSearch->archive();
+
+        return new ChampsSearchResource($champsSearch->refresh());
+    }
+
+    public function restore(Request $request, int $search): ChampsSearchResource
+    {
+        $companyId = $this->champsCompanyId($request);
+        $champsSearch = ChampsSearch::query()
+            ->forCompany($companyId)
+            ->whereKey($search)
+            ->firstOrFail();
+
+        $champsSearch->restoreFromArchive();
+
+        return new ChampsSearchResource($champsSearch->refresh());
+    }
+
+    public function archiveAll(Request $request): JsonResponse
+    {
+        $companyId = $this->champsCompanyId($request);
+        $archivedCount = ChampsSearch::query()
+            ->forCompany($companyId)
+            ->active()
+            ->update(['archived_at' => now()]);
+
+        return response()->json([
+            'message' => 'Histórico arquivado. Leads e memória de prospecção foram preservados.',
+            'archived_count' => $archivedCount,
+        ]);
     }
 }

@@ -3,7 +3,9 @@
 namespace App\Champs\Providers;
 
 use App\Champs\Contracts\LeadProviderInterface;
+use App\Champs\Contracts\PaginatedLeadProviderInterface;
 use App\Champs\DTOs\DiscoveredLead;
+use App\Champs\DTOs\LeadDiscoveryPage;
 use App\Champs\DTOs\LeadDiscoveryRequest;
 use App\Champs\Exceptions\LeadProviderException;
 use Illuminate\Http\Client\ConnectionException;
@@ -11,7 +13,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use JsonException;
 
-final class GooglePlacesLeadProvider implements LeadProviderInterface
+final class GooglePlacesLeadProvider implements LeadProviderInterface, PaginatedLeadProviderInterface
 {
     public const FIELD_MASK = [
         'places.id',
@@ -32,7 +34,56 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
 
     public function discover(LeadDiscoveryRequest $request): array
     {
+        $leads = [];
+        $seenPlaceIds = [];
+        $pageToken = null;
+        $pageCount = 0;
+
+        do {
+            $page = $this->discoverPage($request, $pageToken);
+            $pageCount++;
+
+            foreach ($page->leads as $lead) {
+                if (isset($seenPlaceIds[$lead->externalId])) {
+                    continue;
+                }
+
+                $seenPlaceIds[$lead->externalId] = true;
+                $leads[] = $lead;
+
+                if (count($leads) >= $request->limit) {
+                    break 2;
+                }
+            }
+
+            $pageToken = $page->nextPageToken;
+        } while ($pageToken !== null && $pageCount < $this->maxPages());
+
+        return $leads;
+    }
+
+    public function discoverPage(
+        LeadDiscoveryRequest $request,
+        ?string $pageToken = null,
+    ): LeadDiscoveryPage {
         $this->ensureConfigured();
+
+        $payload = [
+            'textQuery' => $request->textQuery(),
+            'pageSize' => min(20, $request->limit),
+            'languageCode' => $this->language(),
+            'regionCode' => $this->region(),
+        ];
+
+        if ($pageToken !== null) {
+            $normalizedPageToken = trim($pageToken);
+
+            if ($normalizedPageToken === '') {
+                throw LeadProviderException::invalidResponse();
+            }
+
+            $payload['pageToken'] = $normalizedPageToken;
+        }
 
         try {
             $response = Http::acceptJson()
@@ -42,12 +93,7 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
                     'X-Goog-FieldMask' => implode(',', self::FIELD_MASK),
                 ])
                 ->timeout($this->timeout())
-                ->post($this->endpoint(), [
-                    'textQuery' => $request->textQuery(),
-                    'pageSize' => $request->limit,
-                    'languageCode' => $this->language(),
-                    'regionCode' => $this->region(),
-                ]);
+                ->post($this->endpoint(), $payload);
         } catch (ConnectionException) {
             throw LeadProviderException::connectionFailure();
         }
@@ -67,7 +113,7 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
             throw LeadProviderException::missingApiKey();
         }
 
-        if ($this->baseUrl() === '' || $this->timeout() < 1) {
+        if ($this->baseUrl() === '' || $this->timeout() < 1 || $this->maxPages() < 1) {
             throw LeadProviderException::invalidConfiguration();
         }
     }
@@ -93,15 +139,12 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
         }
     }
 
-    /**
-     * @return list<DiscoveredLead>
-     */
-    private function mapResponse(Response $response, LeadDiscoveryRequest $request): array
+    private function mapResponse(Response $response, LeadDiscoveryRequest $request): LeadDiscoveryPage
     {
         $body = trim($response->body());
 
         if ($body === '') {
-            return [];
+            return new LeadDiscoveryPage([]);
         }
 
         try {
@@ -122,6 +165,7 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
 
         $leads = [];
         $seenPlaceIds = [];
+        $nextPageToken = $this->nextPageToken($payload);
 
         foreach ($places as $place) {
             if (! is_array($place)) {
@@ -156,12 +200,30 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
                 rawData: $place,
             );
 
-            if (count($leads) >= $request->limit) {
+            if (count($leads) >= min(20, $request->limit)) {
                 break;
             }
         }
 
-        return $leads;
+        return new LeadDiscoveryPage($leads, $nextPageToken);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function nextPageToken(array $payload): ?string
+    {
+        if (! array_key_exists('nextPageToken', $payload) || $payload['nextPageToken'] === null) {
+            return null;
+        }
+
+        if (! is_string($payload['nextPageToken'])) {
+            throw LeadProviderException::invalidResponse();
+        }
+
+        $token = trim($payload['nextPageToken']);
+
+        return $token === '' ? null : $token;
     }
 
     private function nullableString(mixed $value): ?string
@@ -203,5 +265,10 @@ final class GooglePlacesLeadProvider implements LeadProviderInterface
     private function timeout(): int
     {
         return (int) config('champs.google_places.timeout', 15);
+    }
+
+    private function maxPages(): int
+    {
+        return (int) config('champs.google_places.max_pages', 3);
     }
 }

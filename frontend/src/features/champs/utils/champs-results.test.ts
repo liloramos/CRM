@@ -107,6 +107,7 @@ describe('resultados persistidos Champs', () => {
       state: 'S',
       limit: 21,
       minimumScore: 101,
+      excludeSeen: true,
     })).toEqual({
       niche: 'Informe um nicho entre 2 e 120 caracteres.',
       city: 'Informe uma cidade entre 2 e 120 caracteres.',

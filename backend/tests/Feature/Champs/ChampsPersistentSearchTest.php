@@ -129,7 +129,9 @@ class ChampsPersistentSearchTest extends TestCase
         ]);
 
         $this->actingAs($user)->postJson('/api/champs/searches', $this->validPayload())->assertCreated();
-        $this->actingAs($user)->postJson('/api/champs/searches', $this->validPayload())->assertCreated();
+        $this->actingAs($user)->postJson('/api/champs/searches', $this->validPayload([
+            'exclude_seen' => false,
+        ]))->assertCreated();
 
         $this->assertSame(1, ChampsLead::query()->count());
         $this->assertSame(2, ChampsSearchResult::query()->count());

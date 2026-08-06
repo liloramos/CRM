@@ -10,6 +10,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChampsSearch extends Model
 {
+    public const NO_NEW_RESULTS_MESSAGE = 'Nenhuma empresa nova foi encontrada com estes critérios. Experimente outro bairro, outra cidade, uma variação do nicho ou permita resultados anteriores.';
+
     public const STATUS_PENDING = 'pending';
 
     public const STATUS_PROCESSING = 'processing';
@@ -37,32 +39,65 @@ class ChampsSearch extends Model
         'state',
         'requested_limit',
         'provider',
+        'search_fingerprint',
+        'exclude_seen',
         'minimum_score',
         'status',
         'total_discovered',
         'total_saved',
         'total_qualified',
+        'total_scanned',
+        'total_skipped_seen',
         'error_message',
         'started_at',
         'completed_at',
+        'archived_at',
     ];
 
     protected function casts(): array
     {
         return [
             'requested_limit' => 'integer',
+            'exclude_seen' => 'boolean',
             'minimum_score' => 'integer',
             'total_discovered' => 'integer',
             'total_saved' => 'integer',
             'total_qualified' => 'integer',
+            'total_scanned' => 'integer',
+            'total_skipped_seen' => 'integer',
             'started_at' => 'datetime',
             'completed_at' => 'datetime',
+            'archived_at' => 'datetime',
         ];
     }
 
     public function scopeForCompany(Builder $query, int $companyId): Builder
     {
         return $query->where('company_id', $companyId);
+    }
+
+    public function scopeActive(Builder $query): Builder
+    {
+        return $query->whereNull('archived_at');
+    }
+
+    public function scopeArchived(Builder $query): Builder
+    {
+        return $query->whereNotNull('archived_at');
+    }
+
+    public function archive(): void
+    {
+        if ($this->archived_at === null) {
+            $this->forceFill(['archived_at' => now()])->save();
+        }
+    }
+
+    public function restoreFromArchive(): void
+    {
+        if ($this->archived_at !== null) {
+            $this->forceFill(['archived_at' => null])->save();
+        }
     }
 
     public function company(): BelongsTo

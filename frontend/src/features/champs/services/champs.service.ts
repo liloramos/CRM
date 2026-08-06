@@ -11,6 +11,8 @@ export type ChampsSearchStatus =
   | 'partially_completed'
   | 'failed'
 
+export type ChampsArchiveFilter = 'active' | 'only' | 'all'
+
 export type ChampsLeadClassification =
   | 'Baixo potencial'
   | 'Potencial médio'
@@ -74,14 +76,20 @@ export type ChampsSearch = {
   state: string
   requestedLimit: number
   provider: string
+  searchFingerprint: string | null
+  excludeSeen: boolean
   minimumScore: number
   status: ChampsSearchStatus
   totalDiscovered: number
   totalSaved: number
   totalQualified: number
+  totalScanned: number
+  totalSkippedSeen: number
   errorMessage: string | null
+  message: string | null
   startedAt: string | null
   completedAt: string | null
+  archivedAt: string | null
   createdAt: string | null
   updatedAt: string | null
   results: ChampsSearchResult[]
@@ -95,6 +103,7 @@ export type CreateChampsSearchPayload = {
   state: string
   limit: number
   minimumScore: number
+  excludeSeen: boolean
 }
 
 export type ChampsSearchFilters = {
@@ -104,6 +113,7 @@ export type ChampsSearchFilters = {
   dateTo?: string
   page?: number
   perPage?: number
+  archived?: ChampsArchiveFilter
 }
 
 export type ChampsLeadFilters = {
@@ -149,6 +159,7 @@ type CreateSearchRequest = {
   state: string
   limit: number
   minimum_score: number
+  exclude_seen: boolean
 }
 
 type ResourceEnvelope = {
@@ -179,10 +190,36 @@ export async function listSearches(filters: ChampsSearchFilters = {}): Promise<P
       date_to: filters.dateTo,
       page: filters.page,
       per_page: filters.perPage,
+      archived: filters.archived,
     })}`,
   )
 
   return adaptPaginatedResponse(response, adaptChampsSearch)
+}
+
+export async function archiveSearch(searchId: number): Promise<ChampsSearch> {
+  const response = await requestJson<ResourceEnvelope>(`${CHAMPS_API_PATH}/searches/${searchId}/archive`, {
+    method: 'PATCH',
+  })
+
+  return adaptChampsSearch(response.data)
+}
+
+export async function restoreSearch(searchId: number): Promise<ChampsSearch> {
+  const response = await requestJson<ResourceEnvelope>(`${CHAMPS_API_PATH}/searches/${searchId}/restore`, {
+    method: 'PATCH',
+  })
+
+  return adaptChampsSearch(response.data)
+}
+
+export async function archiveAllSearches(): Promise<number> {
+  const response = await requestJson<unknown>(`${CHAMPS_API_PATH}/searches/archive-all`, {
+    method: 'POST',
+  })
+  const resource = asRecord(response)
+
+  return requiredNumber(resource.archived_count)
 }
 
 export async function getSearch(searchId: number): Promise<ChampsSearch> {
@@ -217,6 +254,7 @@ export function serializeCreateSearchPayload(payload: CreateChampsSearchPayload)
     state: payload.state.trim().toUpperCase(),
     limit: Math.trunc(payload.limit),
     minimum_score: Math.trunc(payload.minimumScore),
+    exclude_seen: payload.excludeSeen,
   }
   const name = payload.name?.trim()
 
@@ -239,14 +277,20 @@ export function adaptChampsSearch(value: unknown): ChampsSearch {
     state: requiredString(resource.state),
     requestedLimit: requiredNumber(resource.requested_limit),
     provider: requiredString(resource.provider),
+    searchFingerprint: nullableString(resource.search_fingerprint),
+    excludeSeen: requiredBoolean(resource.exclude_seen),
     minimumScore: requiredNumber(resource.minimum_score),
     status: adaptSearchStatus(resource.status),
     totalDiscovered: requiredNumber(resource.total_discovered),
     totalSaved: requiredNumber(resource.total_saved),
     totalQualified: requiredNumber(resource.total_qualified),
+    totalScanned: requiredNumber(resource.total_scanned),
+    totalSkippedSeen: requiredNumber(resource.total_skipped_seen),
     errorMessage: nullableString(resource.error_message),
+    message: nullableString(resource.message),
     startedAt: nullableString(resource.started_at),
     completedAt: nullableString(resource.completed_at),
+    archivedAt: nullableString(resource.archived_at),
     createdAt: nullableString(resource.created_at),
     updatedAt: nullableString(resource.updated_at),
     results: Array.isArray(rawResults) ? rawResults.map(adaptChampsSearchResult) : [],

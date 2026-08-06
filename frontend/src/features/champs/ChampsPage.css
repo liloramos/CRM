@@ -680,6 +680,40 @@
   font-size: 12px;
 }
 
+.champs-progressive-option {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.champs-progressive-option label {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.champs-progressive-option input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  accent-color: var(--gold-primary);
+}
+
+.champs-progressive-option input:focus-visible {
+  outline: 2px solid rgba(201, 165, 90, 0.62);
+  outline-offset: 3px;
+}
+
+.champs-progressive-option input:disabled + span {
+  opacity: 0.55;
+}
+
 .champs-search-submit {
   min-width: 172px;
   min-height: 46px;
@@ -1187,6 +1221,141 @@
   text-align: right !important;
 }
 
+.champs-history__toolbar,
+.champs-history-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.champs-history-filter {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-bg-soft);
+}
+
+.champs-history-filter button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--color-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.champs-history-filter button[aria-pressed='true'] {
+  border-color: rgba(201, 165, 90, 0.28);
+  color: var(--color-text);
+  background: rgba(201, 165, 90, 0.12);
+}
+
+.champs-history-filter button:focus-visible {
+  outline: 2px solid rgba(201, 165, 90, 0.55);
+  outline-offset: 2px;
+}
+
+.champs-history-clear {
+  min-height: 40px;
+  padding-right: 12px;
+  padding-left: 12px;
+  font-size: 11px;
+}
+
+.champs-history-actions .champs-table-action {
+  flex: 1 1 auto;
+}
+
+.champs-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.76);
+  backdrop-filter: blur(8px);
+}
+
+.champs-modal {
+  position: relative;
+  display: grid;
+  width: min(520px, 100%);
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.58);
+}
+
+.champs-modal__icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid rgba(201, 165, 90, 0.3);
+  border-radius: 10px;
+  color: var(--gold-light);
+  background: rgba(201, 165, 90, 0.1);
+}
+
+.champs-modal h2 {
+  margin: 0 32px 8px 0;
+  color: var(--color-text);
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.champs-modal p {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.champs-modal__close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--color-muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.champs-modal__close:hover {
+  border-color: var(--color-border);
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.champs-modal__close:focus-visible {
+  outline: 2px solid rgba(201, 165, 90, 0.55);
+  outline-offset: 2px;
+}
+
+.champs-modal__actions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 4px;
+}
+
 .champs-pagination {
   display: flex;
   align-items: center;
@@ -1374,8 +1543,13 @@
   }
 
   .champs-panel__actions,
-  .champs-actions {
+  .champs-actions,
+  .champs-history__toolbar {
     width: 100%;
+  }
+
+  .champs-history__toolbar {
+    justify-content: flex-start;
   }
 
   .champs-button {
@@ -1450,6 +1624,27 @@
 @media (max-width: 800px) {
   .champs-page {
     padding: 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .champs-modal {
+    grid-template-columns: 1fr;
+    padding: 20px;
+  }
+
+  .champs-modal__icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .champs-modal__actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .champs-modal__actions .champs-button {
+    width: 100%;
   }
 }
 

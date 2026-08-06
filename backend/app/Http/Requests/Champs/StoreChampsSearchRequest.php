@@ -26,6 +26,7 @@ class StoreChampsSearchRequest extends FormRequest
             'state' => ['required', 'string', 'size:2'],
             'limit' => ['required', 'integer', 'min:1', "max:{$maxResults}"],
             'minimum_score' => ['sometimes', 'integer', 'min:0', 'max:100'],
+            'exclude_seen' => ['sometimes', 'boolean'],
             'company_id' => ['prohibited'],
             'user_id' => ['prohibited'],
             'provider' => ['prohibited'],
@@ -37,6 +38,9 @@ class StoreChampsSearchRequest extends FormRequest
             'access_token' => ['prohibited'],
             'password' => ['prohibited'],
             'secret' => ['prohibited'],
+            'seen_ids' => ['prohibited'],
+            'exclude_ids' => ['prohibited'],
+            'external_ids' => ['prohibited'],
         ];
     }
 

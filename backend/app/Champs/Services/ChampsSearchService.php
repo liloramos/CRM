@@ -3,10 +3,12 @@
 namespace App\Champs\Services;
 
 use App\Champs\Contracts\LeadProviderInterface;
+use App\Champs\Contracts\PaginatedLeadProviderInterface;
 use App\Champs\DTOs\DiscoveredLead;
 use App\Champs\DTOs\LeadDiscoveryRequest;
 use App\Champs\Exceptions\ChampsSearchException;
 use App\Champs\Exceptions\LeadProviderException;
+use App\Champs\Support\ChampsSearchFingerprint;
 use App\Models\ChampsLead;
 use App\Models\ChampsSearch;
 use App\Models\ChampsSearchResult;
@@ -34,6 +36,7 @@ final class ChampsSearchService
         int $limit,
         ?string $name = null,
         int $minimumScore = 0,
+        bool $excludeSeen = true,
     ): ChampsSearch {
         $companyId = $this->companyId($user);
 
@@ -44,6 +47,14 @@ final class ChampsSearchService
         $discoveryRequest = new LeadDiscoveryRequest($niche, $city, $state, $limit);
         $providerName = $this->provider->name();
         $searchName = $this->searchName($name, $discoveryRequest);
+        $searchFingerprint = ChampsSearchFingerprint::make(
+            $discoveryRequest->niche,
+            $discoveryRequest->city,
+            $discoveryRequest->state,
+            $providerName,
+        );
+
+        $this->backfillLegacyFingerprints($companyId);
 
         $search = ChampsSearch::query()->create([
             'company_id' => $companyId,
@@ -54,21 +65,30 @@ final class ChampsSearchService
             'state' => mb_strtoupper($discoveryRequest->state),
             'requested_limit' => $discoveryRequest->limit,
             'provider' => $providerName,
+            'search_fingerprint' => $searchFingerprint,
+            'exclude_seen' => $excludeSeen,
             'minimum_score' => $minimumScore,
             'status' => ChampsSearch::STATUS_PROCESSING,
             'started_at' => now(),
         ]);
 
         try {
-            $providerLeads = $this->provider->discover($discoveryRequest);
-            $totalDiscovered = count($providerLeads);
-            $discoveredLeads = $this->uniqueDiscoveries($providerLeads, $providerName);
+            $seenExternalIds = $excludeSeen
+                ? $this->seenExternalIds($companyId, $providerName, $searchFingerprint)
+                : [];
+            $discoverySummary = $this->discoverProgressively(
+                request: $discoveryRequest,
+                providerName: $providerName,
+                seenExternalIds: $seenExternalIds,
+                excludeSeen: $excludeSeen,
+            );
+            $discoveredLeads = $discoverySummary['discoveries'];
             $savedLeadIds = [];
 
             DB::transaction(function () use (
                 $search,
                 $discoveredLeads,
-                $totalDiscovered,
+                $discoverySummary,
                 $providerName,
                 $companyId,
                 $minimumScore,
@@ -77,11 +97,11 @@ final class ChampsSearchService
                 $saved = 0;
                 $qualifiedCount = 0;
 
-                foreach ($discoveredLeads as $discovery) {
+                foreach ($discoveredLeads as $discovered) {
                     $lead = $this->upsertLead(
                         companyId: $companyId,
                         providerName: $providerName,
-                        discoveredLead: $discovery['lead'],
+                        discoveredLead: $discovered['lead'],
                     );
 
                     $score = $this->scoring->calculate($lead);
@@ -99,7 +119,7 @@ final class ChampsSearchService
                             'reasons' => $score['reasons'],
                             'criteria' => $score['criteria'],
                             'qualified' => $qualified,
-                            'position' => $discovery['position'],
+                            'position' => $discovered['position'],
                         ],
                     );
 
@@ -109,9 +129,11 @@ final class ChampsSearchService
                 }
 
                 $search->update([
-                    'total_discovered' => $totalDiscovered,
+                    'total_discovered' => count($discoveredLeads),
                     'total_saved' => $saved,
                     'total_qualified' => $qualifiedCount,
+                    'total_scanned' => $discoverySummary['total_scanned'],
+                    'total_skipped_seen' => $discoverySummary['total_skipped_seen'],
                     'error_message' => null,
                 ]);
             });
@@ -159,39 +181,128 @@ final class ChampsSearchService
     }
 
     /**
-     * @param  list<DiscoveredLead>  $discoveredLeads
-     * @return list<array{lead: DiscoveredLead, position: int}>
+     * @param  array<string, true>  $seenExternalIds
+     * @return array{
+     *     discoveries: list<array{lead: DiscoveredLead, position: int}>,
+     *     total_scanned: int,
+     *     total_skipped_seen: int
+     * }
      */
-    private function uniqueDiscoveries(array $discoveredLeads, string $providerName): array
+    private function discoverProgressively(
+        LeadDiscoveryRequest $request,
+        string $providerName,
+        array $seenExternalIds,
+        bool $excludeSeen,
+    ): array {
+        $discoveries = [];
+        $scannedExternalIds = [];
+        $totalSkippedSeen = 0;
+        $pageToken = null;
+        $pageCount = 0;
+        $maxPages = max(1, (int) config('champs.google_places.max_pages', 3));
+        $paginatedProvider = $this->provider instanceof PaginatedLeadProviderInterface
+            ? $this->provider
+            : null;
+
+        do {
+            if ($paginatedProvider !== null) {
+                $page = $paginatedProvider->discoverPage($request, $pageToken);
+                $providerLeads = $page->leads;
+                $nextPageToken = $page->nextPageToken;
+            } else {
+                $providerLeads = $this->provider->discover($request);
+                $nextPageToken = null;
+            }
+
+            $pageCount++;
+
+            foreach ($providerLeads as $lead) {
+                if (! $lead instanceof DiscoveredLead) {
+                    throw ChampsSearchException::processingFailed();
+                }
+
+                $externalId = trim($lead->externalId);
+
+                if ($externalId === '') {
+                    continue;
+                }
+
+                $key = $providerName.'|'.$externalId;
+
+                if (isset($scannedExternalIds[$key])) {
+                    continue;
+                }
+
+                $scannedExternalIds[$key] = true;
+
+                if ($excludeSeen && isset($seenExternalIds[$externalId])) {
+                    $totalSkippedSeen++;
+
+                    continue;
+                }
+
+                $discoveries[] = [
+                    'lead' => $lead,
+                    'position' => count($discoveries) + 1,
+                ];
+
+                if (count($discoveries) >= $request->limit) {
+                    break 2;
+                }
+            }
+
+            $pageToken = $nextPageToken;
+        } while (
+            $paginatedProvider !== null
+            && $pageToken !== null
+            && $pageCount < $maxPages
+        );
+
+        return [
+            'discoveries' => $discoveries,
+            'total_scanned' => count($scannedExternalIds),
+            'total_skipped_seen' => $totalSkippedSeen,
+        ];
+    }
+
+    /**
+     * @return array<string, true>
+     */
+    private function seenExternalIds(
+        int $companyId,
+        string $providerName,
+        string $searchFingerprint,
+    ): array {
+        return DB::table('champs_search_results as result')
+            ->join('champs_searches as search', 'search.id', '=', 'result.search_id')
+            ->join('champs_leads as lead', 'lead.id', '=', 'result.lead_id')
+            ->where('search.company_id', $companyId)
+            ->where('search.search_fingerprint', $searchFingerprint)
+            ->where('search.provider', $providerName)
+            ->where('lead.company_id', $companyId)
+            ->where('lead.provider', $providerName)
+            ->distinct()
+            ->pluck('lead.external_id')
+            ->mapWithKeys(fn (string $externalId): array => [$externalId => true])
+            ->all();
+    }
+
+    private function backfillLegacyFingerprints(int $companyId): void
     {
-        $unique = [];
-        $seen = [];
-
-        foreach ($discoveredLeads as $index => $lead) {
-            if (! $lead instanceof DiscoveredLead) {
-                throw ChampsSearchException::processingFailed();
-            }
-
-            $externalId = trim($lead->externalId);
-
-            if ($externalId === '') {
-                continue;
-            }
-
-            $key = $providerName.'|'.$externalId;
-
-            if (isset($seen[$key])) {
-                continue;
-            }
-
-            $seen[$key] = true;
-            $unique[] = [
-                'lead' => $lead,
-                'position' => $index + 1,
-            ];
-        }
-
-        return $unique;
+        ChampsSearch::query()
+            ->forCompany($companyId)
+            ->whereNull('search_fingerprint')
+            ->get(['id', 'niche', 'city', 'state', 'provider'])
+            ->each(function (ChampsSearch $search): void {
+                $search->forceFill([
+                    'search_fingerprint' => ChampsSearchFingerprint::make(
+                        $search->niche,
+                        $search->city,
+                        $search->state,
+                        $search->provider,
+                    ),
+                ])->saveQuietly();
+            });
     }
 
     private function upsertLead(

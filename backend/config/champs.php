@@ -9,6 +9,7 @@ return [
         'region' => env('GOOGLE_PLACES_REGION', 'BR'),
         'timeout' => (int) env('GOOGLE_PLACES_TIMEOUT', 15),
         'max_results' => (int) env('GOOGLE_PLACES_MAX_RESULTS', 20),
+        'max_pages' => (int) env('GOOGLE_PLACES_MAX_PAGES', 3),
     ],
 
     'meta' => [

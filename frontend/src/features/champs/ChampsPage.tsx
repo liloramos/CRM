@@ -8,6 +8,10 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import './ChampsPage.css'
+import {
+  ChampsArchiveDialog,
+  type ChampsArchiveTarget,
+} from './components/ChampsArchiveDialog'
 import { ChampsLeadFilters } from './components/ChampsLeadFilters'
 import { ChampsLeadTable } from './components/ChampsLeadTable'
 import { ChampsSearchForm } from './components/ChampsSearchForm'
@@ -15,10 +19,13 @@ import { ChampsSearchHistory } from './components/ChampsSearchHistory'
 import { ChampsStats } from './components/ChampsStats'
 import { ChampsStatusBadge } from './components/ChampsStatusBadge'
 import {
+  archiveAllSearches,
+  archiveSearch,
   champsErrorMessage,
   createSearch,
   getSearch,
   listSearches,
+  restoreSearch,
   type ChampsSearch,
   type CreateChampsSearchPayload,
   type PaginationMeta,
@@ -35,10 +42,13 @@ import { readChampsPreferences, writeChampsPreferences } from './utils/champs-st
 
 type ResultSource = 'api' | 'local'
 
+const NO_NEW_RESULTS_MESSAGE = 'Nenhuma empresa nova foi encontrada com estes critérios. Experimente outro bairro, outra cidade, uma variação do nicho ou permita resultados anteriores.'
+
 export function ChampsPage() {
   const [initialPreferences] = useState(readChampsPreferences)
   const [searches, setSearches] = useState<ChampsSearch[]>([])
   const [historyMeta, setHistoryMeta] = useState<PaginationMeta | null>(null)
+  const [historyArchiveFilter, setHistoryArchiveFilter] = useState<'active' | 'only'>('active')
   const [activeSearch, setActiveSearch] = useState<ChampsSearch | null>(null)
   const [localLeads, setLocalLeads] = useState<Lead[]>([])
   const [resultSource, setResultSource] = useState<ResultSource>('api')
@@ -55,6 +65,8 @@ export function ChampsPage() {
   const [isHistoryLoading, setIsHistoryLoading] = useState(true)
   const [isOpeningSearch, setIsOpeningSearch] = useState(false)
   const [isCreatingSearch, setIsCreatingSearch] = useState(false)
+  const [isHistoryMutating, setIsHistoryMutating] = useState(false)
+  const [archiveTarget, setArchiveTarget] = useState<ChampsArchiveTarget | null>(null)
 
   const openSearch = useCallback(async (searchId: number, focusResults = true) => {
     setResultSource('api')
@@ -80,7 +92,11 @@ export function ChampsPage() {
     setHistoryError(null)
 
     try {
-      const response = await listSearches({ page, perPage: 10 })
+      const response = await listSearches({
+        archived: historyArchiveFilter,
+        page,
+        perPage: 10,
+      })
       setSearches(response.data)
       setHistoryMeta(response.meta)
 
@@ -93,15 +109,15 @@ export function ChampsPage() {
     } finally {
       setIsHistoryLoading(false)
     }
-  }, [initialPreferences.lastSearchId, openSearch])
+  }, [historyArchiveFilter, initialPreferences.lastSearchId, openSearch])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      void loadHistory(1, true)
+      void loadHistory(1, historyArchiveFilter === 'active')
     }, 0)
 
     return () => window.clearTimeout(timeout)
-  }, [loadHistory])
+  }, [historyArchiveFilter, loadHistory])
 
   useEffect(() => {
     writeChampsPreferences({
@@ -146,9 +162,9 @@ export function ChampsPage() {
 
       setActiveSearch(completeSearch)
       setResultSource('api')
-      setFeedback(
-        `${completeSearch.totalDiscovered} lead(s) encontrado(s); ${completeSearch.totalQualified} atingiram o score mínimo.`,
-      )
+      setFeedback(completeSearch.message ?? (
+        `${completeSearch.totalDiscovered} lead(s) encontrado(s); ${completeSearch.totalQualified} atingiram o score mínimo.`
+      ))
       focusResultsPanel()
       await loadHistory(1)
     } catch (error) {
@@ -218,6 +234,49 @@ export function ChampsPage() {
 
   function downloadTemplate() {
     downloadCsvContent('modelo-importacao-champs.csv', buildTemplateCsv())
+  }
+
+  async function confirmArchive() {
+    if (archiveTarget === null || isHistoryMutating) {
+      return
+    }
+
+    setIsHistoryMutating(true)
+
+    try {
+      if (archiveTarget.kind === 'all') {
+        const count = await archiveAllSearches()
+        setFeedback(`${count} pesquisa(s) arquivada(s). Leads e memória de prospecção foram preservados.`)
+      } else {
+        await archiveSearch(archiveTarget.search.id)
+        setFeedback('Pesquisa arquivada. Leads e memória de prospecção foram preservados.')
+      }
+
+      setArchiveTarget(null)
+      await loadHistory(1)
+    } catch (error) {
+      setFeedback(champsErrorMessage(error))
+    } finally {
+      setIsHistoryMutating(false)
+    }
+  }
+
+  async function handleRestoreSearch(search: ChampsSearch) {
+    if (isHistoryMutating) {
+      return
+    }
+
+    setIsHistoryMutating(true)
+
+    try {
+      await restoreSearch(search.id)
+      setFeedback('Pesquisa restaurada para o histórico ativo.')
+      await loadHistory(historyMeta?.currentPage ?? 1)
+    } catch (error) {
+      setFeedback(champsErrorMessage(error))
+    } finally {
+      setIsHistoryMutating(false)
+    }
   }
 
   const hasSelectedSource = resultSource === 'local' ? localLeads.length > 0 : activeSearch !== null
@@ -363,7 +422,7 @@ export function ChampsPage() {
                     context={resultContext}
                     emptyDescription={
                       sourceResults.length === 0
-                        ? 'A busca foi concluída sem estabelecimentos para exibir.'
+                        ? activeSearch?.message ?? NO_NEW_RESULTS_MESSAGE
                         : 'Ajuste ou limpe os filtros para rever todos os resultados.'
                     }
                     results={filteredResults}
@@ -389,14 +448,29 @@ export function ChampsPage() {
 
       <ChampsSearchHistory
         activeSearchId={activeSearchId}
+        archiveFilter={historyArchiveFilter}
         error={historyError}
         isLoading={isHistoryLoading}
+        isMutating={isHistoryMutating}
         meta={historyMeta}
+        onArchive={(search) => setArchiveTarget({ kind: 'search', search })}
+        onArchiveAll={() => setArchiveTarget({ kind: 'all' })}
+        onArchiveFilterChange={setHistoryArchiveFilter}
         onOpen={(searchId) => void openSearch(searchId)}
         onPageChange={(page) => void loadHistory(page)}
         onRetry={() => void loadHistory(historyMeta?.currentPage ?? 1)}
+        onRestore={(search) => void handleRestoreSearch(search)}
         searches={searches}
       />
+
+      {archiveTarget ? (
+        <ChampsArchiveDialog
+          isBusy={isHistoryMutating}
+          onCancel={() => setArchiveTarget(null)}
+          onConfirm={() => void confirmArchive()}
+          target={archiveTarget}
+        />
+      ) : null}
     </main>
   )
 }

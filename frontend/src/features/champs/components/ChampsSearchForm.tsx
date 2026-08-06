@@ -56,6 +56,7 @@ export function ChampsSearchForm({
   const [state, setState] = useState('SP')
   const [limit, setLimit] = useState(Math.min(20, maxResults))
   const [minimumScore, setMinimumScore] = useState(0)
+  const [excludeSeen, setExcludeSeen] = useState(true)
   const [errors, setErrors] = useState<SearchFormErrors>({})
   const limitOptions = getLimitOptions(maxResults)
 
@@ -69,6 +70,7 @@ export function ChampsSearchForm({
       state,
       limit,
       minimumScore,
+      excludeSeen,
     }
     const validationErrors = validateSearchPayload(payload, maxResults)
 
@@ -172,7 +174,18 @@ export function ChampsSearchForm({
         </div>
 
         <div className="champs-search-form__footer">
-          <p>Todos os resultados ficam no histórico, inclusive os que não atingirem o corte.</p>
+          <div className="champs-progressive-option">
+            <label>
+              <input
+                checked={excludeSeen}
+                disabled={isSubmitting}
+                onChange={(event) => setExcludeSeen(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Ocultar empresas já encontradas</span>
+            </label>
+            <p>Desmarque para permitir empresas apresentadas em buscas anteriores.</p>
+          </div>
           <button className="champs-button champs-button--primary champs-search-submit" disabled={isSubmitting} type="submit">
             {isSubmitting ? (
               <LoaderCircle aria-hidden="true" className="champs-spin" size={18} />

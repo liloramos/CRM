@@ -224,6 +224,95 @@ class GooglePlacesLeadProviderTest extends TestCase
         });
     }
 
+    public function test_it_preserves_query_parameters_when_requesting_the_next_page(): void
+    {
+        Http::fake([
+            self::ENDPOINT => Http::sequence()
+                ->push([
+                    'places' => $this->placesForIds(['place-page-1']),
+                    'nextPageToken' => 'page-token-2',
+                ])
+                ->push([
+                    'places' => $this->placesForIds([
+                        'place-page-2',
+                        'place-page-3',
+                        'place-page-4',
+                        'place-page-5',
+                    ]),
+                ]),
+        ]);
+
+        $leads = $this->provider()->discover($this->request());
+
+        $this->assertCount(5, $leads);
+        Http::assertSentCount(2);
+        Http::assertSent(function (Request $request): bool {
+            return $request->data() === [
+                'textQuery' => 'clínica de estética em São Paulo SP',
+                'pageSize' => 5,
+                'languageCode' => 'pt-BR',
+                'regionCode' => 'BR',
+                'pageToken' => 'page-token-2',
+            ];
+        });
+    }
+
+    public function test_pagination_stops_when_the_requested_quantity_is_reached(): void
+    {
+        Http::fake([
+            self::ENDPOINT => Http::response([
+                'places' => $this->placesForIds([
+                    'place-stop-1',
+                    'place-stop-2',
+                    'place-stop-3',
+                    'place-stop-4',
+                    'place-stop-5',
+                ]),
+                'nextPageToken' => 'unused-page-token',
+            ]),
+        ]);
+
+        $this->assertCount(5, $this->provider()->discover($this->request()));
+        Http::assertSentCount(1);
+    }
+
+    public function test_pagination_stops_without_a_next_page_token(): void
+    {
+        Http::fake([
+            self::ENDPOINT => Http::response([
+                'places' => $this->placesForIds(['place-only-page']),
+            ]),
+        ]);
+
+        $this->assertCount(1, $this->provider()->discover($this->request()));
+        Http::assertSentCount(1);
+    }
+
+    public function test_pagination_respects_the_configured_maximum_pages(): void
+    {
+        config(['champs.google_places.max_pages' => 3]);
+        Http::fake([
+            self::ENDPOINT => Http::sequence()
+                ->push([
+                    'places' => $this->placesForIds(['place-max-1']),
+                    'nextPageToken' => 'page-2',
+                ])
+                ->push([
+                    'places' => $this->placesForIds(['place-max-2']),
+                    'nextPageToken' => 'page-3',
+                ])
+                ->push([
+                    'places' => $this->placesForIds(['place-max-3']),
+                    'nextPageToken' => 'page-4',
+                ]),
+        ]);
+
+        $leads = $this->provider()->discover($this->request());
+
+        $this->assertCount(3, $leads);
+        Http::assertSentCount(3);
+    }
+
     public function test_api_key_is_absent_from_exceptions_and_logs(): void
     {
         $secret = 'secret-value-that-must-never-leak';
@@ -283,6 +372,22 @@ class GooglePlacesLeadProviderTest extends TestCase
                 ],
             ],
         ];
+    }
+
+    /**
+     * @param  list<string>  $ids
+     * @return list<array<string, mixed>>
+     */
+    private function placesForIds(array $ids): array
+    {
+        return array_map(
+            fn (string $id): array => [
+                'id' => $id,
+                'displayName' => ['text' => "Empresa {$id}"],
+                'formattedAddress' => 'Rua Fictícia, 100 - São Paulo - SP',
+            ],
+            $ids,
+        );
     }
 
     /**

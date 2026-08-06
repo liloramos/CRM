@@ -38,6 +38,14 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
 Route::prefix('api/champs')->name('api.champs.')->middleware('auth')->group(function () {
     Route::post('searches', [ChampsSearchController::class, 'store'])->name('searches.store');
     Route::get('searches', [ChampsSearchController::class, 'index'])->name('searches.index');
+    Route::post('searches/archive-all', [ChampsSearchController::class, 'archiveAll'])
+        ->name('searches.archive-all');
+    Route::patch('searches/{search}/archive', [ChampsSearchController::class, 'archive'])
+        ->whereNumber('search')
+        ->name('searches.archive');
+    Route::patch('searches/{search}/restore', [ChampsSearchController::class, 'restore'])
+        ->whereNumber('search')
+        ->name('searches.restore');
     Route::get('searches/{search}', [ChampsSearchController::class, 'show'])
         ->whereNumber('search')
         ->name('searches.show');
