@@ -139,6 +139,16 @@ class User extends Authenticatable implements PasskeyUser
         return $this->hasMany(ChampsSearch::class);
     }
 
+    public function assignedChampsLeads(): HasMany
+    {
+        return $this->hasMany(ChampsLead::class, 'assigned_user_id');
+    }
+
+    public function champsLeadActivities(): HasMany
+    {
+        return $this->hasMany(ChampsLeadActivity::class);
+    }
+
     public function assignRole(Role|string $role): void
     {
         $roleModel = $role instanceof Role

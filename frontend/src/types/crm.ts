@@ -15,6 +15,7 @@ export type RouteKey =
   | 'ia'
   | 'perfil'
   | 'champs'
+  | 'saved-leads'
 
 export type BadgeTone =
   | 'brand'

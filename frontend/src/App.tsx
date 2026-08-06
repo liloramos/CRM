@@ -26,6 +26,7 @@ import {
 } from './services/crm.service'
 import type { AppModal, AuthUser, OperationalSnapshot, PrintPreviewResult, RouteKey, SnapshotSource } from './types/crm'
 import { ChampsPage } from './features/champs/ChampsPage'
+import { SavedLeadsPage } from './features/champs/SavedLeadsPage'
 
 function App() {
   const { logout, status: authStatus, user } = useAuth()
@@ -257,6 +258,8 @@ function App() {
     switch (activeRoute) {
       case 'champs':
         return <ChampsPage />
+      case 'saved-leads':
+        return <SavedLeadsPage />
       case 'login':
       case 'cadastro':
       case 'dashboard':

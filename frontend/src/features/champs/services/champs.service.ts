@@ -19,6 +19,24 @@ export type ChampsLeadClassification =
   | 'Bom potencial'
   | 'Alta prioridade'
 
+export type ChampsLeadStage =
+  | 'new'
+  | 'reviewing'
+  | 'interested'
+  | 'contacted'
+  | 'awaiting_response'
+  | 'meeting_scheduled'
+  | 'client'
+  | 'lost'
+  | 'discarded'
+
+export type ChampsLeadPriority = 'low' | 'normal' | 'high' | 'urgent'
+
+export type ChampsLeadAssignee = {
+  id: number
+  name: string
+}
+
 export type ChampsScoreCriterion = {
   met: boolean
   points: number
@@ -44,6 +62,16 @@ export type ChampsLead = {
   instagramFollowersCount: number
   instagramMediaCount: number
   instagramIsProfessional: boolean
+  isFavorite: boolean
+  pipelineStage: ChampsLeadStage
+  priority: ChampsLeadPriority
+  assignedUserId: number | null
+  assignedUser: ChampsLeadAssignee | null
+  nextFollowUpAt: string | null
+  lastContactedAt: string | null
+  commercialNotes: string | null
+  archivedAt: string | null
+  activitiesCount?: number
   score?: number
   classification?: ChampsLeadClassification
   reasons?: string[]
@@ -344,6 +372,18 @@ export function adaptChampsLead(value: unknown): ChampsLead {
     instagramFollowersCount: requiredNumber(resource.instagram_followers_count),
     instagramMediaCount: requiredNumber(resource.instagram_media_count),
     instagramIsProfessional: requiredBoolean(resource.instagram_is_professional),
+    isFavorite: optionalBoolean(resource.is_favorite) ?? false,
+    pipelineStage: optionalLeadStage(resource.pipeline_stage) ?? 'new',
+    priority: optionalLeadPriority(resource.priority) ?? 'normal',
+    assignedUserId: nullableNumber(resource.assigned_user_id),
+    assignedUser: optionalAssignee(resource.assigned_user),
+    nextFollowUpAt: nullableString(resource.next_follow_up_at),
+    lastContactedAt: nullableString(resource.last_contacted_at),
+    commercialNotes: nullableString(resource.commercial_notes),
+    archivedAt: nullableString(resource.archived_at),
+    ...(optionalNumber(resource.activities_count) === undefined
+      ? {}
+      : { activitiesCount: optionalNumber(resource.activities_count) }),
     ...(score === undefined ? {} : { score }),
     ...(classification === undefined ? {} : { classification }),
     ...(reasons === undefined ? {} : { reasons }),
@@ -482,6 +522,45 @@ function optionalClassification(value: unknown): ChampsLeadClassification | unde
   return undefined
 }
 
+function optionalLeadStage(value: unknown): ChampsLeadStage | undefined {
+  if (
+    value === 'new'
+    || value === 'reviewing'
+    || value === 'interested'
+    || value === 'contacted'
+    || value === 'awaiting_response'
+    || value === 'meeting_scheduled'
+    || value === 'client'
+    || value === 'lost'
+    || value === 'discarded'
+  ) {
+    return value
+  }
+
+  return undefined
+}
+
+function optionalLeadPriority(value: unknown): ChampsLeadPriority | undefined {
+  if (value === 'low' || value === 'normal' || value === 'high' || value === 'urgent') {
+    return value
+  }
+
+  return undefined
+}
+
+function optionalAssignee(value: unknown): ChampsLeadAssignee | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  const resource = asRecord(value)
+
+  return {
+    id: requiredNumber(resource.id),
+    name: requiredString(resource.name),
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) {
     return invalidResponse()
@@ -516,6 +595,10 @@ function nullableNumber(value: unknown): number | null {
 
 function requiredBoolean(value: unknown): boolean {
   return typeof value === 'boolean' ? value : invalidResponse()
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
 }
 
 function stringArray(value: unknown): string[] {

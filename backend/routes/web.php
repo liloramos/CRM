@@ -3,7 +3,10 @@
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\Champs\ChampsLeadActivityController;
 use App\Http\Controllers\Api\Champs\ChampsLeadController;
+use App\Http\Controllers\Api\Champs\ChampsLeadOperationController;
+use App\Http\Controllers\Api\Champs\ChampsSavedLeadController;
 use App\Http\Controllers\Api\Champs\ChampsSearchController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
@@ -36,6 +39,7 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
 });
 
 Route::prefix('api/champs')->name('api.champs.')->middleware('auth')->group(function () {
+    Route::get('saved-leads', [ChampsSavedLeadController::class, 'index'])->name('saved-leads.index');
     Route::post('searches', [ChampsSearchController::class, 'store'])->name('searches.store');
     Route::get('searches', [ChampsSearchController::class, 'index'])->name('searches.index');
     Route::post('searches/archive-all', [ChampsSearchController::class, 'archiveAll'])
@@ -50,6 +54,30 @@ Route::prefix('api/champs')->name('api.champs.')->middleware('auth')->group(func
         ->whereNumber('search')
         ->name('searches.show');
     Route::get('leads', [ChampsLeadController::class, 'index'])->name('leads.index');
+    Route::patch('leads/{lead}/favorite', [ChampsLeadOperationController::class, 'favorite'])
+        ->whereNumber('lead')
+        ->name('leads.favorite');
+    Route::patch('leads/{lead}/pipeline', [ChampsLeadOperationController::class, 'pipeline'])
+        ->whereNumber('lead')
+        ->name('leads.pipeline');
+    Route::patch('leads/{lead}/assignment', [ChampsLeadOperationController::class, 'assignment'])
+        ->whereNumber('lead')
+        ->name('leads.assignment');
+    Route::patch('leads/{lead}/follow-up', [ChampsLeadOperationController::class, 'followUp'])
+        ->whereNumber('lead')
+        ->name('leads.follow-up');
+    Route::post('leads/{lead}/activities', [ChampsLeadActivityController::class, 'store'])
+        ->whereNumber('lead')
+        ->name('leads.activities.store');
+    Route::get('leads/{lead}/activities', [ChampsLeadActivityController::class, 'index'])
+        ->whereNumber('lead')
+        ->name('leads.activities.index');
+    Route::patch('leads/{lead}/archive', [ChampsLeadOperationController::class, 'archive'])
+        ->whereNumber('lead')
+        ->name('leads.archive');
+    Route::patch('leads/{lead}/restore', [ChampsLeadOperationController::class, 'restore'])
+        ->whereNumber('lead')
+        ->name('leads.restore');
 });
 
 Route::middleware(['auth', 'verified'])->group(function () {

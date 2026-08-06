@@ -16,6 +16,12 @@ export const menuItems: MenuItem[] = [
     group: 'operacao',
   },
   {
+    key: 'saved-leads',
+    label: 'Leads salvos',
+    icon: 'customers',
+    group: 'operacao',
+  },
+  {
     key: 'perfil',
     label: 'Perfil',
     icon: 'user',
@@ -40,4 +46,5 @@ export const routeLabels: Record<RouteKey, string> = {
   ia: 'IA e Automacao',
   perfil: 'Perfil',
   champs: 'Prospecção de leads',
+  'saved-leads': 'Leads salvos',
 }

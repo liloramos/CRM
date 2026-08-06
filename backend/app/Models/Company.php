@@ -157,4 +157,9 @@ class Company extends Model
     {
         return $this->hasMany(ChampsLead::class);
     }
+
+    public function champsLeadActivities(): HasMany
+    {
+        return $this->hasMany(ChampsLeadActivity::class);
+    }
 }
