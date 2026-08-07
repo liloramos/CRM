@@ -2,10 +2,13 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\WhatsAppMessageSendFailedException;
 use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
 use App\Models\Conversation;
 use App\Models\ConversationAlert;
+use App\Models\Customer;
+use App\Models\Message;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppMediaFile;
 use App\Services\Conversations\ConversationAlertService;
@@ -38,6 +41,13 @@ class ConversationOperationsController extends Controller
         $conversations = Conversation::query()
             ->with($this->conversationRelations())
             ->where('company_id', $company->id)
+            ->when(! config('chatbotcrm.whatsapp.demo_data_enabled'), function ($query): void {
+                $query->whereDoesntHave('customer', function ($customers): void {
+                    $customers->where('source_channel', Customer::SOURCE_CHANNEL_DEMO)
+                        ->orWhere('email', Customer::DEMO_EMAIL)
+                        ->orWhere('email', 'like', Customer::DASHBOARD_DEMO_EMAIL_PREFIX.'%@example.test');
+                });
+            })
             ->when(isset($validated['since']), function ($query) use ($validated): void {
                 $query->where(function ($nested) use ($validated): void {
                     $nested->where('updated_at', '>', $validated['since'])
@@ -113,7 +123,57 @@ class ConversationOperationsController extends Controller
         ]);
 
         try {
-            $conversation = $workflow->sendHumanMessage($company, $conversation, $request->user(), $validated['body']);
+            $conversation = $workflow->sendHumanMessage(
+                $company,
+                $conversation,
+                $request->user(),
+                $validated['body'],
+                $validated['client_reference'] ?? null,
+            );
+        } catch (WhatsAppMessageSendFailedException $exception) {
+            $conversation = Conversation::query()
+                ->with($this->conversationRelations())
+                ->where('company_id', $company->id)
+                ->findOrFail($exception->conversationId);
+
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'code' => $exception->errorCode,
+                'data' => $presenter->conversation($conversation),
+            ], 422);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->conversation($conversation->load($this->conversationRelations())),
+        ]);
+    }
+
+    public function retryMessage(
+        Request $request,
+        Conversation $conversation,
+        Message $message,
+        ConversationWorkflowService $workflow,
+        ConversationPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        abort_unless((int) $message->conversation_id === (int) $conversation->id, 404);
+
+        try {
+            $conversation = $workflow->retryHumanMessage($company, $conversation, $message, $request->user());
+        } catch (WhatsAppMessageSendFailedException $exception) {
+            $conversation = Conversation::query()
+                ->with($this->conversationRelations())
+                ->where('company_id', $company->id)
+                ->findOrFail($exception->conversationId);
+
+            return response()->json([
+                'message' => $exception->getMessage(),
+                'code' => $exception->errorCode,
+                'data' => $presenter->conversation($conversation),
+            ], 422);
         } catch (DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
@@ -262,7 +322,7 @@ class ConversationOperationsController extends Controller
     private function conversationRelations(): array
     {
         return [
-            'customer',
+            'customer.addresses',
             'assignedUser',
             'manualTakeoverBy',
             'activeOrder.payerCustomer',
@@ -271,6 +331,7 @@ class ConversationOperationsController extends Controller
             'activeOrder.latestPrintJob',
             'activeOrder.payments.proofs',
             'messages.mediaFiles',
+            'messages.whatsappMessageDeliveries',
             'alerts.payment',
             'alerts.paymentProof',
             'orders' => fn ($query) => $query->latest('id')->limit(1),

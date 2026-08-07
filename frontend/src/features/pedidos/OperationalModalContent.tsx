@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent
 import { Badge } from '../../components/ui/Badge'
 import { EmptyState, LoadingState } from '../../components/ui/States'
 import { Icon } from '../../components/ui/Icon'
+import { SelectField } from '../../components/ui/SelectField'
 import type {
   AddItemContext,
   AppModal,
@@ -238,17 +239,16 @@ export function OperationalModalContent({
           </div>
         ) : null}
 
-        <label>
-          Tipo de atendimento
-          <select
-            onChange={(event) => onNewOrderFulfillmentTypeChange(event.target.value as FulfillmentApiType)}
-            value={newOrderFulfillmentType}
-          >
-            <option value="pickup">Retirada</option>
-            <option value="counter">Balcao</option>
-            <option value="delivery">Entrega</option>
-          </select>
-        </label>
+        <SelectField
+          label="Tipo de atendimento"
+          onChange={(value) => onNewOrderFulfillmentTypeChange(value as FulfillmentApiType)}
+          options={[
+            { value: 'pickup', label: 'Retirada' },
+            { value: 'counter', label: 'Balcão' },
+            { value: 'delivery', label: 'Entrega' },
+          ]}
+          value={newOrderFulfillmentType}
+        />
         <label>
           Observacao do pedido
           <textarea
@@ -281,17 +281,21 @@ export function OperationalModalContent({
         ) : (
           <p>Crie ou selecione um pedido antes de adicionar itens.</p>
         )}
-        <label>
-          Produto
-          <select disabled={!addItemContext || products.length === 0} onChange={(event) => onProductChange(event.target.value)} value={selectedProduct?.id ?? ''}>
-            {products.length === 0 ? <option value="">Nenhum produto carregado</option> : null}
-            {products.map((product) => (
-              <option disabled={!product.available} key={product.id} value={product.id}>
-                {product.name} - {formatCurrency(product.price)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField
+          disabled={!addItemContext || products.length === 0}
+          label="Produto"
+          onChange={onProductChange}
+          options={products.map((product) => ({
+            value: product.id,
+            label: `${product.name} - ${formatCurrency(product.price)}`,
+            description: product.category,
+            disabled: !product.available,
+          }))}
+          placeholder={products.length === 0 ? 'Nenhum produto carregado' : 'Selecione um produto'}
+          searchable
+          searchPlaceholder="Buscar produto..."
+          value={selectedProduct?.id ?? ''}
+        />
         {selectedProduct?.meatConfiguration ? (
           <BeefChoicePicker
             dailyMeats={selectedProduct.dailyMeatOptions ?? []}
@@ -359,6 +363,15 @@ export function OperationalModalContent({
             value={itemNotes}
           />
         </label>
+        {selectedProduct ? (
+          <AddItemCompositionSummary
+            extraBeefSelected={itemExtraBeef}
+            meatMode={itemMeatMode}
+            product={selectedProduct}
+            quantity={itemQuantity}
+            selectedOptionIds={selectedOptionIds}
+          />
+        ) : null}
         {actionError ? <p className="form-error">{actionError}</p> : null}
       </div>
     )
@@ -388,17 +401,19 @@ export function OperationalModalContent({
           Pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong>. Total em aberto:{' '}
           <strong>{formatCurrency(selectedOrder?.amountDue ?? 0)}</strong>.
         </p>
-        <label>
-          Forma de pagamento
-          <select onChange={(event) => onPaymentMethodChange(event.target.value as PaymentMethodSelection)} value={paymentMethod}>
-            <option value="pix">Pix</option>
-            <option value="cash">Dinheiro</option>
-            <option value="debit_card">Cartao de debito</option>
-            <option value="credit_card">Cartao de credito</option>
-            <option value="customer_credit">Credito do cliente</option>
-            <option value="other">Outra forma</option>
-          </select>
-        </label>
+        <SelectField
+          label="Forma de pagamento"
+          onChange={(value) => onPaymentMethodChange(value as PaymentMethodSelection)}
+          options={[
+            { value: 'pix', label: 'Pix' },
+            { value: 'cash', label: 'Dinheiro' },
+            { value: 'debit_card', label: 'Cartão de débito' },
+            { value: 'credit_card', label: 'Cartão de crédito' },
+            { value: 'customer_credit', label: 'Crédito do cliente' },
+            { value: 'other', label: 'Outra forma' },
+          ]}
+          value={paymentMethod}
+        />
         <label>
           Valor recebido
           <input
@@ -428,16 +443,15 @@ export function OperationalModalContent({
       <div className="modal-fields">
         {transitions.length > 0 ? (
           <>
-            <label>
-              Novo status
-              <select onChange={(event) => onStatusTargetChange(event.target.value as BackendOrderStatus)} value={statusTarget}>
-                {transitions.map((transition) => (
-                  <option key={transition.status} value={transition.status}>
-                    {transition.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label="Novo status"
+              onChange={(value) => onStatusTargetChange(value as BackendOrderStatus)}
+              options={transitions.map((transition) => ({
+                value: transition.status,
+                label: transition.label,
+              }))}
+              value={statusTarget}
+            />
             <label>
               Motivo
               <input
@@ -1030,13 +1044,37 @@ function StructuredOptionPicker({
           return (
             <div className="option-picker__group" key={group.id}>
               <div className="option-picker__heading">
-                <span>{group.label}</span>
-                <Badge tone="success">Incluido</Badge>
+                <span>{includedGroupLabel(group.label)}</span>
+                <small>Desmarque somente quando o cliente pedir para retirar.</small>
               </div>
-              <div className="included-components">
-                {group.component_options.map((option) => (
-                  <span key={option.id}>{option.name}</span>
-                ))}
+              <div className="option-picker__grid">
+                {group.component_options.map((option) => {
+                  const token = removedComponentToken(option.component_id)
+                  const disabled = !option.link_active || option.requires_confirmation || !option.available
+                  const checked = !disabled && !selectedOptionIds.includes(token)
+
+                  return (
+                    <label className={optionChoiceClassName(checked, disabled)} key={option.id}>
+                      <input
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={() => {
+                          onSelectedOptionsChange(
+                            checked
+                              ? [...selectedOptionIds, token]
+                              : selectedOptionIds.filter((optionId) => optionId !== token),
+                          )
+                        }}
+                        type="checkbox"
+                      />
+                      <span className="option-choice__box" aria-hidden="true" />
+                      <span className="option-choice__content">
+                        <strong>{option.name}</strong>
+                        <small>{fixedComponentHint(option, checked)}</small>
+                      </span>
+                    </label>
+                  )
+                })}
               </div>
             </div>
           )
@@ -1158,6 +1196,129 @@ function LegacyOptionPicker({
   )
 }
 
+function AddItemCompositionSummary({
+  extraBeefSelected,
+  meatMode,
+  product,
+  quantity,
+  selectedOptionIds,
+}: {
+  extraBeefSelected: boolean
+  meatMode: MeatModeSelection
+  product: Product
+  quantity: number
+  selectedOptionIds: string[]
+}) {
+  const summary = buildCompositionSummary(product, selectedOptionIds, meatMode, extraBeefSelected)
+  const unitPrice = summary.unitPrice
+  const subtotal = unitPrice * Math.max(1, quantity)
+
+  return (
+    <aside className="add-item-summary" aria-label="Resumo do item">
+      <div className="add-item-summary__header">
+        <div>
+          <span className="mini-label">Resumo</span>
+          <strong>{product.name}</strong>
+        </div>
+        <Badge tone="brand">{formatCurrency(unitPrice)}</Badge>
+      </div>
+      {summary.composition.length > 0 ? (
+        <div>
+          <span>Composição</span>
+          <p>{summary.composition.join(', ')}</p>
+        </div>
+      ) : null}
+      {summary.removals.length > 0 ? (
+        <div>
+          <span>Retirados</span>
+          <p>{summary.removals.join(', ')}</p>
+        </div>
+      ) : null}
+      {summary.additions.length > 0 ? (
+        <div>
+          <span>Adicionais</span>
+          <p>{summary.additions.join(', ')}</p>
+        </div>
+      ) : null}
+      <div className="add-item-summary__footer">
+        <span>{Math.max(1, quantity)} unidade(s)</span>
+        <strong>Subtotal {formatCurrency(subtotal)}</strong>
+      </div>
+    </aside>
+  )
+}
+
+function buildCompositionSummary(
+  product: Product,
+  selectedOptionIds: string[],
+  meatMode: MeatModeSelection,
+  extraBeefSelected: boolean,
+): { composition: string[]; removals: string[]; additions: string[]; unitPrice: number } {
+  const selectedTokens = new Set(selectedOptionIds)
+  const composition: string[] = []
+  const removals: string[] = []
+  const additions: string[] = []
+
+  for (const group of product.structuredGroups ?? []) {
+    if (product.meatConfiguration && ['variacao_bife', 'bife_adicional'].includes(group.code)) {
+      continue
+    }
+
+    if (group.selection_mode === 'fixed') {
+      for (const option of group.component_options) {
+        if (!option.link_active || option.requires_confirmation || !option.available) {
+          continue
+        }
+
+        if (selectedTokens.has(removedComponentToken(option.component_id))) {
+          removals.push(`Sem ${option.name}`)
+        } else {
+          composition.push(option.name)
+        }
+      }
+
+      continue
+    }
+
+    for (const option of group.component_options) {
+      if (selectedTokens.has(componentOptionToken(option.id))) {
+        composition.push(option.name)
+      }
+    }
+
+    for (const option of group.product_options) {
+      if (selectedTokens.has(productOptionToken(option.id))) {
+        composition.push(option.selectable_product.name)
+      }
+    }
+  }
+
+  if (product.meatConfiguration) {
+    if (meatMode === 'beef_only') {
+      composition.push('Somente bife')
+    } else {
+      for (const meat of product.dailyMeatOptions ?? []) {
+        if (selectedTokens.has(dailyMeatToken(meat.component.id))) {
+          composition.push(meat.component.display_name || meat.component.name)
+        }
+      }
+
+      if (extraBeefSelected) {
+        const extraBeef = product.additions?.find((addition) => addition.code === 'extra_beef')
+        additions.push(`Bife adicional${extraBeef ? ` - ${formatCurrency(extraBeef.price_cents / 100)}` : ''}`)
+      }
+    }
+  }
+
+  const beefOnlyPrice = product.meatConfiguration?.beef_only.final_price_cents
+  const extraBeef = product.additions?.find((addition) => addition.code === 'extra_beef')
+  const unitPrice = meatMode === 'beef_only' && beefOnlyPrice !== null && beefOnlyPrice !== undefined
+    ? beefOnlyPrice / 100
+    : product.price + (extraBeefSelected && extraBeef ? extraBeef.price_cents / 100 : 0)
+
+  return { composition, removals, additions, unitPrice }
+}
+
 function handleCustomerSearchKeyDown(
   event: KeyboardEvent<HTMLInputElement>,
   activeIndex: number,
@@ -1274,12 +1435,36 @@ function productOptionToken(id: number): string {
   return `product:${id}`
 }
 
+function fixedComponentHint(option: StructuredComponentOption, checked: boolean): string {
+  if (!option.link_active || option.requires_confirmation) {
+    return 'Configuração pendente'
+  }
+
+  if (!option.available) {
+    return option.availability.reason ?? 'Indisponível hoje'
+  }
+
+  return checked ? 'Incluído no preço' : 'Retirar deste item'
+}
+
 function dailyMeatToken(id: number): string {
   return `daily-meat:${id}`
 }
 
+function removedComponentToken(id: number): string {
+  return `remove-component:${id}`
+}
+
 function isDailyMeatToken(token: string): boolean {
   return token.startsWith('daily-meat:')
+}
+
+function includedGroupLabel(label: string): string {
+  if (label.toLowerCase().includes('fix')) {
+    return 'Incluídos na marmita'
+  }
+
+  return label
 }
 
 function groupOptions(options: MenuOption[]): Array<{ groupLabel: string; options: MenuOption[] }> {

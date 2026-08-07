@@ -4,6 +4,7 @@ use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
 use App\Http\Controllers\Api\AdminMenuReadController;
 use App\Http\Controllers\Api\AppSessionController;
+use App\Http\Controllers\Api\ConversationConfigurationController;
 use App\Http\Controllers\Api\ConversationOperationsController;
 use App\Http\Controllers\Api\CustomerOperationsController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
@@ -93,6 +94,7 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
             ->name('menu.options.availability.update');
         Route::get('customers', [CustomerOperationsController::class, 'index'])->name('customers.index');
         Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
+        Route::patch('customers/{customer}', [CustomerOperationsController::class, 'update'])->name('customers.update');
         Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
         Route::post('orders/drafts', [OrderOperationsController::class, 'storeDraft'])->name('orders.drafts.store');
         Route::get('orders/{order}', [OrderOperationsController::class, 'show'])->name('orders.show');
@@ -111,6 +113,21 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('orders/{order}/payments/confirm', [OrderOperationsController::class, 'confirmPayment'])->name('orders.payments.confirm');
         Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
+        Route::get('conversation-quick-replies', [ConversationConfigurationController::class, 'quickReplies'])
+            ->middleware('permission:whatsapp.view')
+            ->name('conversation-quick-replies.index');
+        Route::post('conversation-quick-replies', [ConversationConfigurationController::class, 'storeQuickReply'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversation-quick-replies.store');
+        Route::patch('conversation-quick-replies/{quickReply}', [ConversationConfigurationController::class, 'updateQuickReply'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversation-quick-replies.update');
+        Route::get('conversation-ai-style', [ConversationConfigurationController::class, 'aiStyle'])
+            ->middleware('permission:ai.view')
+            ->name('conversation-ai-style.show');
+        Route::patch('conversation-ai-style', [ConversationConfigurationController::class, 'updateAiStyle'])
+            ->middleware('permission:ai.manage')
+            ->name('conversation-ai-style.update');
         Route::get('conversations', [ConversationOperationsController::class, 'index'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.index');
@@ -120,6 +137,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('conversations/{conversation}/messages', [ConversationOperationsController::class, 'sendMessage'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.messages.store');
+        Route::post('conversations/{conversation}/messages/{message}/retry', [ConversationOperationsController::class, 'retryMessage'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.messages.retry');
         Route::post('conversations/{conversation}/mode', [ConversationOperationsController::class, 'setMode'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.mode');

@@ -5,6 +5,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { Modal } from '../../components/ui/Modal'
+import { SelectField } from '../../components/ui/SelectField'
 import { EmptyState, ErrorState } from '../../components/ui/States'
 import {
   ApiError,
@@ -1182,26 +1183,26 @@ function ProductsTab({
           <span>Buscar produto</span>
           <input placeholder="Nome do produto" value={search} onChange={(event) => setSearch(event.target.value)} />
         </label>
-        <label>
-          <span>Categoria</span>
-          <select value={categorySlug} onChange={(event) => setCategorySlug(event.target.value)}>
-            <option value="all">Todas</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.slug}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Status</span>
-          <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as ProductAdminFilter)}>
-            <option value="active">Ativos</option>
-            <option value="inactive">Inativos</option>
-            <option value="legacy">Legados</option>
-            <option value="all">Todos</option>
-          </select>
-        </label>
+        <SelectField
+          label="Categoria"
+          onChange={setCategorySlug}
+          options={[
+            { value: 'all', label: 'Todas' },
+            ...categories.map((category) => ({ value: category.slug, label: category.name })),
+          ]}
+          value={categorySlug}
+        />
+        <SelectField
+          label="Status"
+          onChange={(value) => setActiveFilter(value as ProductAdminFilter)}
+          options={[
+            { value: 'active', label: 'Ativos' },
+            { value: 'inactive', label: 'Inativos' },
+            { value: 'legacy', label: 'Legados' },
+            { value: 'all', label: 'Todos' },
+          ]}
+          value={activeFilter}
+        />
       </Card>
       <ProductCatalog
         actionLabel={canManageMenu ? 'Catalogo administrativo' : 'Produtos visiveis'}
@@ -1324,21 +1325,23 @@ function ComponentCatalog({
             onChange={(event) => setSearch(event.target.value)}
           />
         </label>
-        <label>
-          <span>Filtro</span>
-          <select value={filter} onChange={(event) => setFilter(event.target.value as ComponentAdminFilter)}>
-            <option value="all">Todos</option>
-            <option value="meat">Carnes</option>
-            <option value="salad">Saladas</option>
-            <option value="hot">Acompanhamentos quentes</option>
-            <option value="extra">Extras</option>
-            <option value="addon">Adicionais</option>
-            <option value="juice_flavor">Bebidas e sabores</option>
-            <option value="active">Ativos</option>
-            <option value="inactive">Inativos</option>
-            <option value="without_days">Sem dia fixo</option>
-          </select>
-        </label>
+        <SelectField
+          label="Filtro"
+          onChange={(value) => setFilter(value as ComponentAdminFilter)}
+          options={[
+            { value: 'all', label: 'Todos' },
+            { value: 'meat', label: 'Carnes' },
+            { value: 'salad', label: 'Saladas' },
+            { value: 'hot', label: 'Acompanhamentos quentes' },
+            { value: 'extra', label: 'Extras' },
+            { value: 'addon', label: 'Adicionais' },
+            { value: 'juice_flavor', label: 'Bebidas e sabores' },
+            { value: 'active', label: 'Ativos' },
+            { value: 'inactive', label: 'Inativos' },
+            { value: 'without_days', label: 'Sem dia fixo' },
+          ]}
+          value={filter}
+        />
       </div>
       {visibleComponents.length > 0 ? (
         <div className="component-admin-grid">
@@ -2169,20 +2172,13 @@ function ComponentForm({
         <input disabled={isMutating} value={form.name} onChange={(event) => updateComponentForm(setForm, 'name', event.target.value)} />
       </label>
       <div className="menu-admin-form-grid">
-        <label>
-          <span>Tipo</span>
-          <select
-            disabled={isMutating}
-            value={form.component_type}
-            onChange={(event) => updateComponentForm(setForm, 'component_type', normalizeComponentType(event.target.value))}
-          >
-            {componentTypes.map((type) => (
-              <option key={type} value={type}>
-                {componentTypeLabels[type]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField
+          disabled={isMutating}
+          label="Tipo"
+          onChange={(value) => updateComponentForm(setForm, 'component_type', normalizeComponentType(value))}
+          options={componentTypes.map((type) => ({ value: type, label: componentTypeLabels[type] }))}
+          value={form.component_type}
+        />
         <label>
           <span>Ordem</span>
           <input
@@ -2232,20 +2228,13 @@ function ComponentDaysForm({
           ser usado apenas em alteracoes de uma data especifica.
         </p>
       </div>
-      <label>
-        <span>Secao do cardapio</span>
-        <select
-          disabled={isMutating}
-          value={form.section}
-          onChange={(event) => setForm((current) => ({ ...current, section: event.target.value as DailyMenuSectionKey }))}
-        >
-          {sectionOrder.map((section) => (
-            <option key={section} value={section}>
-              {sectionLabels[section]}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        disabled={isMutating}
+        label="Seção do cardápio"
+        onChange={(value) => setForm((current) => ({ ...current, section: value as DailyMenuSectionKey }))}
+        options={sectionOrder.map((section) => ({ value: section, label: sectionLabels[section] }))}
+        value={form.section}
+      />
       <fieldset className="menu-admin-choice-group" disabled={isMutating}>
         <legend>Dias da semana</legend>
         {weeklyDayOrder.map((day) => (
@@ -2302,18 +2291,17 @@ function AvailabilityForm({
       <p>
         Alteracao global para <strong>{componentDisplayName(item.component)}</strong> na data selecionada.
       </p>
-      <label>
-        <span>Status</span>
-        <select
-          disabled={isMutating}
-          value={form.status}
-          onChange={(event) => setForm((current) => ({ ...current, status: event.target.value as EffectiveAvailabilityStatus }))}
-        >
-          <option value="sold_out">Esgotado</option>
-          <option value="unavailable">Indisponivel</option>
-          <option value="available">Disponivel</option>
-        </select>
-      </label>
+      <SelectField
+        disabled={isMutating}
+        label="Status"
+        onChange={(value) => setForm((current) => ({ ...current, status: value as EffectiveAvailabilityStatus }))}
+        options={[
+          { value: 'sold_out', label: 'Esgotado' },
+          { value: 'unavailable', label: 'Indisponível' },
+          { value: 'available', label: 'Disponível' },
+        ]}
+        value={form.status}
+      />
       <label>
         <span>Motivo</span>
         <textarea
@@ -2323,23 +2311,20 @@ function AvailabilityForm({
           onChange={(event) => setForm((current) => ({ ...current, reason: event.target.value }))}
         />
       </label>
-      <label>
-        <span>Substituto sugerido</span>
-        <select
-          disabled={isMutating}
-          value={form.replacement_component_id}
-          onChange={(event) => setForm((current) => ({ ...current, replacement_component_id: event.target.value }))}
-        >
-          <option value="">Sem substituto</option>
-          {components
+      <SelectField
+        disabled={isMutating}
+        label="Substituto sugerido"
+        onChange={(value) => setForm((current) => ({ ...current, replacement_component_id: value }))}
+        options={[
+          { value: '', label: 'Sem substituto' },
+          ...components
             .filter((component) => component.id !== item.component.id && component.is_active)
-            .map((component) => (
-              <option key={component.id} value={component.id}>
-                {componentOptionLabel(component)}
-              </option>
-            ))}
-        </select>
-      </label>
+            .map((component) => ({ value: String(component.id), label: componentOptionLabel(component) })),
+        ]}
+        searchable
+        searchPlaceholder="Buscar substituto..."
+        value={form.replacement_component_id}
+      />
     </>
   )
 }
@@ -2374,20 +2359,13 @@ function DailyAdjustmentForm({
 
   return (
     <>
-      <label>
-        <span>Secao</span>
-        <select
-          disabled={isMutating || item !== null}
-          value={form.section}
-          onChange={(event) => setForm((current) => ({ ...current, component_id: '', section: event.target.value as DailyMenuSectionKey }))}
-        >
-          {sectionOrder.map((section) => (
-            <option key={section} value={section}>
-              {sectionLabels[section]}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        disabled={isMutating || item !== null}
+        label="Seção"
+        onChange={(value) => setForm((current) => ({ ...current, component_id: '', section: value as DailyMenuSectionKey }))}
+        options={sectionOrder.map((section) => ({ value: section, label: sectionLabels[section] }))}
+        value={form.section}
+      />
       <label>
         <span>Buscar componente</span>
         <input
@@ -2397,36 +2375,32 @@ function DailyAdjustmentForm({
           onChange={(event) => setForm((current) => ({ ...current, search: event.target.value }))}
         />
       </label>
-      <label>
-        <span>Componente</span>
-        <select
-          disabled={isMutating || item !== null}
-          value={form.component_id}
-          onChange={(event) => setForm((current) => ({ ...current, component_id: event.target.value }))}
-        >
-          <option value="">Selecione</option>
-          {selectableComponents.map((component) => (
-            <option key={component.id} value={component.id}>
-              {componentOptionLabel(component)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        disabled={isMutating || item !== null}
+        label="Componente"
+        onChange={(value) => setForm((current) => ({ ...current, component_id: value }))}
+        options={[
+          { value: '', label: 'Selecione' },
+          ...selectableComponents.map((component) => ({ value: String(component.id), label: componentOptionLabel(component) })),
+        ]}
+        searchable
+        searchPlaceholder="Buscar componente..."
+        value={form.component_id}
+      />
       {selectableComponents.length === 0 && item === null ? (
         <p className="muted-text">Nenhum componente ativo encontrado para esta secao e busca.</p>
       ) : null}
       <div className="menu-admin-form-grid">
-        <label>
-          <span>Acao</span>
-          <select
-            disabled={isMutating}
-            value={form.action}
-            onChange={(event) => setForm((current) => ({ ...current, action: event.target.value as DailyMenuAdjustmentAction }))}
-          >
-            <option value="include">Incluir somente nesta data</option>
-            <option value="exclude">Ocultar somente nesta data</option>
-          </select>
-        </label>
+        <SelectField
+          disabled={isMutating}
+          label="Ação"
+          onChange={(value) => setForm((current) => ({ ...current, action: value as DailyMenuAdjustmentAction }))}
+          options={[
+            { value: 'include', label: 'Incluir somente nesta data' },
+            { value: 'exclude', label: 'Ocultar somente nesta data' },
+          ]}
+          value={form.action}
+        />
       </div>
       <label>
         <span>Ordem</span>
@@ -2466,50 +2440,33 @@ function WeeklyItemForm({
 }) {
   return (
     <>
-      <label>
-        <span>Componente</span>
-        <select
-          disabled={isMutating || isEditing}
-          value={form.component_id}
-          onChange={(event) => setForm((current) => ({ ...current, component_id: event.target.value }))}
-        >
-          <option value="">Selecione</option>
-          {components.map((component) => (
-            <option key={component.id} value={component.id}>
-              {componentOptionLabel(component)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SelectField
+        disabled={isMutating || isEditing}
+        label="Componente"
+        onChange={(value) => setForm((current) => ({ ...current, component_id: value }))}
+        options={[
+          { value: '', label: 'Selecione' },
+          ...components.map((component) => ({ value: String(component.id), label: componentOptionLabel(component) })),
+        ]}
+        searchable
+        searchPlaceholder="Buscar componente..."
+        value={form.component_id}
+      />
       <div className="menu-admin-form-grid">
-        <label>
-          <span>Dia</span>
-          <select
-            disabled={isMutating}
-            value={form.service_day}
-            onChange={(event) => setForm((current) => ({ ...current, service_day: event.target.value as WeeklyMenuServiceDayKey }))}
-          >
-            {weeklyDayOrder.map((day) => (
-              <option key={day} value={day}>
-                {serviceDayLabels[day]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Secao</span>
-          <select
-            disabled={isMutating}
-            value={form.section}
-            onChange={(event) => setForm((current) => ({ ...current, section: event.target.value as DailyMenuSectionKey }))}
-          >
-            {sectionOrder.map((section) => (
-              <option key={section} value={section}>
-                {sectionLabels[section]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField
+          disabled={isMutating}
+          label="Dia"
+          onChange={(value) => setForm((current) => ({ ...current, service_day: value as WeeklyMenuServiceDayKey }))}
+          options={weeklyDayOrder.map((day) => ({ value: day, label: serviceDayLabels[day] }))}
+          value={form.service_day}
+        />
+        <SelectField
+          disabled={isMutating}
+          label="Seção"
+          onChange={(value) => setForm((current) => ({ ...current, section: value as DailyMenuSectionKey }))}
+          options={sectionOrder.map((section) => ({ value: section, label: sectionLabels[section] }))}
+          value={form.section}
+        />
       </div>
       <label>
         <span>Ordem</span>

@@ -28,7 +28,8 @@ class ConversationSeeder extends Seeder
             [
                 'name' => 'Cliente Exemplo',
                 'phone' => null,
-                'notes' => 'Cliente ficticio para seed local.',
+                'source_channel' => Customer::SOURCE_CHANNEL_DEMO,
+                'notes' => 'Cliente fictício para seed local.',
             ],
         );
 
@@ -51,7 +52,7 @@ class ConversationSeeder extends Seeder
                 'type' => 'text',
             ],
             [
-                'content' => 'Ola, gostaria de fazer um pedido.',
+                'content' => 'Olá, gostaria de fazer um pedido.',
             ],
         );
     }

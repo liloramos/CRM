@@ -46,7 +46,7 @@ class AppSessionController extends Controller
 
         if (! Auth::attempt($credentials, $remember)) {
             throw ValidationException::withMessages([
-                'email' => ['Credenciais invalidas para este ambiente.'],
+                'email' => ['Credenciais inválidas para este ambiente.'],
             ]);
         }
 

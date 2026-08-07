@@ -146,6 +146,10 @@ class OrderOperationsController extends Controller
             'structured_options.*.component_link_id' => ['nullable', 'integer'],
             'structured_options.*.product_link_id' => ['nullable', 'integer'],
             'structured_options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            'included_component_ids' => ['sometimes', 'array'],
+            'included_component_ids.*' => ['integer'],
+            'removed_component_ids' => ['sometimes', 'array'],
+            'removed_component_ids.*' => ['integer'],
             'meat_mode' => ['nullable', 'string', 'in:traditional,beef_only'],
             'traditional_meat_component_ids' => ['sometimes', 'array'],
             'traditional_meat_component_ids.*' => ['integer'],
@@ -173,11 +177,15 @@ class OrderOperationsController extends Controller
                         'extra_beef_quantity' => $this->additionQuantity($validated['additions'] ?? [], 'extra_beef'),
                     ],
                     (int) $validated['quantity'],
+                    [
+                        'included_component_ids' => $validated['included_component_ids'] ?? [],
+                        'removed_component_ids' => $validated['removed_component_ids'] ?? [],
+                    ],
                 );
 
                 $validated['options'] = $selection['options'];
 
-                foreach (['unit_price_cents', 'selected_components'] as $key) {
+                foreach (['unit_price_cents', 'selected_components', 'removed_ingredients'] as $key) {
                     if (array_key_exists($key, $selection)) {
                         $validated[$key] = $selection[$key];
                     }

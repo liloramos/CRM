@@ -22,7 +22,7 @@ class ConversationPresenter
     public function conversation(Conversation $conversation): array
     {
         $conversation->loadMissing([
-            'customer',
+            'customer.addresses',
             'assignedUser',
             'manualTakeoverBy',
             'activeOrder.payerCustomer',
@@ -31,6 +31,7 @@ class ConversationPresenter
             'activeOrder.latestPrintJob',
             'activeOrder.payments.proofs',
             'messages.mediaFiles',
+            'messages.whatsappMessageDeliveries',
             'whatsappMessageDeliveries',
             'alerts.payment',
             'alerts.paymentProof',
@@ -103,6 +104,10 @@ class ConversationPresenter
      */
     private function message(Message $message): array
     {
+        $delivery = $message->relationLoaded('whatsappMessageDeliveries')
+            ? $message->whatsappMessageDeliveries->sortByDesc('id')->first()
+            : null;
+
         return [
             'id' => (string) $message->id,
             'sender' => $this->senderFor($message),
@@ -112,6 +117,10 @@ class ConversationPresenter
             'timeLabel' => $message->created_at?->format('H:i') ?? '',
             'createdAt' => $message->created_at?->toIso8601String(),
             'status' => $message->delivery_status ?: 'received',
+            'errorMessage' => $message->delivery_status === 'failed' ? $delivery?->error_message : null,
+            'errorCode' => $message->delivery_status === 'failed'
+                ? ($message->error_code ?: data_get($delivery?->safe_payload, 'error_code'))
+                : null,
             'media' => $message->mediaFiles
                 ->map(fn (WhatsAppMediaFile $media): array => [
                     'id' => (string) $media->id,
@@ -143,11 +152,19 @@ class ConversationPresenter
     private function customer(Conversation $conversation): array
     {
         $customer = $conversation->customer;
+        $customer?->loadMissing('addresses');
+        $defaultAddress = $customer?->addresses->firstWhere('is_default', true) ?? $customer?->addresses->first();
 
         return [
             'id' => (string) $customer->id,
             'name' => $customer->name,
             'phoneLabel' => $customer->phone ?: $conversation->whatsapp_identifier ?: 'Sem telefone cadastrado',
+            'phone' => $customer->phone,
+            'email' => $customer->email,
+            'whatsappId' => $customer->whatsapp_id,
+            'whatsappProfileName' => $customer->whatsapp_profile_name,
+            'sourceChannel' => $customer->source_channel,
+            'lastWhatsappAt' => $customer->last_whatsapp_at?->toIso8601String(),
             'tags' => array_values(array_filter([
                 'WhatsApp',
                 $customer->source_channel === 'whatsapp' ? 'Criado pelo WhatsApp' : null,
@@ -155,6 +172,14 @@ class ConversationPresenter
             'creditBalance' => round(((int) $customer->credit_balance_cents) / 100, 2),
             'notes' => $customer->notes ? [$customer->notes] : [],
             'preferences' => [],
+            'address' => $defaultAddress ? [
+                'street' => $defaultAddress->street,
+                'number' => $defaultAddress->number,
+                'complement' => $defaultAddress->complement,
+                'neighborhood' => $defaultAddress->neighborhood,
+                'city' => $defaultAddress->city,
+                'reference' => $defaultAddress->reference,
+            ] : null,
         ];
     }
 

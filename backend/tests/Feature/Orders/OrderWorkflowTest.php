@@ -319,19 +319,94 @@ class OrderWorkflowTest extends TestCase
             ->json('data');
 
         $this->assertSame((string) $order->id, $data['id']);
-        $this->assertCount(6, $data['items'][0]['additions']);
-        $this->assertContains('Arroz', $data['items'][0]['additions']);
-        $this->assertContains('Mandioca', $data['items'][0]['additions']);
-        $this->assertContains('Beterraba', $data['items'][0]['additions']);
-        $this->assertContains('Porco', $data['items'][0]['additions']);
-        $this->assertNotContains('Repolho com tomate', $data['items'][0]['additions']);
-        $this->assertNotContains('Vinagrete', $data['items'][0]['additions']);
+        $this->assertCount(6, $data['items'][0]['composition']);
+        $this->assertContains('Arroz', $data['items'][0]['composition']);
+        $this->assertContains('Mandioca', $data['items'][0]['composition']);
+        $this->assertContains('Beterraba', $data['items'][0]['composition']);
+        $this->assertContains('Porco', $data['items'][0]['composition']);
+        $this->assertNotContains('Repolho com tomate', $data['items'][0]['composition']);
+        $this->assertNotContains('Vinagrete', $data['items'][0]['composition']);
+        $this->assertSame([], $data['items'][0]['removals']);
+        $this->assertSame([], $data['items'][0]['additions']);
         $this->assertSame(6, $order->refresh()->items()->firstOrFail()->options()->count());
         $this->assertDatabaseHas('order_item_options', [
             'name' => 'Porco',
             'group_code' => 'carne',
             'quantity' => 1,
         ]);
+    }
+
+    public function test_structured_order_item_persists_default_component_removals(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $arroz = $this->menuComponentId($company, 'arroz');
+        $mandioca = $this->menuComponentId($company, 'mandioca');
+        $feijao = $this->menuComponentId($company, 'feijao');
+        $macarrao = $this->menuComponentId($company, 'macarrao');
+
+        $data = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'included_component_ids' => [$arroz, $mandioca],
+                'removed_component_ids' => [$feijao, $macarrao],
+                'structured_options' => $this->componentChoiceRows($product, [
+                    'salada_casa' => ['beterraba'],
+                    'carne' => ['porco'],
+                ]),
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+
+        $this->assertContains('Arroz', $data['composition']);
+        $this->assertContains('Mandioca', $data['composition']);
+        $this->assertContains('Beterraba', $data['composition']);
+        $this->assertContains('Porco', $data['composition']);
+        $this->assertNotContains('Feijão', $data['composition']);
+        $this->assertNotContains('Macarrão', $data['composition']);
+        $this->assertContains('Sem Feijão', $data['removals']);
+        $this->assertContains('Sem Macarrão', $data['removals']);
+        $this->assertDatabaseHas('order_items', [
+            'order_id' => $order->id,
+            'product_id' => $product->id,
+        ]);
+        $this->assertDatabaseMissing('order_item_options', [
+            'order_item_id' => $order->refresh()->items()->firstOrFail()->id,
+            'name' => 'Feijão',
+        ]);
+    }
+
+    public function test_structured_order_item_rejects_removal_outside_default_composition(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $beterraba = $this->menuComponentId($company, 'beterraba');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'removed_component_ids' => [$beterraba],
+                'structured_options' => $this->componentChoiceRows($product, [
+                    'salada_casa' => ['beterraba'],
+                    'carne' => ['porco'],
+                ]),
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['removed_component_ids']);
     }
 
     public function test_structured_order_item_endpoint_rejects_missing_required_and_excess_choices(): void
@@ -470,8 +545,8 @@ class OrderWorkflowTest extends TestCase
 
         $this->assertSame(16, $traditional['unitPrice']);
         $this->assertSame(16, $traditional['totalPrice']);
-        $this->assertContains('Porco', $traditional['additions']);
-        $this->assertContains('Frango ao molho', $traditional['additions']);
+        $this->assertContains('Porco', $traditional['composition']);
+        $this->assertContains('Frango ao molho', $traditional['composition']);
 
         $beefOnly = $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
@@ -486,7 +561,7 @@ class OrderWorkflowTest extends TestCase
 
         $this->assertSame(20, $beefOnly['unitPrice']);
         $this->assertSame(20, $beefOnly['totalPrice']);
-        $this->assertContains('Somente bife', $beefOnly['additions']);
+        $this->assertContains('Somente bife', $beefOnly['composition']);
 
         $withExtraBeef = $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
@@ -634,7 +709,7 @@ class OrderWorkflowTest extends TestCase
             ->json('data.items.1');
 
         $this->assertSame(22, $beefOnly['unitPrice']);
-        $this->assertContains('Somente bife', $beefOnly['additions']);
+        $this->assertContains('Somente bife', $beefOnly['composition']);
 
         $withExtraBeef = $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [

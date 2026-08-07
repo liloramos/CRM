@@ -1,0 +1,39 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "safe-business-account-id",
+      "changes": [
+        {
+          "field": "messages",
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "15550000002",
+              "phone_number_id": "fake-phone-number-id"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Contato Sanitizado"
+                },
+                "wa_id": "15550000001"
+              }
+            ],
+            "messages": [
+              {
+                "from": "15550000001",
+                "id": "wamid.fixture-inbound-message",
+                "timestamp": "1780000000",
+                "text": {
+                  "body": "Mensagem inbound sanitizada."
+                },
+                "type": "text"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

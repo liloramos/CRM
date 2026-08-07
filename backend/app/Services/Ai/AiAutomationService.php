@@ -10,6 +10,7 @@ use App\Models\AiResponseSuggestion;
 use App\Models\AutomationEvent;
 use App\Models\Company;
 use App\Models\Conversation;
+use App\Models\ConversationQuickReply;
 use App\Models\Message;
 use App\Models\User;
 use DomainException;
@@ -162,6 +163,21 @@ class AiAutomationService
                         'allow_auto_send' => $setting->allow_auto_send,
                         'require_human_confirmation_for_ambiguous' => $setting->require_human_confirmation_for_ambiguous,
                         'require_human_confirmation_for_payments' => $setting->require_human_confirmation_for_payments,
+                        'conversation_style' => data_get($setting->settings, 'conversation_style', []),
+                        'approved_quick_replies' => ConversationQuickReply::query()
+                            ->where('company_id', $company->id)
+                            ->where('is_active', true)
+                            ->orderBy('display_order')
+                            ->orderBy('title')
+                            ->limit(30)
+                            ->get(['title', 'shortcut', 'body', 'category'])
+                            ->map(fn (ConversationQuickReply $reply): array => [
+                                'title' => $reply->title,
+                                'shortcut' => $reply->shortcut,
+                                'body' => $reply->body,
+                                'category' => $reply->category,
+                            ])
+                            ->all(),
                     ],
                     metadata: ['requested_from' => $attributes['requested_from'] ?? 'operational'],
                 ))

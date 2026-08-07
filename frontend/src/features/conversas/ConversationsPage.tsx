@@ -1,17 +1,42 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Badge } from '../../components/ui/Badge'
-import { Button } from '../../components/ui/Button'
+import { Button, IconButton } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
+import { Icon } from '../../components/ui/Icon'
+import { Modal } from '../../components/ui/Modal'
 import { EmptyState } from '../../components/ui/States'
-import { Tabs } from '../../components/ui/Tabs'
-import { conversationModeConfig } from '../../constants/status'
-import type { Conversation, ConversationAlert, ConversationMessage, Order } from '../../types/crm'
+import { CustomerEditor } from '../clientes/CustomerEditor'
+import { getConversationQuickReplies, type UpdateCustomerPayload } from '../../services/crm.service'
+import type {
+  BadgeTone,
+  Conversation,
+  ConversationAlert,
+  ConversationMessage,
+  ConversationQuickReply,
+  CustomerSummary,
+  Order,
+} from '../../types/crm'
 import { formatCurrency, initialsFromName } from '../../utils/formatters'
+import { ConversationConfigurationModal } from './ConversationConfigurationModal'
+import { quickReplyCategoryLabel } from './conversationLabels'
+import './ConversationsPage.css'
 
 type ConversationFilter = 'all' | 'unread' | 'alerts' | 'manual' | 'automatic'
+type ConversationPanel = 'list' | 'chat' | 'details'
+type ConversationToastTone = 'info' | 'success' | 'warning' | 'error'
+type AlertSeverityFilter = 'all' | ConversationAlert['severity']
+
+type ConversationToast = {
+  id: string
+  deduplicationKey: string
+  message: string
+  tone: ConversationToastTone
+}
+
+const CONVERSATION_CUSTOMER_FORM_ID = 'conversation-customer-editor'
 
 type ConversationsPageProps = {
   alerts: ConversationAlert[]
@@ -31,7 +56,9 @@ type ConversationsPageProps = {
   onRejectPayment: (conversationId: string, proofId: string, reason: string) => Promise<void>
   onResolveAlert: (conversationId: string, alertId: string) => void
   onSelectConversation: (conversationId: string) => void
-  onSendMessage: (conversationId: string, body: string) => Promise<void>
+  onRetryMessage: (conversationId: string, messageId: string) => Promise<void>
+  onSendMessage: (conversationId: string, body: string, clientReference: string) => Promise<void>
+  onUpdateCustomer: (customerId: string, payload: UpdateCustomerPayload) => Promise<void>
 }
 
 export function ConversationsPage({
@@ -50,17 +77,42 @@ export function ConversationsPage({
   onRejectPayment,
   onResolveAlert,
   onSelectConversation,
+  onRetryMessage,
   onSendMessage,
+  onUpdateCustomer,
   selectedConversation,
   syncLabel,
 }: ConversationsPageProps) {
   const [activeFilter, setActiveFilter] = useState<ConversationFilter>('all')
+  const [activePanel, setActivePanel] = useState<ConversationPanel>('list')
+  const [isContextOpen, setIsContextOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [composerBody, setComposerBody] = useState('')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentRejectReason, setPaymentRejectReason] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+  const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null)
+  const [customerError, setCustomerError] = useState<string | null>(null)
+  const [isSavingCustomer, setIsSavingCustomer] = useState(false)
+  const [quickReplies, setQuickReplies] = useState<ConversationQuickReply[]>([])
+  const [quickReplySearch, setQuickReplySearch] = useState('')
+  const [isQuickReplyOpen, setIsQuickReplyOpen] = useState(false)
+  const [isConfigurationOpen, setIsConfigurationOpen] = useState(false)
+  const [alertSeverityFilter, setAlertSeverityFilter] = useState<AlertSeverityFilter>('all')
+  const [toasts, setToasts] = useState<ConversationToast[]>([])
+  const [soundEnabled, setSoundEnabled] = useState(() => readBooleanPreference('conversation-sound-enabled'))
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(() => (
+    readBooleanPreference('conversation-browser-notifications')
+      && typeof Notification !== 'undefined'
+      && Notification.permission === 'granted'
+  ))
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const clientReferenceRef = useRef<string | null>(null)
+  const knownNotificationEventsRef = useRef<Set<string>>(new Set())
+  const notificationsInitializedRef = useRef(false)
+  const contextPanelRef = useRef<HTMLElement>(null)
+  const contextTriggerRef = useRef<HTMLElement | null>(null)
 
   const filteredConversations = useMemo(() => {
     const needle = normalize(search)
@@ -80,25 +132,164 @@ export function ConversationsPage({
       }
 
       if (activeFilter === 'alerts') {
-        return (conversation.alerts ?? []).some((alert) => alert.status !== 'resolved')
+        return hasOpenAlerts(conversation)
       }
 
       if (activeFilter === 'manual') {
-        return conversation.automationMode === 'manual' || conversation.mode === 'manual' || conversation.mode === 'atencao'
+        return isManualConversation(conversation)
       }
 
       if (activeFilter === 'automatic') {
-        return conversation.automationMode !== 'manual' && conversation.mode === 'ia'
+        return isAutomaticConversation(conversation)
       }
 
       return true
     })
   }, [activeFilter, conversations, search])
 
-  const selectedMode = selectedConversation ? conversationModeConfig[selectedConversation.mode] : conversationModeConfig.manual
   const activeAlerts = (selectedConversation?.alerts ?? []).filter((alert) => alert.status !== 'resolved')
+  const bannerAlert = selectBannerAlert(activeAlerts)
+  const filteredActiveAlerts = activeAlerts.filter((alert) => (
+    alertSeverityFilter === 'all' || alert.severity === alertSeverityFilter
+  ))
   const review = selectedConversation?.paymentReview ?? null
   const defaultPaymentAmount = review?.amountCents ? review.amountCents / 100 : review?.expectedTotal
+  const selectedMode = selectedConversation ? modePresentation(selectedConversation) : null
+  const selectedIsManual = selectedConversation ? isManualConversation(selectedConversation) : false
+
+  const filterItems: Array<{ key: ConversationFilter; label: string; count: number }> = [
+    { key: 'all', label: 'Todas', count: conversations.length },
+    { key: 'unread', label: 'Não lidas', count: conversations.reduce((sum, item) => sum + item.unread, 0) },
+    { key: 'alerts', label: 'Alertas', count: conversations.filter(hasOpenAlerts).length },
+    { key: 'manual', label: 'Manual', count: conversations.filter(isManualConversation).length },
+    { key: 'automatic', label: 'Automático', count: conversations.filter(isAutomaticConversation).length },
+  ]
+
+  const addToast = useCallback((message: string, tone: ConversationToastTone, deduplicationKey: string) => {
+    setToasts((current) => {
+      if (current.some((toast) => toast.deduplicationKey === deduplicationKey)) {
+        return current
+      }
+
+      return [...current, {
+        id: createClientReference(),
+        deduplicationKey,
+        message,
+        tone,
+      }].slice(-4)
+    })
+  }, [])
+
+  const dismissToast = useCallback((toastId: string) => {
+    setToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    void getConversationQuickReplies()
+      .then((replies) => {
+        if (active) {
+          setQuickReplies(replies.filter((reply) => reply.isActive))
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setQuickReplies([])
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (toasts.length === 0) {
+      return undefined
+    }
+
+    const timeout = window.setTimeout(() => {
+      setToasts((current) => current.slice(1))
+    }, 5200)
+
+    return () => window.clearTimeout(timeout)
+  }, [toasts])
+
+  useEffect(() => {
+    const nextEvents = collectNotificationEvents(conversations)
+    const knownEvents = knownNotificationEventsRef.current
+
+    if (!notificationsInitializedRef.current) {
+      nextEvents.forEach((event) => knownEvents.add(event.key))
+      notificationsInitializedRef.current = true
+      return
+    }
+
+    nextEvents.forEach((event) => {
+      if (knownEvents.has(event.key)) {
+        return
+      }
+
+      knownEvents.add(event.key)
+      addToast(event.message, event.tone, event.key)
+
+      const conversationIsOpen = document.visibilityState === 'visible'
+        && selectedConversation?.id === event.conversationId
+
+      if (browserNotificationsEnabled && !conversationIsOpen && typeof Notification !== 'undefined') {
+        new Notification('Conversas WhatsApp', { body: event.message, tag: event.key })
+      }
+
+      if (soundEnabled && !conversationIsOpen) {
+        playNotificationSound()
+      }
+    })
+  }, [addToast, browserNotificationsEnabled, conversations, selectedConversation?.id, soundEnabled])
+
+  useEffect(() => {
+    if (!isContextOpen) {
+      return undefined
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsContextOpen(false)
+        setActivePanel((current) => (current === 'details' ? 'chat' : current))
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isContextOpen])
+
+  useEffect(() => {
+    if (!isContextOpen) {
+      return
+    }
+
+    window.requestAnimationFrame(() => contextPanelRef.current?.focus())
+  }, [isContextOpen])
+
+  function handleSelectConversation(conversationId: string) {
+    onSelectConversation(conversationId)
+    setActivePanel('chat')
+    setLocalError(null)
+  }
+
+  function handleOpenContext(event?: { currentTarget?: EventTarget | null }) {
+    if (event?.currentTarget instanceof HTMLElement) {
+      contextTriggerRef.current = event.currentTarget
+    }
+    setActivePanel('details')
+    setIsContextOpen(true)
+  }
+
+  function handleCloseContext() {
+    setIsContextOpen(false)
+    setActivePanel((current) => (current === 'details' ? 'chat' : current))
+    window.requestAnimationFrame(() => contextTriggerRef.current?.focus())
+  }
 
   async function handleSubmitMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -116,10 +307,30 @@ export function ConversationsPage({
     }
 
     try {
-      await onSendMessage(selectedConversation.id, body)
+      const clientReference = clientReferenceRef.current ?? createClientReference()
+      clientReferenceRef.current = clientReference
+      await onSendMessage(selectedConversation.id, body, clientReference)
+      clientReferenceRef.current = null
       setComposerBody('')
+      setIsQuickReplyOpen(false)
+    } catch (sendError) {
+      setLocalError(sendError instanceof Error
+        ? sendError.message
+        : 'A mensagem não foi enviada. O texto foi mantido para nova tentativa.')
+    }
+  }
+
+  async function handleRetryMessage(messageId: string) {
+    if (!selectedConversation) {
+      return
+    }
+
+    setLocalError(null)
+
+    try {
+      await onRetryMessage(selectedConversation.id, messageId)
     } catch {
-      setLocalError('A mensagem nao foi enviada. O texto foi mantido para nova tentativa.')
+      setLocalError('Não foi possível reenviar a mensagem agora.')
     }
   }
 
@@ -156,75 +367,228 @@ export function ConversationsPage({
     setPaymentRejectReason('')
   }
 
+  function handleReturnToAutomatic() {
+    if (!selectedConversation) {
+      return
+    }
+
+    const confirmed = window.confirm('Devolver esta conversa para o atendimento automático?')
+    if (confirmed) {
+      void onChangeMode(selectedConversation.id, 'assisted')
+    }
+  }
+
+  async function handleSaveCustomer(payload: UpdateCustomerPayload) {
+    if (!editingCustomer) {
+      return
+    }
+
+    setCustomerError(null)
+    setIsSavingCustomer(true)
+
+    try {
+      await onUpdateCustomer(editingCustomer.id, payload)
+      setEditingCustomer(null)
+    } catch (error) {
+      setCustomerError(error instanceof Error ? error.message : 'Não foi possível atualizar o cliente.')
+    } finally {
+      setIsSavingCustomer(false)
+    }
+  }
+
+  function handleComposerChange(value: string) {
+    if (value !== composerBody) {
+      clientReferenceRef.current = null
+    }
+
+    setComposerBody(value)
+    setLocalError(null)
+  }
+
+  function handleInsertQuickReply(reply: ConversationQuickReply) {
+    const separator = composerBody.trim() === '' ? '' : '\n'
+    handleComposerChange(`${composerBody}${separator}${reply.body}`)
+    setIsQuickReplyOpen(false)
+    setQuickReplySearch('')
+    window.requestAnimationFrame(() => composerRef.current?.focus())
+  }
+
+  async function handleToggleBrowserNotifications() {
+    if (typeof Notification === 'undefined') {
+      addToast('Este navegador não oferece notificações do sistema.', 'warning', 'notification-api-unavailable')
+      return
+    }
+
+    if (browserNotificationsEnabled) {
+      setBrowserNotificationsEnabled(false)
+      writeBooleanPreference('conversation-browser-notifications', false)
+      addToast('Notificações do navegador desativadas.', 'info', `browser-notifications-off:${Date.now()}`)
+      return
+    }
+
+    const permission = await Notification.requestPermission()
+    const enabled = permission === 'granted'
+    setBrowserNotificationsEnabled(enabled)
+    writeBooleanPreference('conversation-browser-notifications', enabled)
+    addToast(
+      enabled ? 'Notificações do navegador ativadas.' : 'Permissão de notificação não concedida.',
+      enabled ? 'success' : 'warning',
+      `browser-notifications:${permission}`,
+    )
+  }
+
+  function handleToggleSound() {
+    const enabled = !soundEnabled
+    setSoundEnabled(enabled)
+    writeBooleanPreference('conversation-sound-enabled', enabled)
+    if (enabled) {
+      playNotificationSound()
+    }
+    addToast(
+      enabled ? 'Som de novas conversas ativado.' : 'Som de novas conversas desativado.',
+      'info',
+      `conversation-sound:${enabled}:${Date.now()}`,
+    )
+  }
+
+  const visibleQuickReplies = quickReplies.filter((reply) => {
+    const needle = normalize(quickReplySearch)
+    return needle === ''
+      || normalize(reply.title).includes(needle)
+      || normalize(reply.shortcut).includes(needle)
+      || normalize(reply.body).includes(needle)
+  })
+
   return (
     <PageContainer density="wide">
-      <PageHeader
-        actions={
-          <div className="conversation-header-actions">
-            <Button icon="refresh" onClick={onRefresh} variant="secondary">
-              Atualizar
-            </Button>
-            <Button icon="orders" onClick={onOpenOrders} variant="secondary">
-              Abrir Pedidos
-            </Button>
-          </div>
-        }
-        description={syncLabel ? `Atualizado as ${syncLabel}. Atendimento com IA assistida, controle manual e revisao humana de pagamentos.` : 'Atendimento com IA assistida, controle manual e revisao humana de pagamentos.'}
-        title="Conversas WhatsApp"
-      />
+      <div className="conversation-page">
+        <PageHeader
+          actions={
+            <div className="conversation-header-actions">
+              {syncLabel ? <span className="conversation-sync-label">Atualizado às {syncLabel}</span> : null}
+              <Button icon="orders" onClick={onOpenOrders} variant="secondary">
+                Abrir pedidos
+              </Button>
+              <IconButton
+                className={browserNotificationsEnabled ? 'is-active' : ''}
+                icon="bell"
+                label={browserNotificationsEnabled ? 'Desativar notificações' : 'Ativar notificações'}
+                onClick={() => void handleToggleBrowserNotifications()}
+                variant="ghost"
+              />
+              <IconButton
+                className={soundEnabled ? 'is-active' : ''}
+                icon={soundEnabled ? 'sound' : 'sound-off'}
+                label={soundEnabled ? 'Desativar som' : 'Ativar som'}
+                onClick={handleToggleSound}
+                variant="ghost"
+              />
+              <IconButton
+                icon="settings"
+                label="Configurar atendimento"
+                onClick={() => setIsConfigurationOpen(true)}
+                variant="ghost"
+              />
+              <IconButton disabled={isLoading} icon="refresh" label="Atualizar conversas" onClick={onRefresh} variant="ghost" />
+            </div>
+          }
+          description="Atendimento automático e manual em um só lugar."
+          title="Conversas WhatsApp"
+        />
 
-      {error || localError ? (
+      {error ? (
         <div className="conversation-error" role="alert">
-          {error ?? localError}
+          {error}
         </div>
       ) : null}
 
-      <div className="conversation-workspace" aria-busy={isLoading}>
-        <Card className="conversation-list-card">
+      <div className="conversation-mobile-nav" aria-label="Áreas de conversas">
+        <button className={activePanel === 'list' ? 'is-active' : ''} onClick={() => setActivePanel('list')} type="button">
+          Conversas
+        </button>
+        <button className={activePanel === 'chat' ? 'is-active' : ''} disabled={!selectedConversation} onClick={() => setActivePanel('chat')} type="button">
+          Chat
+        </button>
+        <button className={activePanel === 'details' ? 'is-active' : ''} disabled={!selectedConversation} onClick={handleOpenContext} type="button">
+          Detalhes
+        </button>
+      </div>
+
+      <div
+        aria-busy={isLoading}
+        className={`conversation-workspace conversation-workspace--${activePanel} ${isContextOpen ? 'has-context-open' : ''}`}
+      >
+        <Card className="conversation-list-panel">
+          <div className="conversation-list-panel__header">
+            <div>
+              <span className="eyebrow">Caixa de entrada</span>
+              <h2>Conversas</h2>
+            </div>
+            {alerts.length > 0 ? <Badge tone="danger" size="sm">{`${alerts.length} alertas`}</Badge> : null}
+          </div>
+
           <div className="conversation-search">
             <label htmlFor="conversation-search">Buscar conversa</label>
-            <input
-              id="conversation-search"
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Nome ou telefone"
-              type="search"
-              value={search}
-            />
+            <div className="conversation-search__field">
+              <Icon name="search" size={16} />
+              <input
+                id="conversation-search"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar por nome ou telefone"
+                type="search"
+                value={search}
+              />
+            </div>
           </div>
-          <Tabs
-            active={activeFilter}
-            onChange={(key) => setActiveFilter(key as ConversationFilter)}
-            tabs={[
-              { key: 'all', label: 'Todas', count: conversations.length },
-              { key: 'unread', label: 'Nao lidas', count: conversations.reduce((sum, item) => sum + item.unread, 0) },
-              { key: 'alerts', label: 'Alertas', count: conversations.filter((item) => (item.alerts ?? []).some((alert) => alert.status !== 'resolved')).length },
-              { key: 'manual', label: 'Manual', count: conversations.filter((item) => item.automationMode === 'manual' || item.mode === 'manual' || item.mode === 'atencao').length },
-              { key: 'automatic', label: 'IA', count: conversations.filter((item) => item.automationMode !== 'manual' && item.mode === 'ia').length },
-            ]}
-          />
-          <div className="conversation-list">
-            {filteredConversations.map((conversation) => (
+
+          <div className="conversation-filter-grid" role="tablist" aria-label="Filtros de conversa">
+            {filterItems.map((filter) => (
               <button
-                className={selectedConversation?.id === conversation.id ? 'conversation-item is-active' : 'conversation-item'}
-                key={conversation.id}
-                onClick={() => onSelectConversation(conversation.id)}
+                aria-selected={activeFilter === filter.key}
+                className={activeFilter === filter.key ? 'conversation-filter is-active' : 'conversation-filter'}
+                key={filter.key}
+                onClick={() => setActiveFilter(filter.key)}
+                role="tab"
                 type="button"
               >
-                <span className="avatar">{initialsFromName(conversation.customer.name)}</span>
-                <span className="conversation-item__content">
-                  <strong>{conversation.customer.name}</strong>
-                  <small>{conversation.customer.phoneLabel}</small>
-                  <span>{conversation.lastMessage}</span>
-                </span>
-                <span className="conversation-item__badges">
-                  {conversation.unread > 0 ? <Badge tone="brand" size="sm">{`${conversation.unread}`}</Badge> : null}
-                  {(conversation.alerts ?? []).some((alert) => alert.status !== 'resolved') ? <Badge tone="danger" size="sm">Alerta</Badge> : null}
-                  <Badge tone={conversationModeConfig[conversation.mode]?.tone ?? 'neutral'} size="sm">
-                    {conversationModeConfig[conversation.mode]?.label ?? conversation.statusLabel}
-                  </Badge>
-                </span>
+                <span>{filter.label}</span>
+                <strong>{filter.count}</strong>
               </button>
             ))}
+          </div>
+
+          <div className="conversation-list" role="list">
+            {filteredConversations.map((conversation) => {
+              const presentation = modePresentation(conversation)
+              const isActive = selectedConversation?.id === conversation.id
+              const openAlerts = openAlertCount(conversation)
+
+              return (
+                <button
+                  className={isActive ? 'conversation-item is-active' : 'conversation-item'}
+                  key={conversation.id}
+                  onClick={() => handleSelectConversation(conversation.id)}
+                  role="listitem"
+                  title={`${conversation.customer.name} - ${conversation.customer.phoneLabel}`}
+                  type="button"
+                >
+                  <span className="avatar">{initialsFromName(conversation.customer.name)}</span>
+                  <span className="conversation-item__content">
+                    <span className="conversation-item__top">
+                      <strong>{conversation.customer.name}</strong>
+                      <time>{formatConversationTime(conversation.lastMessageAt)}</time>
+                    </span>
+                    <small>{conversation.customer.phoneLabel || 'Sem telefone cadastrado'}</small>
+                    <span className="conversation-item__preview">{conversation.lastMessage}</span>
+                    <span className="conversation-item__badges">
+                      {conversation.unread > 0 ? <Badge tone="brand" size="sm">{`${conversation.unread} não lida${conversation.unread > 1 ? 's' : ''}`}</Badge> : null}
+                      {openAlerts > 0 ? <Badge tone="danger" size="sm">{`${openAlerts} alerta${openAlerts > 1 ? 's' : ''}`}</Badge> : null}
+                      <Badge tone={presentation.tone} size="sm">{presentation.label}</Badge>
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
           </div>
           {filteredConversations.length === 0 ? (
             <EmptyState description="Nenhuma conversa encontrada para este filtro." title="Sem conversas" />
@@ -235,80 +599,152 @@ export function ConversationsPage({
           {selectedConversation ? (
             <>
               <div className="chat-panel__header">
-                <div>
-                  <strong>{selectedConversation.customer.name}</strong>
-                  <span>{selectedConversation.statusLabel}</span>
+                <div className="chat-heading">
+                  <span className="avatar">{initialsFromName(selectedConversation.customer.name)}</span>
+                  <div className="chat-heading__identity">
+                    <h2>{selectedConversation.customer.name}</h2>
+                    <div className="chat-heading__meta">
+                      <span>{selectedConversation.customer.phoneLabel || 'Sem telefone cadastrado'}</span>
+                      <span>{selectedConversation.statusLabel}</span>
+                      {selectedConversation.assignedUser ? <span>Responsável: {selectedConversation.assignedUser.name}</span> : null}
+                    </div>
+                  </div>
                 </div>
+
                 <div className="conversation-mode-actions">
-                  <Badge tone={selectedMode.tone}>{selectedMode.label}</Badge>
-                  {selectedConversation.automationMode === 'manual' ? (
-                    <Button
-                      disabled={isActionBusy}
-                      onClick={() => void onChangeMode(selectedConversation.id, 'assisted')}
-                      variant="secondary"
+                  <div className="conversation-mode-segment" aria-label="Modo de atendimento">
+                    <button
+                      aria-pressed={!selectedIsManual}
+                      className={!selectedIsManual ? 'is-active' : ''}
+                      disabled={isActionBusy || !selectedIsManual}
+                      onClick={handleReturnToAutomatic}
+                      type="button"
                     >
-                      Devolver para IA
+                      Automático
+                    </button>
+                    <button
+                      aria-pressed={selectedIsManual}
+                      className={selectedIsManual ? 'is-active' : ''}
+                      disabled={isActionBusy || selectedIsManual}
+                      onClick={() => void onChangeMode(selectedConversation.id, 'manual')}
+                      type="button"
+                    >
+                      Manual
+                    </button>
+                  </div>
+                  {selectedMode ? <Badge tone={selectedMode.tone}>{selectedMode.label}</Badge> : null}
+                  {selectedIsManual ? (
+                    <Button disabled={isActionBusy} onClick={handleReturnToAutomatic} size="sm" variant="secondary">
+                      Devolver para o automático
                     </Button>
                   ) : (
                     <Button
                       disabled={isActionBusy}
                       onClick={() => void onChangeMode(selectedConversation.id, 'manual')}
+                      size="sm"
                       variant="secondary"
                     >
                       Assumir atendimento
                     </Button>
                   )}
+                  <Button className="conversation-context-toggle" onClick={handleOpenContext} size="sm" variant="secondary">
+                    Ver detalhes
+                  </Button>
                 </div>
               </div>
 
-              {activeAlerts.length > 0 ? (
-                <div className="conversation-alert-strip">
-                  {activeAlerts.map((alert) => (
-                    <div className={`conversation-alert conversation-alert--${alert.severity}`} key={alert.id}>
-                      <strong>{alert.title}</strong>
-                      <span>{alert.message}</span>
-                      <div>
-                        {alert.status === 'open' ? (
-                          <Button onClick={() => onAcknowledgeAlert(selectedConversation.id, alert.id)} size="sm" variant="secondary">
-                            Reconhecer
-                          </Button>
-                        ) : null}
-                        <Button onClick={() => onResolveAlert(selectedConversation.id, alert.id)} size="sm" variant="secondary">
-                          Resolver
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              {bannerAlert ? (
+                <ConversationAlertBanner
+                  alert={bannerAlert}
+                  onOpenDetails={handleOpenContext}
+                />
               ) : null}
 
-              <div className="message-list">
-                {selectedConversation.messages.map((message) => (
-                  <MessageBubble key={message.id} message={message} />
-                ))}
-                {selectedConversation.messages.length === 0 ? (
-                  <EmptyState description="Historico ainda vazio para esta conversa." title="Sem mensagens" />
-                ) : null}
-              </div>
+              <MessageTimeline
+                conversationId={selectedConversation.id}
+                messages={selectedConversation.messages}
+                onRetryMessage={handleRetryMessage}
+              />
 
               <form className="composer" onSubmit={handleSubmitMessage}>
+                {!selectedIsManual ? (
+                  <p className="conversation-automation-note">
+                    A conversa está no automático. Ao enviar uma resposta manual, o atendimento passa para a equipe.
+                  </p>
+                ) : null}
                 <textarea
                   aria-label="Mensagem para cliente"
                   disabled={!selectedConversation || isActionBusy}
-                  onChange={(event) => setComposerBody(event.target.value)}
+                  onChange={(event) => handleComposerChange(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
                       event.currentTarget.form?.requestSubmit()
                     }
                   }}
-                  placeholder="Digite uma resposta para o cliente..."
-                  rows={2}
+                  placeholder="Digite uma mensagem..."
+                  rows={3}
+                  ref={composerRef}
                   value={composerBody}
                 />
-                <Button disabled={isActionBusy || composerBody.trim() === ''} icon="arrow" type="submit" variant="primary">
-                  Enviar
-                </Button>
+                <div className="composer__footer">
+                  <div className="composer__tools">
+                    <Button
+                      aria-expanded={isQuickReplyOpen}
+                      aria-haspopup="dialog"
+                      icon="spark"
+                      onClick={() => setIsQuickReplyOpen((current) => !current)}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      Respostas rápidas
+                    </Button>
+                    <span>Enter envia · Shift+Enter quebra linha</span>
+                  </div>
+                  <Button disabled={isActionBusy || composerBody.trim() === ''} icon="arrow" type="submit" variant="primary">
+                    {isActionBusy ? 'Enviando' : 'Enviar'}
+                  </Button>
+                </div>
+                {isQuickReplyOpen ? (
+                  <div className="quick-reply-picker" role="dialog" aria-label="Respostas rápidas">
+                    <div className="quick-reply-picker__header">
+                      <strong>Respostas rápidas</strong>
+                      <IconButton icon="close" label="Fechar respostas rápidas" onClick={() => setIsQuickReplyOpen(false)} />
+                    </div>
+                    <div className="quick-reply-picker__search">
+                      <Icon name="search" size={16} />
+                      <input
+                        autoFocus
+                        onChange={(event) => setQuickReplySearch(event.target.value)}
+                        placeholder="Buscar resposta"
+                        type="search"
+                        value={quickReplySearch}
+                      />
+                    </div>
+                    <div className="quick-reply-picker__list">
+                      {visibleQuickReplies.map((reply) => (
+                        <button key={reply.id} onClick={() => handleInsertQuickReply(reply)} type="button">
+                          <span>
+                            <strong>{reply.title}</strong>
+                            <small>/{reply.shortcut} · {quickReplyCategoryLabel(reply.category)}</small>
+                          </span>
+                          <p>{reply.body}</p>
+                        </button>
+                      ))}
+                      {visibleQuickReplies.length === 0 ? (
+                        <p className="muted-text">Nenhuma resposta rápida encontrada.</p>
+                      ) : null}
+                    </div>
+                    <Button onClick={() => setIsConfigurationOpen(true)} size="sm" variant="secondary">
+                      Gerenciar respostas
+                    </Button>
+                  </div>
+                ) : null}
+                {localError ? (
+                  <div className="composer__error" role="alert">
+                    {localError}
+                  </div>
+                ) : null}
               </form>
             </>
           ) : (
@@ -316,16 +752,46 @@ export function ConversationsPage({
           )}
         </Card>
 
-        <Card className="conversation-context-panel">
-          <SectionTitle title="Resumo" />
+        {isContextOpen ? (
+          <button
+            aria-label="Fechar detalhes da conversa"
+            className="conversation-context-backdrop"
+            onClick={handleCloseContext}
+            type="button"
+          />
+        ) : null}
+
+        <section
+          aria-label="Detalhes da conversa"
+          aria-modal={isContextOpen ? true : undefined}
+          className="card card--default conversation-context-panel"
+          ref={contextPanelRef}
+          role={isContextOpen ? 'dialog' : undefined}
+          tabIndex={-1}
+        >
+          <div className="conversation-context-panel__header">
+            <SectionTitle title="Detalhes" />
+            <IconButton className="conversation-context-close" icon="close" label="Fechar detalhes" onClick={handleCloseContext} />
+          </div>
           {selectedConversation ? (
             <>
-              <div className="conversation-customer-card">
+              <div className="conversation-context-block conversation-customer-card">
                 <span className="avatar">{initialsFromName(selectedConversation.customer.name)}</span>
                 <div>
                   <strong>{selectedConversation.customer.name}</strong>
-                  <span>{selectedConversation.customer.phoneLabel}</span>
+                  <span>{selectedConversation.customer.phoneLabel || 'Sem telefone cadastrado'}</span>
+                  <small>Origem: {sourceLabel(selectedConversation.customer.sourceChannel)}</small>
                 </div>
+                <Button
+                  onClick={() => {
+                    setCustomerError(null)
+                    setEditingCustomer(selectedConversation.customer)
+                  }}
+                  size="sm"
+                  variant="secondary"
+                >
+                  Editar cliente
+                </Button>
               </div>
 
               <div className="conversation-context-block">
@@ -333,8 +799,11 @@ export function ConversationsPage({
                 {linkedOrder ? (
                   <div className="current-order">
                     <div className="current-order__header">
-                      <strong>{linkedOrder.code}</strong>
-                      <span>{formatCurrency(linkedOrder.total)}</span>
+                      <div>
+                        <strong>{linkedOrder.code}</strong>
+                        <span>{linkedOrder.status}</span>
+                      </div>
+                      <strong>{formatCurrency(linkedOrder.total)}</strong>
                     </div>
                     <div className="current-order__items">
                       {linkedOrder.items.map((item) => (
@@ -342,7 +811,7 @@ export function ConversationsPage({
                           <span>
                             {item.quantity}x {item.name}
                           </span>
-                          <small>{item.additions.join(' · ') || item.notes}</small>
+                          <small>{item.additions.join(' - ') || item.notes}</small>
                         </div>
                       ))}
                     </div>
@@ -355,7 +824,7 @@ export function ConversationsPage({
                       <Button onClick={onOpenOrders} variant="secondary">
                         Abrir pedido
                       </Button>
-                      <Button icon="printer" onClick={() => onPreviewTicket(linkedOrder.id)} variant="primary">
+                      <Button icon="printer" onClick={() => onPreviewTicket(linkedOrder.id)} variant="secondary">
                         Visualizar comanda
                       </Button>
                     </div>
@@ -367,8 +836,8 @@ export function ConversationsPage({
 
               {review?.proofId ? (
                 <div className="conversation-context-block payment-review-card">
-                  <h3>Revisar pagamento</h3>
-                  <p>Comprovante recebido. A IA nao confirma pagamento; Larissa ou Beatriz precisam aprovar.</p>
+                  <h3>Pagamento</h3>
+                  <p>Comprovante recebido. A IA não confirma pagamento; Larissa ou Beatriz precisam aprovar.</p>
                   <dl>
                     <div>
                       <dt>Pedido</dt>
@@ -398,7 +867,7 @@ export function ConversationsPage({
                     />
                   </label>
                   <label>
-                    Observacao da aprovacao
+                    Observação da aprovação
                     <textarea onChange={(event) => setPaymentNotes(event.target.value)} rows={2} value={paymentNotes} />
                   </label>
                   <div className="conversation-context-actions">
@@ -407,7 +876,7 @@ export function ConversationsPage({
                     </Button>
                   </div>
                   <label>
-                    Motivo da rejeicao
+                    Motivo da rejeição
                     <textarea onChange={(event) => setPaymentRejectReason(event.target.value)} rows={2} value={paymentRejectReason} />
                   </label>
                   <Button disabled={isActionBusy} onClick={() => void handleRejectPayment()} variant="secondary">
@@ -417,58 +886,290 @@ export function ConversationsPage({
               ) : null}
 
               <div className="conversation-context-block">
-                <h3>Alertas gerais</h3>
-                {alerts.length > 0 ? (
+                <h3>Alertas</h3>
+                <div className="conversation-alert-filters" aria-label="Filtrar alertas">
+                  {(['all', 'critical', 'warning', 'info'] as AlertSeverityFilter[]).map((severity) => (
+                    <button
+                      aria-pressed={alertSeverityFilter === severity}
+                      className={alertSeverityFilter === severity ? 'is-active' : ''}
+                      key={severity}
+                      onClick={() => setAlertSeverityFilter(severity)}
+                      type="button"
+                    >
+                      {alertSeverityLabel(severity)}
+                    </button>
+                  ))}
+                </div>
+                {filteredActiveAlerts.length > 0 ? (
                   <div className="conversation-global-alerts">
-                    {alerts.slice(0, 6).map((alert) => (
-                      <div className={`conversation-alert conversation-alert--${alert.severity}`} key={alert.id}>
-                        <strong>{alert.title}</strong>
-                        <span>{alert.message}</span>
-                      </div>
+                    {filteredActiveAlerts.map((alert) => (
+                      <ConversationAlertCard
+                        alert={alert}
+                        key={alert.id}
+                        onAcknowledge={() => onAcknowledgeAlert(selectedConversation.id, alert.id)}
+                        onResolve={() => onResolveAlert(selectedConversation.id, alert.id)}
+                      />
                     ))}
                   </div>
                 ) : (
-                  <p className="muted-text">Nenhum alerta aberto no momento.</p>
+                  <p className="muted-text">Nenhum alerta aberto nesta conversa.</p>
                 )}
               </div>
             </>
           ) : (
             <EmptyState description="Selecione uma conversa para ver cliente, pedido e alertas." title="Sem contexto" />
           )}
-        </Card>
+        </section>
+        </div>
+        <Modal
+          closeDisabled={isSavingCustomer}
+          description="Atualize o cadastro sem sobrescrever o perfil recebido do WhatsApp."
+          onClose={() => setEditingCustomer(null)}
+          onPrimary={() => document.getElementById(CONVERSATION_CUSTOMER_FORM_ID)?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))}
+          open={editingCustomer !== null}
+          primaryDisabled={isSavingCustomer}
+          primaryLabel={isSavingCustomer ? 'Salvando' : 'Salvar alterações'}
+          size="lg"
+          title="Editar cliente"
+        >
+          <CustomerEditor
+            customer={editingCustomer}
+            disabled={isSavingCustomer}
+            error={customerError}
+            formId={CONVERSATION_CUSTOMER_FORM_ID}
+            key={editingCustomer?.id ?? 'conversation-customer'}
+            mode="edit"
+            onSubmit={handleSaveCustomer}
+          />
+        </Modal>
+        <ConversationConfigurationModal
+          onClose={() => setIsConfigurationOpen(false)}
+          onQuickRepliesChanged={(replies) => setQuickReplies(replies.filter((reply) => reply.isActive))}
+          open={isConfigurationOpen}
+        />
+        <div className="conversation-toast-viewport" aria-live="polite" aria-relevant="additions">
+          {toasts.map((toast) => (
+            <div className={`conversation-toast conversation-toast--${toast.tone}`} key={toast.id} role="status">
+              <span>{toast.message}</span>
+              <IconButton icon="close" label="Fechar aviso" onClick={() => dismissToast(toast.id)} />
+            </div>
+          ))}
+        </div>
       </div>
     </PageContainer>
   )
 }
 
-function MessageBubble({ message }: { message: ConversationMessage }) {
+function ConversationAlertBanner({
+  alert,
+  onOpenDetails,
+}: {
+  alert: ConversationAlert
+  onOpenDetails: () => void
+}) {
   return (
-    <div className={`message-bubble message-bubble--${message.sender}`}>
-      <div className="message-bubble__meta">
-        <strong>{senderLabel(message.sender)}</strong>
-        <span>{message.timeLabel}</span>
+    <div className={`conversation-alert-banner conversation-alert-banner--${alert.severity}`} role="status">
+      <Icon name="alert" size={18} />
+      <div>
+        <strong>{alert.title}</strong>
+        <span>{alert.message}</span>
       </div>
-      <p>{message.body}</p>
-      {message.media && message.media.length > 0 ? (
-        <div className="message-media-list">
-          {message.media.map((media) => (
-            <a className="message-media" href={media.url ?? '#'} key={media.id} rel="noreferrer" target="_blank">
-              {media.mimeType?.startsWith('image/') && media.url ? (
-                <img alt={media.name} src={media.url} />
-              ) : null}
-              <span>{media.name}</span>
-            </a>
-          ))}
-        </div>
-      ) : null}
-      {message.status ? <small>{message.status}</small> : null}
+      <Button onClick={onOpenDetails} size="sm" variant="ghost">
+        Ver detalhes
+      </Button>
     </div>
   )
 }
 
+function ConversationAlertCard({
+  alert,
+  onAcknowledge,
+  onResolve,
+}: {
+  alert: ConversationAlert
+  onAcknowledge: () => void
+  onResolve: () => void
+}) {
+  return (
+    <div className={`conversation-alert conversation-alert--${alert.severity}`}>
+      <div className="conversation-alert__content">
+        <strong>{alert.title}</strong>
+        <span>{alert.message}</span>
+      </div>
+      <div className="conversation-alert__actions">
+        {alert.status === 'open' ? (
+          <Button onClick={onAcknowledge} size="sm" variant="secondary">
+            Reconhecer
+          </Button>
+        ) : null}
+        <Button onClick={onResolve} size="sm" variant="secondary">
+          Resolver
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function MessageTimeline({
+  conversationId,
+  messages,
+  onRetryMessage,
+}: {
+  conversationId: string
+  messages: ConversationMessage[]
+  onRetryMessage: (messageId: string) => void
+}) {
+  const listRef = useRef<HTMLDivElement>(null)
+  const lastConversationRef = useRef<string | null>(null)
+  const [isNearBottom, setIsNearBottom] = useState(true)
+
+  useEffect(() => {
+    const node = listRef.current
+    if (!node) {
+      return
+    }
+
+    const conversationChanged = lastConversationRef.current !== conversationId
+    if (conversationChanged || isNearBottom) {
+      node.scrollTop = node.scrollHeight
+    }
+    lastConversationRef.current = conversationId
+  }, [conversationId, isNearBottom, messages.length])
+
+  let lastDateKey = ''
+
+  return (
+    <div
+      className="message-list"
+      onScroll={(event) => {
+        const node = event.currentTarget
+        setIsNearBottom(node.scrollHeight - node.scrollTop - node.clientHeight < 96)
+      }}
+      ref={listRef}
+    >
+      {messages.length > 0 ? (
+        messages.map((message) => {
+          const dateKey = message.createdAt ? new Date(message.createdAt).toDateString() : 'current'
+          const shouldShowDate = dateKey !== lastDateKey
+          lastDateKey = dateKey
+
+          return (
+            <div className="message-list__group" key={message.id}>
+              {shouldShowDate ? <div className="message-date-separator">{formatMessageDate(message.createdAt)}</div> : null}
+              <MessageBubble message={message} onRetry={() => onRetryMessage(message.id)} />
+            </div>
+          )
+        })
+      ) : (
+        <EmptyState description="Histórico ainda vazio para esta conversa." title="Sem mensagens" />
+      )}
+    </div>
+  )
+}
+
+function MessageBubble({ message, onRetry }: { message: ConversationMessage; onRetry: () => void }) {
+  const failed = message.status === 'failed'
+
+  return (
+    <div className={`message-bubble message-bubble--${message.sender} ${failed ? 'is-failed' : ''}`}>
+      <div className="message-bubble__meta">
+        <strong>{senderLabel(message.sender)}</strong>
+        <time>{message.timeLabel}</time>
+      </div>
+      {message.body ? <p>{message.body}</p> : <p className="muted-text">{messageTypeLabel(message.type)}</p>}
+      {message.media && message.media.length > 0 ? (
+        <div className="message-media-list">
+          {message.media.map((media) => (
+            <MediaPreview key={media.id} media={media} />
+          ))}
+        </div>
+      ) : null}
+      {message.status ? <small className="message-bubble__status">{messageStatusLabel(message.status)}</small> : null}
+      {failed ? (
+        <div className="message-bubble__error">
+          <strong>Não enviada</strong>
+          <span>{messageFailureLabel(message.errorCode, message.errorMessage)}</span>
+          <Button onClick={onRetry} size="sm" variant="secondary">
+            Tentar novamente
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function MediaPreview({ media }: { media: NonNullable<ConversationMessage['media']>[number] }) {
+  const isImage = media.mimeType?.startsWith('image/') ?? false
+  const isAudio = media.mimeType?.startsWith('audio/') ?? false
+
+  if (isImage && media.url) {
+    return (
+      <a className="message-media message-media--image" href={media.url} rel="noreferrer" target="_blank">
+        <img alt={media.name} src={media.url} />
+        <span>{media.name}</span>
+      </a>
+    )
+  }
+
+  if (isAudio && media.url) {
+    return (
+      <div className="message-media message-media--audio">
+        <span>{media.name}</span>
+        <audio controls src={media.url}>
+          Seu navegador não suporta áudio.
+        </audio>
+      </div>
+    )
+  }
+
+  if (media.url) {
+    return (
+      <a className="message-media message-media--file" href={media.url} rel="noreferrer" target="_blank">
+        <Icon name="mail" size={16} />
+        <span>{mediaLabel(media)}</span>
+      </a>
+    )
+  }
+
+  return (
+    <div className="message-media message-media--file">
+      <Icon name="lock" size={16} />
+      <span>{mediaLabel(media)}</span>
+    </div>
+  )
+}
+
+function isManualConversation(conversation: Conversation): boolean {
+  return conversation.automationMode === 'manual' || conversation.mode === 'manual' || conversation.mode === 'atencao'
+}
+
+function isAutomaticConversation(conversation: Conversation): boolean {
+  return !isManualConversation(conversation)
+}
+
+function hasOpenAlerts(conversation: Conversation): boolean {
+  return openAlertCount(conversation) > 0
+}
+
+function openAlertCount(conversation: Conversation): number {
+  return (conversation.alerts ?? []).filter((alert) => alert.status !== 'resolved').length
+}
+
+function modePresentation(conversation: Conversation): { label: string; tone: BadgeTone } {
+  if (conversation.mode === 'atencao') {
+    return { label: 'Atenção', tone: 'danger' }
+  }
+
+  if (isManualConversation(conversation)) {
+    return { label: 'Manual', tone: 'manual' }
+  }
+
+  return { label: 'Automático', tone: 'success' }
+}
+
 function senderLabel(sender: ConversationMessage['sender']): string {
   if (sender === 'ai') {
-    return 'IA'
+    return 'Automático'
   }
 
   if (sender === 'attendant') {
@@ -476,6 +1177,97 @@ function senderLabel(sender: ConversationMessage['sender']): string {
   }
 
   return 'Cliente'
+}
+
+function messageStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    delivered: 'Entregue',
+    failed: 'Não enviada',
+    pending: 'Enviando',
+    processing: 'Processando',
+    queued: 'Enviando',
+    read: 'Lida',
+    received: 'Recebida',
+    sent: 'Enviada',
+  }
+
+  return labels[status] ?? 'Atualizando'
+}
+
+function messageFailureLabel(errorCode?: string | null, fallback?: string | null): string {
+  const labels: Record<string, string> = {
+    whatsapp_configuration_missing: 'A integração do WhatsApp precisa ser configurada antes do envio.',
+    whatsapp_customer_window_closed: 'A janela de atendimento está fechada. Use um modelo aprovado pela Meta.',
+    whatsapp_network_failure: 'Não foi possível alcançar a Meta. Verifique a conexão e tente novamente.',
+    whatsapp_phone_number_mismatch: 'O número de envio configurado não corresponde à conta da Meta.',
+    whatsapp_provider_rejected: 'A Meta recusou esta mensagem. Confira o destinatário e tente novamente.',
+    whatsapp_recipient_not_allowed: 'O número destinatário não está autorizado no ambiente de teste.',
+    whatsapp_template_required: 'Esta conversa exige um modelo de mensagem aprovado pela Meta.',
+    whatsapp_token_expired: 'A credencial da Meta expirou e precisa ser renovada.',
+    whatsapp_token_invalid: 'A credencial da Meta não foi aceita.',
+  }
+
+  return (errorCode && labels[errorCode]) || fallback || 'Não foi possível enviar esta mensagem.'
+}
+
+function messageTypeLabel(type: ConversationMessage['type']): string {
+  const labels: Record<string, string> = {
+    audio: 'Áudio recebido',
+    document: 'Documento recebido',
+    image: 'Imagem recebida',
+    interactive: 'Resposta interativa recebida',
+    location: 'Localização recebida',
+    unsupported: 'Mensagem recebida em formato não suportado',
+  }
+
+  return labels[type ?? 'text'] ?? 'Mensagem recebida'
+}
+
+function mediaLabel(media: NonNullable<ConversationMessage['media']>[number]): string {
+  const size = media.sizeBytes ? ` - ${formatFileSize(media.sizeBytes)}` : ''
+  return `${media.name}${size}`
+}
+
+function formatFileSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`
+  }
+
+  if (sizeBytes < 1024 * 1024) {
+    return `${Math.round(sizeBytes / 1024)} KB`
+  }
+
+  return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function formatConversationTime(value?: string | null): string {
+  if (!value) {
+    return ''
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatMessageDate(value?: string | null): string {
+  if (!value) {
+    return 'Conversa'
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return 'Conversa'
+  }
+
+  return date.toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    weekday: 'long',
+  })
 }
 
 function normalize(value: string): string {
@@ -491,4 +1283,120 @@ function parseCurrencyToCents(value: string): number {
   }
 
   return Math.round(amount * 100)
+}
+
+function sourceLabel(source?: string | null): string {
+  if (source === 'whatsapp') {
+    return 'WhatsApp'
+  }
+
+  if (source === 'manual') {
+    return 'Manual'
+  }
+
+  if (source === 'demo') {
+    return 'Demonstração'
+  }
+
+  return 'Cadastro'
+}
+
+function selectBannerAlert(alerts: ConversationAlert[]): ConversationAlert | null {
+  const priorities: Record<ConversationAlert['severity'], number> = {
+    critical: 3,
+    warning: 2,
+    info: 1,
+  }
+
+  return alerts
+    .filter((alert) => alert.type !== 'message_send_failed')
+    .sort((left, right) => priorities[right.severity] - priorities[left.severity])[0] ?? null
+}
+
+function alertSeverityLabel(severity: AlertSeverityFilter): string {
+  const labels: Record<AlertSeverityFilter, string> = {
+    all: 'Todos',
+    critical: 'Críticos',
+    warning: 'Atenção',
+    info: 'Informativos',
+  }
+
+  return labels[severity]
+}
+
+type NotificationEvent = {
+  key: string
+  conversationId: string
+  message: string
+  tone: ConversationToastTone
+}
+
+function collectNotificationEvents(conversations: Conversation[]): NotificationEvent[] {
+  return conversations.flatMap((conversation) => {
+    const messageEvents = conversation.messages
+      .filter((message) => message.direction === 'inbound' || message.sender === 'customer')
+      .map((message) => ({
+        key: `conversation-message:${message.id}`,
+        conversationId: conversation.id,
+        message: `Nova mensagem de ${conversation.customer.name}.`,
+        tone: 'info' as const,
+      }))
+    const alertEvents = (conversation.alerts ?? [])
+      .filter((alert) => alert.status === 'open')
+      .map((alert) => ({
+        key: `conversation-alert:${alert.id}`,
+        conversationId: conversation.id,
+        message: `${alert.title}: ${alert.message}`,
+        tone: alert.severity === 'critical' ? 'error' as const : alert.severity === 'warning' ? 'warning' as const : 'info' as const,
+      }))
+
+    return [...messageEvents, ...alertEvents]
+  })
+}
+
+function readBooleanPreference(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function writeBooleanPreference(key: string, value: boolean): void {
+  try {
+    window.localStorage.setItem(key, String(value))
+  } catch {
+    // Preferences remain valid for the current session when storage is unavailable.
+  }
+}
+
+function createClientReference(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function playNotificationSound(): void {
+  if (typeof window === 'undefined' || typeof window.AudioContext === 'undefined') {
+    return
+  }
+
+  try {
+    const context = new window.AudioContext()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.frequency.value = 640
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.015)
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.16)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.18)
+    oscillator.addEventListener('ended', () => void context.close(), { once: true })
+  } catch {
+    // Browser audio policies can block playback; the visual notification still works.
+  }
 }

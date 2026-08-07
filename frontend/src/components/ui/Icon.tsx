@@ -30,6 +30,8 @@ import {
   User,
   Users,
   Utensils,
+  Volume2,
+  VolumeX,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -66,6 +68,8 @@ export type IconName =
   | 'edit'
   | 'clock'
   | 'spark'
+  | 'sound'
+  | 'sound-off'
   | 'logout'
 
 type IconProps = {
@@ -106,6 +110,8 @@ const iconComponents: Record<string, LucideIcon> = {
   edit: Pencil,
   clock: Clock,
   spark: Sparkles,
+  sound: Volume2,
+  'sound-off': VolumeX,
   logout: LogOut,
 }
 

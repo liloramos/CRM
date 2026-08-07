@@ -16,6 +16,11 @@ interface WhatsAppProviderInterface
 
     public function connectionStatus(): WhatsAppConnectionStatus;
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function diagnoseConnectivity(): array;
+
     public function verifyWebhook(?string $mode, ?string $token, ?string $challenge): ?string;
 
     /**

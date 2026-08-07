@@ -26,6 +26,7 @@ import {
   deleteDraftOrder,
   deleteOrdersPermanently,
   deleteOrderPermanently,
+  describeApiError,
   generateTicketPreview,
   acknowledgeConversationAlert,
   approveConversationPaymentProof,
@@ -34,9 +35,11 @@ import {
   getOperationalSnapshot,
   rejectConversationPaymentProof,
   resolveConversationAlert,
+  retryConversationMessage,
   searchCustomers,
   sendConversationMessage,
   setConversationAutomationMode,
+  updateCustomer,
   updateOrderStatus,
   ApiError,
 } from './services/crm.service'
@@ -57,6 +60,7 @@ import type {
   StructuredComponentOption,
   StructuredProductOption,
 } from './types/crm'
+import type { UpdateCustomerPayload } from './services/crm.service'
 import { getOrderOperationalState, isOrderInActiveQueue } from './features/pedidos/orderOperationalState'
 
 type OrderItemOptionPayload =
@@ -66,6 +70,8 @@ type OrderItemOptionPayload =
         product_link_id?: number
         quantity?: number
       }>
+      included_component_ids?: number[]
+      removed_component_ids?: number[]
       meat_mode?: 'traditional' | 'beef_only'
       traditional_meat_component_ids?: number[]
       additions?: Array<{
@@ -80,6 +86,8 @@ type OrderItemOptionPayload =
         quantity?: number
       }>
       structured_options?: never
+      included_component_ids?: never
+      removed_component_ids?: never
       meat_mode?: never
       traditional_meat_component_ids?: never
       additions?: never
@@ -166,8 +174,8 @@ function App() {
       })
       setSelectedConversationId((current) => current ?? response.snapshot.conversations[0]?.id ?? null)
       setSelectedProductId((current) => current || response.snapshot.products[0]?.id || '')
-    } catch {
-      setSnapshotError('Verifique sua conexão e tente novamente.')
+    } catch (error) {
+      setSnapshotError(describeApiError(error, 'Não foi possível atualizar o painel.'))
       setSnapshot((current) => current ?? emptyOperationalSnapshot(user))
       setSnapshotSource('api')
     } finally {
@@ -187,6 +195,26 @@ function App() {
       }
     })
     setSelectedConversationId(conversation.id)
+  }, [])
+
+  const replaceCustomer = useCallback((customer: CustomerSummary) => {
+    setSnapshot((current) => {
+      if (!current) {
+        return current
+      }
+
+      const customerExists = current.customers.some((candidate) => candidate.id === customer.id)
+
+      return {
+        ...current,
+        customers: customerExists
+          ? current.customers.map((candidate) => (candidate.id === customer.id ? customer : candidate))
+          : [...current.customers, customer].sort((first, second) => first.name.localeCompare(second.name, 'pt-BR')),
+        conversations: current.conversations.map((conversation) => (
+          conversation.customer.id === customer.id ? { ...conversation, customer } : conversation
+        )),
+      }
+    })
   }, [])
 
   const loadConversations = useCallback(async (incremental = false) => {
@@ -230,9 +258,9 @@ function App() {
       })
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) {
-        setConversationError('Seu usuario nao tem permissao para visualizar conversas do WhatsApp.')
+        setConversationError('Seu usuário não tem permissão para visualizar conversas do WhatsApp.')
       } else {
-        setConversationError(error instanceof Error ? error.message : 'Nao foi possivel carregar as conversas.')
+        setConversationError(describeApiError(error, 'Não foi possível carregar as conversas.'))
       }
     } finally {
       conversationPollingBusyRef.current = false
@@ -839,29 +867,66 @@ function App() {
         reason:
           mode === 'manual'
             ? 'Atendimento manual assumido pela interface operacional.'
-            : 'Automacao reativada pela interface operacional.',
+            : 'Automação reativada pela interface operacional.',
       })
       replaceConversation(conversation)
     } catch (error) {
-      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel alterar o modo da conversa.')
+      setConversationError(error instanceof Error ? error.message : 'Não foi possível alterar o modo da conversa.')
     } finally {
       setIsActionBusy(false)
     }
   }
 
-  async function handleConversationSendMessage(conversationId: string, body: string) {
+  async function handleConversationSendMessage(conversationId: string, body: string, clientReference: string) {
     setIsActionBusy(true)
     setConversationError(null)
 
     try {
-      const conversation = await sendConversationMessage(conversationId, body)
+      const conversation = await sendConversationMessage(conversationId, body, clientReference)
       replaceConversation(conversation)
     } catch (error) {
-      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel enviar a mensagem.')
+      const failedConversation = conversationFromApiError(error)
+      if (failedConversation) {
+        replaceConversation(failedConversation)
+      }
+      setConversationError(isWhatsAppDeliveryError(error)
+        ? null
+        : error instanceof Error ? error.message : 'Não foi possível enviar a mensagem.')
       throw error
     } finally {
       setIsActionBusy(false)
     }
+  }
+
+  async function handleConversationRetryMessage(conversationId: string, messageId: string) {
+    setIsActionBusy(true)
+    setConversationError(null)
+
+    try {
+      const conversation = await retryConversationMessage(conversationId, messageId)
+      replaceConversation(conversation)
+    } catch (error) {
+      const failedConversation = conversationFromApiError(error)
+      if (failedConversation) {
+        replaceConversation(failedConversation)
+      }
+      setConversationError(isWhatsAppDeliveryError(error)
+        ? null
+        : error instanceof Error ? error.message : 'Não foi possível reenviar a mensagem.')
+      throw error
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleCreateCustomerFromPage(payload: UpdateCustomerPayload) {
+    const customer = await createCustomer(payload)
+    replaceCustomer(customer)
+  }
+
+  async function handleUpdateCustomerFromPage(customerId: string, payload: UpdateCustomerPayload) {
+    const customer = await updateCustomer(customerId, payload)
+    replaceCustomer(customer)
   }
 
   async function handleConversationAlertAction(conversationId: string, alertId: string, action: 'acknowledge' | 'resolve') {
@@ -893,7 +958,7 @@ function App() {
         }
       })
     } catch (error) {
-      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o alerta.')
+      setConversationError(error instanceof Error ? error.message : 'Não foi possível atualizar o alerta.')
     }
   }
 
@@ -909,7 +974,7 @@ function App() {
       replaceConversation(conversation)
       await loadSnapshot()
     } catch (error) {
-      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel aprovar o pagamento.')
+      setConversationError(error instanceof Error ? error.message : 'Não foi possível aprovar o pagamento.')
     } finally {
       setIsActionBusy(false)
     }
@@ -924,7 +989,7 @@ function App() {
       replaceConversation(conversation)
       await loadSnapshot()
     } catch (error) {
-      setConversationError(error instanceof Error ? error.message : 'Nao foi possivel rejeitar o comprovante.')
+      setConversationError(error instanceof Error ? error.message : 'Não foi possível rejeitar o comprovante.')
     } finally {
       setIsActionBusy(false)
     }
@@ -1134,7 +1199,9 @@ function App() {
             onRejectPayment={handleRejectConversationPayment}
             onResolveAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'resolve')}
             onSelectConversation={setSelectedConversationId}
+            onRetryMessage={handleConversationRetryMessage}
             onSendMessage={handleConversationSendMessage}
+            onUpdateCustomer={handleUpdateCustomerFromPage}
             selectedConversation={selectedConversation}
             syncLabel={conversationSyncAt ? new Date(conversationSyncAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null}
           />
@@ -1207,7 +1274,13 @@ function App() {
           />
         )
       case 'clientes':
-        return <CustomersPage customers={snapshot.customers} />
+        return (
+          <CustomersPage
+            customers={snapshot.customers}
+            onCreateCustomer={handleCreateCustomerFromPage}
+            onUpdateCustomer={handleUpdateCustomerFromPage}
+          />
+        )
       case 'relatorios':
         return <ReportsPage />
       case 'whatsapp':
@@ -1382,6 +1455,16 @@ function buildOrderItemOptions(
   }
 
   const selectedTokens = new Set(selectedOptionIds)
+  const removedComponentIds = selectedOptionIds
+    .filter(isRemovedComponentToken)
+    .map((token) => Number(token.replace('remove-component:', '')))
+    .filter((value) => Number.isFinite(value))
+  const removedComponentSet = new Set(removedComponentIds)
+  const includedComponentIds = groups
+    .filter((group) => group.selection_mode === 'fixed')
+    .flatMap((group) => group.component_options)
+    .filter((option) => option.link_active && !option.requires_confirmation && option.available && !removedComponentSet.has(option.component_id))
+    .map((option) => option.component_id)
   const dailyMeatIds = selectedOptionIds
     .filter(isDailyMeatToken)
     .map((token) => Number(token.replace('daily-meat:', '')))
@@ -1438,7 +1521,11 @@ function buildOrderItemOptions(
   }
 
   if (!hasBeefRules) {
-    return { structured_options: structuredOptions }
+    return {
+      structured_options: structuredOptions,
+      included_component_ids: includedComponentIds,
+      removed_component_ids: removedComponentIds,
+    }
   }
 
   if (meatMode === 'beef_only') {
@@ -1448,6 +1535,8 @@ function buildOrderItemOptions(
 
     return {
       structured_options: structuredOptions,
+      included_component_ids: includedComponentIds,
+      removed_component_ids: removedComponentIds,
       meat_mode: 'beef_only',
       traditional_meat_component_ids: [],
       additions: [],
@@ -1467,6 +1556,8 @@ function buildOrderItemOptions(
 
   return {
     structured_options: structuredOptions,
+    included_component_ids: includedComponentIds,
+    removed_component_ids: removedComponentIds,
     meat_mode: 'traditional',
     traditional_meat_component_ids: dailyMeatIds,
     additions: extraBeefSelected ? [{ code: 'extra_beef', quantity: 1 }] : [],
@@ -1503,6 +1594,10 @@ function productOptionToken(id: number): string {
 
 function isDailyMeatToken(token: string): boolean {
   return token.startsWith('daily-meat:')
+}
+
+function isRemovedComponentToken(token: string): boolean {
+  return token.startsWith('remove-component:')
 }
 
 function parseCurrencyInputToCents(value: string): number {
@@ -1546,6 +1641,24 @@ function blockedDeletionsFromError(error: unknown): BlockedOrderDeletion[] {
       reasons: entry.reasons.map(String),
     }]
   })
+}
+
+function conversationFromApiError(error: unknown): Conversation | null {
+  if (!(error instanceof ApiError) || typeof error.details !== 'object' || error.details === null) {
+    return null
+  }
+
+  const data = 'data' in error.details ? error.details.data : null
+
+  if (!data || typeof data !== 'object' || !('id' in data) || !('messages' in data)) {
+    return null
+  }
+
+  return data as Conversation
+}
+
+function isWhatsAppDeliveryError(error: unknown): boolean {
+  return error instanceof ApiError && (error.code?.startsWith('whatsapp_') ?? false)
 }
 
 function primaryLabelForModal(modal: AppModal): string {

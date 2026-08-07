@@ -90,6 +90,11 @@
             margin: 1px 0;
         }
 
+        .details--removals {
+            font-weight: 700;
+            text-transform: none;
+        }
+
         .ticket::after {
             content: "";
             display: block;
@@ -232,6 +237,13 @@
                             @endforeach
                         </ul>
                     @endif
+                    @if (! empty($item['removed_ingredients']))
+                        <ul class="details details--removals">
+                            @foreach ($item['removed_ingredients'] as $detail)
+                                <li><strong>{{ $detail }}</strong></li>
+                            @endforeach
+                        </ul>
+                    @endif
                     <ul class="details">
                         @if (! empty($item['beneficiary_name']))
                             <li>Para: {{ $item['beneficiary_name'] }}</li>
@@ -242,11 +254,16 @@
                         @if (! empty($item['item_notes']))
                             <li>Obs item: {{ $item['item_notes'] }}</li>
                         @endif
-                        @foreach (['preferences' => 'Pref', 'restrictions' => 'Restr', 'removed_ingredients' => 'Remover', 'selected_components' => 'Comp'] as $field => $label)
+                        @foreach (['preferences' => 'Pref', 'restrictions' => 'Restr'] as $field => $label)
                             @foreach ($item[$field] as $detail)
                                 <li>{{ $label }}: {{ $detail }}</li>
                             @endforeach
                         @endforeach
+                        @if (empty($item['options']))
+                            @foreach ($item['selected_components'] as $detail)
+                                <li>Comp: {{ $detail }}</li>
+                            @endforeach
+                        @endif
                         @if (! empty($item['substitution_notes']))
                             <li>Subst: {{ $item['substitution_notes'] }}</li>
                         @endif

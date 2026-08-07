@@ -21,7 +21,10 @@ import type {
   BackendOrderStatus,
   ComponentAvailabilityMutationResponse,
   Conversation,
+  ConversationAiStyle,
   ConversationAlert,
+  ConversationQuickReply,
+  ConversationQuickReplyCategory,
   CustomerSummary,
   DailyMenuAdjustmentMutationResponse,
   DailyMenuAdjustmentAction,
@@ -92,6 +95,8 @@ type AddItemPayload = {
     product_link_id?: number
     quantity?: number
   }>
+  included_component_ids?: number[]
+  removed_component_ids?: number[]
   meat_mode?: 'traditional' | 'beef_only'
   traditional_meat_component_ids?: number[]
   additions?: Array<{
@@ -105,6 +110,24 @@ type CreateCustomerPayload = {
   phone?: string
   email?: string
   notes?: string
+  address?: CustomerAddressPayload
+}
+
+export type CustomerAddressPayload = {
+  street?: string
+  number?: string
+  complement?: string
+  neighborhood?: string
+  city?: string
+  reference?: string
+}
+
+export type UpdateCustomerPayload = {
+  name: string
+  phone?: string
+  email?: string
+  notes?: string
+  address?: CustomerAddressPayload
 }
 
 type CancelOrderPayload = {
@@ -249,13 +272,47 @@ const EMPTY_FINANCIAL_SUMMARY = {
 export class ApiError extends Error {
   public readonly status: number
   public readonly details?: unknown
+  public readonly code?: string
 
-  constructor(message: string, status: number, details?: unknown) {
+  constructor(message: string, status: number, details?: unknown, code?: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.details = details
+    this.code = code
   }
+}
+
+export function describeApiError(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    if (error.status === 401) {
+      return 'Sua sessão expirou. Entre novamente.'
+    }
+
+    if (error.status === 403) {
+      return 'Seu usuário não tem permissão para realizar esta ação.'
+    }
+
+    if (error.status === 404) {
+      return 'O endpoint solicitado não está disponível no backend em execução.'
+    }
+
+    if (error.status === 422 || error.code?.startsWith('whatsapp_')) {
+      return error.message
+    }
+
+    if (error.status >= 500) {
+      return 'O backend não conseguiu concluir a solicitação.'
+    }
+
+    return error.message || fallback
+  }
+
+  if (error instanceof TypeError) {
+    return 'Não foi possível conectar ao backend. Confirme se o servidor está em execução.'
+  }
+
+  return error instanceof Error && error.message ? error.message : fallback
 }
 
 export function getMockOperationalSnapshot(): OperationalSnapshot {
@@ -472,6 +529,15 @@ export async function setConversationAutomationMode(conversationId: string, payl
   return response.data
 }
 
+export async function updateCustomer(customerId: string, payload: UpdateCustomerPayload): Promise<CustomerSummary> {
+  const response = await requestJson<ApiEnvelope<CustomerSummary>>(`/api/app/customers/${customerId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
 export async function getConversations(params: ConversationListParams = {}): Promise<ConversationListResponse> {
   const searchParams = new URLSearchParams()
 
@@ -505,11 +571,81 @@ export async function getConversation(conversationId: string): Promise<Conversat
   return response.data
 }
 
-export async function sendConversationMessage(conversationId: string, body: string): Promise<Conversation> {
+export async function sendConversationMessage(
+  conversationId: string,
+  body: string,
+  clientReference?: string,
+): Promise<Conversation> {
   const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/messages`, {
-    body: JSON.stringify({ body }),
+    body: JSON.stringify({ body, client_reference: clientReference }),
     method: 'POST',
   })
+
+  return response.data
+}
+
+export type ConversationQuickReplyPayload = {
+  title: string
+  shortcut: string
+  body: string
+  category: ConversationQuickReplyCategory
+  is_active: boolean
+  display_order: number
+}
+
+export async function getConversationQuickReplies(includeInactive = false): Promise<ConversationQuickReply[]> {
+  const query = includeInactive ? '?include_inactive=1' : ''
+  const response = await requestJson<ApiEnvelope<ConversationQuickReply[]>>(`/api/app/conversation-quick-replies${query}`)
+
+  return response.data
+}
+
+export async function createConversationQuickReply(
+  payload: ConversationQuickReplyPayload,
+): Promise<ConversationQuickReply> {
+  const response = await requestJson<ApiEnvelope<ConversationQuickReply>>('/api/app/conversation-quick-replies', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function updateConversationQuickReply(
+  quickReplyId: string,
+  payload: ConversationQuickReplyPayload,
+): Promise<ConversationQuickReply> {
+  const response = await requestJson<ApiEnvelope<ConversationQuickReply>>(
+    `/api/app/conversation-quick-replies/${quickReplyId}`,
+    {
+      body: JSON.stringify(payload),
+      method: 'PATCH',
+    },
+  )
+
+  return response.data
+}
+
+export async function getConversationAiStyle(): Promise<ConversationAiStyle> {
+  const response = await requestJson<ApiEnvelope<ConversationAiStyle>>('/api/app/conversation-ai-style')
+
+  return response.data
+}
+
+export async function updateConversationAiStyle(payload: ConversationAiStyle): Promise<ConversationAiStyle> {
+  const response = await requestJson<ApiEnvelope<ConversationAiStyle>>('/api/app/conversation-ai-style', {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function retryConversationMessage(conversationId: string, messageId: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(
+    `/api/app/conversations/${conversationId}/messages/${messageId}/retry`,
+    { method: 'POST' },
+  )
 
   return response.data
 }
@@ -863,7 +999,11 @@ async function requestJson<T = unknown>(path: string, init: RequestInit = {}): P
         ? String(payload.message)
         : `Erro HTTP ${response.status}`
 
-    throw new ApiError(message, response.status, payload)
+    const code = typeof payload === 'object' && payload !== null && 'code' in payload
+      ? String(payload.code)
+      : undefined
+
+    throw new ApiError(message, response.status, payload, code)
   }
 
   return payload as T

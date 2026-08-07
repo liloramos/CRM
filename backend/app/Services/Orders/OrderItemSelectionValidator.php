@@ -29,7 +29,7 @@ class OrderItemSelectionValidator
     /**
      * @param  list<array<string, mixed>>  $rows
      * @param  array<string, mixed>  $meatSelection
-     * @return array{options: list<array<string, mixed>>, unit_price_cents?: int, selected_components?: array<string, mixed>}
+     * @return array{options: list<array<string, mixed>>, unit_price_cents?: int, selected_components?: list<string>, removed_ingredients?: list<string>}
      */
     public function validateStructuredSelections(
         Company $company,
@@ -38,6 +38,7 @@ class OrderItemSelectionValidator
         array $rows,
         array $meatSelection = [],
         int $itemQuantity = 1,
+        array $compositionSelection = [],
     ): array {
         $product->loadMissing([
             'optionGroups.componentOptions.component',
@@ -67,6 +68,7 @@ class OrderItemSelectionValidator
             ->keyBy(fn (array $row): int => (int) $row['product_link_id']);
 
         $this->assertRowsBelongToProduct($product, $componentRows, $productRows);
+        $this->assertDefaultCompositionBelongsToProduct($product, $compositionSelection);
 
         if ($this->hasTraditionalBeefRules($product)) {
             return $this->validateTraditionalMarmita(
@@ -77,26 +79,44 @@ class OrderItemSelectionValidator
                 productRows: $productRows,
                 meatSelection: $meatSelection,
                 itemQuantity: $itemQuantity,
+                compositionSelection: $compositionSelection,
             );
         }
 
         $validated = [];
+        $selectedComponents = [];
+        $removedIngredients = [];
 
         foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
             $validated = [
                 ...$validated,
-                ...$this->validateGroup($company, $product, $date, $group, $componentRows, $productRows),
+                ...$this->validateGroup(
+                    $company,
+                    $product,
+                    $date,
+                    $group,
+                    $componentRows,
+                    $productRows,
+                    $compositionSelection,
+                    $selectedComponents,
+                    $removedIngredients,
+                ),
             ];
         }
 
-        return ['options' => $validated];
+        return [
+            'options' => $validated,
+            'selected_components' => $selectedComponents,
+            'removed_ingredients' => $removedIngredients,
+        ];
     }
 
     /**
      * @param  Collection<int, array<string, mixed>>  $componentRows
      * @param  Collection<int, array<string, mixed>>  $productRows
      * @param  array<string, mixed>  $meatSelection
-     * @return array{options: list<array<string, mixed>>, unit_price_cents: int}
+     * @param  array<string, mixed>  $compositionSelection
+     * @return array{options: list<array<string, mixed>>, unit_price_cents: int, selected_components: list<string>, removed_ingredients: list<string>}
      */
     private function validateTraditionalMarmita(
         Company $company,
@@ -106,6 +126,7 @@ class OrderItemSelectionValidator
         Collection $productRows,
         array $meatSelection,
         int $itemQuantity,
+        array $compositionSelection,
     ): array {
         $this->rejectSpecialBeefRows($product, $componentRows);
 
@@ -120,6 +141,8 @@ class OrderItemSelectionValidator
         ]);
 
         $validated = [];
+        $selectedComponents = [];
+        $removedIngredients = [];
 
         foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
             if ($this->isBeefRuleGroup($group)) {
@@ -132,7 +155,17 @@ class OrderItemSelectionValidator
 
             $validated = [
                 ...$validated,
-                ...$this->validateGroup($company, $product, $date, $group, $componentRows, $productRows),
+                ...$this->validateGroup(
+                    $company,
+                    $product,
+                    $date,
+                    $group,
+                    $componentRows,
+                    $productRows,
+                    $compositionSelection,
+                    $selectedComponents,
+                    $removedIngredients,
+                ),
             ];
         }
 
@@ -146,6 +179,8 @@ class OrderItemSelectionValidator
                     $this->beefOnlyRow($beefOnly, $quote),
                 ],
                 'unit_price_cents' => (int) $quote['total_cents'],
+                'selected_components' => $selectedComponents,
+                'removed_ingredients' => $removedIngredients,
             ];
         }
 
@@ -164,6 +199,8 @@ class OrderItemSelectionValidator
                 ...$traditionalRows,
             ],
             'unit_price_cents' => (int) $quote['total_cents'],
+            'selected_components' => $selectedComponents,
+            'removed_ingredients' => $removedIngredients,
         ];
     }
 
@@ -195,6 +232,45 @@ class OrderItemSelectionValidator
 
         if ($invalidComponentIds !== [] || $invalidProductIds !== []) {
             throw new DomainException('Uma ou mais escolhas nao pertencem ao produto selecionado.');
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $compositionSelection
+     */
+    private function assertDefaultCompositionBelongsToProduct(Product $product, array $compositionSelection): void
+    {
+        $defaultComponentIds = $product->optionGroups
+            ->filter(fn (ProductOptionGroup $group): bool => $group->selection_mode === ProductSelectionMode::Fixed)
+            ->flatMap(fn (ProductOptionGroup $group) => $group->componentOptions)
+            ->filter(fn (ProductGroupComponent $link): bool => (bool) $link->is_active)
+            ->map(fn (ProductGroupComponent $link): int => (int) $link->menu_component_id)
+            ->unique()
+            ->values()
+            ->all();
+
+        $includedComponentIds = $this->integerList($compositionSelection['included_component_ids'] ?? []);
+        $removedComponentIds = $this->integerList($compositionSelection['removed_component_ids'] ?? []);
+        $invalidIncluded = array_values(array_diff($includedComponentIds, $defaultComponentIds));
+        $invalidRemoved = array_values(array_diff($removedComponentIds, $defaultComponentIds));
+        $conflicting = array_values(array_intersect($includedComponentIds, $removedComponentIds));
+
+        if ($invalidIncluded !== []) {
+            throw ValidationException::withMessages([
+                'included_component_ids' => ['Um dos ingredientes mantidos nao pertence aos itens incluidos por padrao deste produto.'],
+            ]);
+        }
+
+        if ($invalidRemoved !== []) {
+            throw ValidationException::withMessages([
+                'removed_component_ids' => ['Somente ingredientes incluidos por padrao podem ser retirados.'],
+            ]);
+        }
+
+        if ($conflicting !== []) {
+            throw ValidationException::withMessages([
+                'removed_component_ids' => ['O mesmo ingrediente nao pode ser mantido e retirado ao mesmo tempo.'],
+            ]);
         }
     }
 
@@ -396,6 +472,9 @@ class OrderItemSelectionValidator
     /**
      * @param  Collection<int, array<string, mixed>>  $componentRows
      * @param  Collection<int, array<string, mixed>>  $productRows
+     * @param  array<string, mixed>  $compositionSelection
+     * @param  list<string>  $selectedComponents
+     * @param  list<string>  $removedIngredients
      * @return list<array<string, mixed>>
      */
     private function validateGroup(
@@ -405,25 +484,52 @@ class OrderItemSelectionValidator
         ProductOptionGroup $group,
         Collection $componentRows,
         Collection $productRows,
+        array $compositionSelection,
+        array &$selectedComponents,
+        array &$removedIngredients,
     ): array {
         if ($group->selection_mode === ProductSelectionMode::Fixed) {
+            $removedComponentIds = $this->integerList($compositionSelection['removed_component_ids'] ?? []);
+
             return $group->componentOptions
                 ->sortBy([['display_order', 'asc'], ['id', 'asc']])
                 ->filter(fn (ProductGroupComponent $link): bool => (bool) $link->is_active)
-                ->map(fn (ProductGroupComponent $link): array => $this->componentSelectionRow($company, $product, $date, $group, $link, null))
+                ->flatMap(function (ProductGroupComponent $link) use ($company, $product, $date, $group, $removedComponentIds, &$selectedComponents, &$removedIngredients): array {
+                    $componentName = $this->componentName($link);
+
+                    if (in_array((int) $link->menu_component_id, $removedComponentIds, true)) {
+                        $removedIngredients[] = 'Sem '.$componentName;
+
+                        return [];
+                    }
+
+                    $selectedComponents[] = $componentName;
+
+                    return [
+                        $this->componentSelectionRow(
+                            $company,
+                            $product,
+                            $date,
+                            $group,
+                            $link,
+                            null,
+                            'included_default',
+                        ),
+                    ];
+                })
                 ->values()
                 ->all();
         }
 
-        $selectedComponents = $group->componentOptions
+        $selectedComponentLinks = $group->componentOptions
             ->filter(fn (ProductGroupComponent $link): bool => $componentRows->has((int) $link->id))
             ->values();
 
-        $selectedProducts = $group->productOptions
+        $selectedProductLinks = $group->productOptions
             ->filter(fn (ProductGroupProduct $link): bool => $productRows->has((int) $link->id))
             ->values();
 
-        $choiceCount = $selectedComponents->count() + $selectedProducts->count();
+        $choiceCount = $selectedComponentLinks->count() + $selectedProductLinks->count();
         $minChoices = (int) ($group->min_choices ?? ($group->is_required ? 1 : 0));
         $maxChoices = $group->max_choices !== null ? (int) $group->max_choices : null;
 
@@ -442,14 +548,14 @@ class OrderItemSelectionValidator
         $validatedRows = [];
         $quantityTotal = 0;
 
-        foreach ($selectedComponents as $link) {
+        foreach ($selectedComponentLinks as $link) {
             $sourceRow = $componentRows->get((int) $link->id);
-            $row = $this->componentSelectionRow($company, $product, $date, $group, $link, $sourceRow);
+            $row = $this->componentSelectionRow($company, $product, $date, $group, $link, $sourceRow, 'selected_choice');
             $quantityTotal += (int) $row['quantity'];
             $validatedRows[] = $row;
         }
 
-        foreach ($selectedProducts as $link) {
+        foreach ($selectedProductLinks as $link) {
             $sourceRow = $productRows->get((int) $link->id);
             $row = $this->productSelectionRow($company, $date, $group, $link, $sourceRow);
             $quantityTotal += (int) $row['quantity'];
@@ -472,6 +578,7 @@ class OrderItemSelectionValidator
         ProductOptionGroup $group,
         ProductGroupComponent $link,
         ?array $sourceRow,
+        ?string $compositionRole = null,
     ): array {
         if (! $link->is_active || $link->requires_confirmation) {
             throw new DomainException("{$link->component->name} nao esta disponivel para este produto.");
@@ -500,6 +607,8 @@ class OrderItemSelectionValidator
                 'selection_actor' => $group->selection_actor->value,
                 'selection_mode' => $group->selection_mode->value,
                 'final_price_cents' => $link->final_price_cents,
+                'composition_role' => $compositionRole,
+                'included_in_unit_price' => (bool) $group->included_in_base_price,
             ],
         ];
     }
@@ -573,6 +682,11 @@ class OrderItemSelectionValidator
         if ($group->max_quantity !== null && $quantityTotal > (int) $group->max_quantity) {
             throw new DomainException("Quantidade acima do limite em {$group->label}.");
         }
+    }
+
+    private function componentName(ProductGroupComponent $link): string
+    {
+        return (string) ($link->component?->display_name ?: $link->component?->name ?: 'Ingrediente');
     }
 
     /**

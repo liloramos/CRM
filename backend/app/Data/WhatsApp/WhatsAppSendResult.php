@@ -12,6 +12,7 @@ class WhatsAppSendResult
         public readonly string $status,
         public readonly ?string $providerMessageId = null,
         public readonly ?string $errorMessage = null,
+        public readonly ?string $errorCode = null,
         public readonly array $safePayload = [],
     ) {}
 

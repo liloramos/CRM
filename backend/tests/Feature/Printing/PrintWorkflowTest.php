@@ -9,7 +9,9 @@ use App\Models\Order;
 use App\Models\PrintJob;
 use App\Models\PrintJobEvent;
 use App\Models\Product;
+use App\Models\ProductGroupComponent;
 use App\Models\ProductOption;
+use App\Models\ProductOptionGroup;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
@@ -198,6 +200,41 @@ class PrintWorkflowTest extends TestCase
         $this->assertStringNotContainsString('Para: Nao informado', $html);
     }
 
+    public function test_ticket_prints_removed_default_components_without_selected_noise(): void
+    {
+        $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, [
+            'customer_name_snapshot' => 'Cliente da Composição',
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $feijao = $this->menuComponentId($company, 'feijao');
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'removed_component_ids' => [$feijao],
+            'structured_options' => $this->componentChoiceRows($product, [
+                'salada_casa' => ['beterraba'],
+                'carne' => ['porco'],
+            ]),
+        ])->assertOk();
+
+        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
+
+        $this->assertStringContainsString('1x N5 Casa', $html);
+        $this->assertStringContainsString('1x Arroz', $html);
+        $this->assertStringContainsString('1x Beterraba', $html);
+        $this->assertStringContainsString('1x Porco', $html);
+        $this->assertStringContainsString('Sem Feijão', $html);
+        $this->assertStringNotContainsString('1x Feijão', $html);
+        $this->assertStringNotContainsString('Repolho com tomate', $html);
+    }
+
     public function test_ticket_preview_route_keeps_company_isolation(): void
     {
         [, $order] = $this->createOperationalOrder();
@@ -337,5 +374,37 @@ class PrintWorkflowTest extends TestCase
             ->where('slug', $slug)
             ->firstOrFail()
             ->id;
+    }
+
+    /**
+     * @param  array<string, list<string>>  $choices
+     * @return list<array{component_link_id: int}>
+     */
+    private function componentChoiceRows(Product $product, array $choices): array
+    {
+        $rows = [];
+
+        foreach ($choices as $groupCode => $componentSlugs) {
+            $group = ProductOptionGroup::query()
+                ->where('product_id', $product->id)
+                ->where('code', $groupCode)
+                ->firstOrFail();
+
+            foreach ($componentSlugs as $componentSlug) {
+                $component = MenuComponent::query()
+                    ->where('company_id', $product->company_id)
+                    ->where('slug', $componentSlug)
+                    ->firstOrFail();
+
+                $link = ProductGroupComponent::query()
+                    ->where('product_option_group_id', $group->id)
+                    ->where('menu_component_id', $component->id)
+                    ->firstOrFail();
+
+                $rows[] = ['component_link_id' => (int) $link->id];
+            }
+        }
+
+        return $rows;
     }
 }

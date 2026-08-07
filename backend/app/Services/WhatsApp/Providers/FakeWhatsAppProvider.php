@@ -37,6 +37,16 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
         );
     }
 
+    public function diagnoseConnectivity(): array
+    {
+        return [
+            'status' => 'available',
+            'http_status' => null,
+            'error_code' => null,
+            'external_api_called' => false,
+        ];
+    }
+
     public function verifyWebhook(?string $mode, ?string $token, ?string $challenge): ?string
     {
         $expectedToken = config('chatbotcrm.whatsapp.fake.verify_token')

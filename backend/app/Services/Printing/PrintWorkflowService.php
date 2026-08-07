@@ -449,6 +449,7 @@ class PrintWorkflowService
                             'total_price_cents' => (int) $option->total_price_cents,
                             'price_delta' => $this->money((int) $option->price_delta_cents, $currency),
                             'total_price' => $this->money((int) $option->total_price_cents, $currency),
+                            'metadata' => $option->metadata ?? [],
                         ])
                         ->values()
                         ->all(),
@@ -498,6 +499,28 @@ class PrintWorkflowService
             foreach (['item_notes', 'beneficiary_name', 'beneficiary_notes', 'substitution_notes'] as $field) {
                 if (! empty($item[$field])) {
                     $lines[] = '- '.$item[$field];
+                }
+            }
+
+            foreach ($item['options'] as $option) {
+                $line = "- {$option['quantity']}x {$option['name']}";
+
+                if (($option['total_price_cents'] ?? 0) > 0) {
+                    $line .= ' '.$option['total_price'];
+                } elseif (($option['price_delta_cents'] ?? 0) > 0) {
+                    $line .= ' '.$option['price_delta'];
+                }
+
+                $lines[] = $line;
+            }
+
+            foreach ($item['removed_ingredients'] as $detail) {
+                $lines[] = '- '.$detail;
+            }
+
+            if (empty($item['options'])) {
+                foreach ($item['selected_components'] as $detail) {
+                    $lines[] = '- '.$detail;
                 }
             }
         }

@@ -69,6 +69,84 @@ class CustomerOperationsTest extends TestCase
             ])
             ->assertStatus(422);
 
-        $this->assertSame(1, Customer::query()->where('company_id', $company->id)->where('phone', '(62) 90000-0000')->count());
+        $this->assertSame(1, Customer::query()->where('company_id', $company->id)->where('phone', '62900000000')->count());
+    }
+
+    public function test_customer_update_persists_fields_address_and_rejects_duplicate_phone(): void
+    {
+        $this->seed(CompanySeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Antigo',
+            'phone' => '62911110000',
+            'whatsapp_id' => '5562911110000',
+            'whatsapp_profile_name' => 'Perfil Meta',
+            'source_channel' => 'whatsapp',
+        ]);
+        Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Existente',
+            'phone' => '62922220000',
+        ]);
+
+        $this->actingAs($user)
+            ->patchJson("/api/app/customers/{$customer->id}", [
+                'name' => 'Cliente Corrigido',
+                'phone' => '(62) 91111-0000',
+                'email' => 'cliente.corrigido@example.test',
+                'notes' => 'Preferencia registrada.',
+                'address' => [
+                    'street' => 'Rua Um',
+                    'number' => '123',
+                    'neighborhood' => 'Centro',
+                    'city' => 'Goiania',
+                    'reference' => 'Portao amarelo',
+                ],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.name', 'Cliente Corrigido')
+            ->assertJsonPath('data.whatsappProfileName', 'Perfil Meta')
+            ->assertJsonPath('data.address.street', 'Rua Um');
+
+        $this->assertDatabaseHas('customer_addresses', [
+            'customer_id' => $customer->id,
+            'street' => 'Rua Um',
+            'number' => '123',
+        ]);
+
+        $this->actingAs($user)
+            ->patchJson("/api/app/customers/{$customer->id}", [
+                'name' => 'Cliente Duplicado',
+                'phone' => '(62) 92222-0000',
+            ])
+            ->assertStatus(422);
+    }
+
+    public function test_customer_index_hides_demo_records_in_operational_mode(): void
+    {
+        $this->seed(CompanySeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+
+        Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Real',
+            'phone' => '62999990000',
+        ]);
+        Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Exemplo',
+            'email' => Customer::DEMO_EMAIL,
+            'source_channel' => Customer::SOURCE_CHANNEL_DEMO,
+        ]);
+
+        $payload = $this->actingAs($user)->getJson('/api/app/customers')->assertOk()->json('data');
+
+        $this->assertCount(1, $payload);
+        $this->assertSame('Cliente Real', $payload[0]['name']);
     }
 }

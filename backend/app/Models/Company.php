@@ -187,4 +187,9 @@ class Company extends Model
     {
         return $this->hasMany(AutomationEvent::class);
     }
+
+    public function conversationQuickReplies(): HasMany
+    {
+        return $this->hasMany(ConversationQuickReply::class);
+    }
 }

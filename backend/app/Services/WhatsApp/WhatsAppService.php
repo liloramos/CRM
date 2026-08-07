@@ -19,6 +19,7 @@ use App\Models\WhatsAppWebhookEvent;
 use App\Services\Conversations\ConversationAiService;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Payments\PaymentWorkflowService;
+use DomainException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -33,6 +34,8 @@ class WhatsAppService
         private readonly ConversationAlertService $alerts,
         private readonly ConversationAiService $ai,
         private readonly PaymentWorkflowService $payments,
+        private readonly WhatsAppErrorClassifier $errors,
+        private readonly WhatsAppInboundTrace $inboundTrace,
     ) {}
 
     /**
@@ -107,8 +110,9 @@ class WhatsAppService
         array $headers = [],
         ?string $method = null,
         ?string $sourceIp = null,
+        ?string $correlationId = null,
     ): WhatsAppWebhookEvent {
-        return DB::transaction(function () use ($payload, $headers, $method, $sourceIp): WhatsAppWebhookEvent {
+        return DB::transaction(function () use ($payload, $headers, $method, $sourceIp, $correlationId): WhatsAppWebhookEvent {
             $account = $this->resolveAccountFromPayload($payload);
             $eventType = $this->eventTypeForPayload($payload);
             $deduplicationKey = $this->deduplicationKey($payload);
@@ -124,7 +128,13 @@ class WhatsAppService
                 }
             }
 
-            return WhatsAppWebhookEvent::query()->create([
+            $sanitizedPayload = $this->sanitizer->sanitize($payload);
+
+            if ($correlationId !== null) {
+                $sanitizedPayload['inbound_trace'] = ['correlation_id' => $correlationId];
+            }
+
+            $event = WhatsAppWebhookEvent::query()->create([
                 'company_id' => $account?->company_id,
                 'whatsapp_account_id' => $account?->id,
                 'provider' => $this->provider->name(),
@@ -136,9 +146,18 @@ class WhatsAppService
                 'signature_present' => $this->signaturePresent($headers),
                 'source_ip_hash' => $this->sourceIpHash($sourceIp),
                 'raw_payload' => $payload,
-                'sanitized_payload' => $this->sanitizer->sanitize($payload),
+                'sanitized_payload' => $sanitizedPayload,
                 'received_at' => now(),
             ]);
+
+            $this->inboundTrace->record($event, 'event_persisted', [
+                ...$this->traceContextForPayload($payload),
+                'account_id' => $account?->id,
+                'company_id' => $account?->company_id,
+                'status' => WhatsAppWebhookEvent::STATUS_RECEIVED,
+            ]);
+
+            return $event->refresh();
         });
     }
 
@@ -150,12 +169,21 @@ class WhatsAppService
             try {
                 $messages = $this->provider->parseWebhookPayload($event->raw_payload ?? []);
                 $statusCount = $this->processStatusesFromPayload($event->raw_payload ?? [], $event);
+                $this->inboundTrace->record($event, 'payload_parsed', [
+                    ...$this->traceContextForPayload($event->raw_payload ?? []),
+                    'message_count' => count($messages),
+                    'status_count' => $statusCount,
+                ]);
 
                 if ($messages === [] && $statusCount === 0) {
                     $event->forceFill([
                         'status' => WhatsAppWebhookEvent::STATUS_IGNORED,
                         'processed_at' => now(),
                     ])->save();
+
+                    $this->inboundTrace->record($event, 'event_completed', [
+                        'status' => WhatsAppWebhookEvent::STATUS_IGNORED,
+                    ]);
 
                     return $event->refresh();
                 }
@@ -168,12 +196,25 @@ class WhatsAppService
                     'status' => WhatsAppWebhookEvent::STATUS_PROCESSED,
                     'processed_at' => now(),
                 ])->save();
+
+                $this->inboundTrace->record($event, 'event_completed', [
+                    'status' => WhatsAppWebhookEvent::STATUS_PROCESSED,
+                ]);
             } catch (Throwable $exception) {
+                $errorCode = $this->webhookProcessingErrorCode($exception);
                 $event->forceFill([
                     'status' => WhatsAppWebhookEvent::STATUS_FAILED,
-                    'error_message' => $exception->getMessage(),
+                    'error_message' => 'Falha ao processar evento do WhatsApp.',
+                    'sanitized_payload' => array_merge($event->sanitized_payload ?? [], [
+                        'processing_error_type' => class_basename($exception),
+                    ]),
                     'processed_at' => now(),
                 ])->save();
+
+                $this->inboundTrace->record($event, 'event_failed', [
+                    'error_code' => $errorCode,
+                    'status' => WhatsAppWebhookEvent::STATUS_FAILED,
+                ]);
             }
 
             return $event->refresh();
@@ -185,9 +226,29 @@ class WhatsAppService
      */
     public function sendTextMessage(Company $company, string $to, string $body, array $attributes = []): WhatsAppMessageDelivery
     {
-        return DB::transaction(function () use ($company, $to, $body, $attributes): WhatsAppMessageDelivery {
+        $recipient = $this->normalizeWhatsAppRecipient($to);
+
+        return DB::transaction(function () use ($company, $recipient, $body, $attributes): WhatsAppMessageDelivery {
             $account = $this->defaultAccountFor($company);
-            $conversation = $this->resolveConversationForOutbound($company, $to, $attributes);
+            $conversation = $this->resolveConversationForOutbound($company, $recipient, $attributes);
+            $clientReference = trim((string) ($attributes['client_reference'] ?? ''));
+
+            if ($clientReference !== '') {
+                $existingMessage = Message::query()
+                    ->where('conversation_id', $conversation->id)
+                    ->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)
+                    ->where('metadata->client_reference', $clientReference)
+                    ->first();
+
+                if ($existingMessage instanceof Message) {
+                    $existingDelivery = $existingMessage->whatsappMessageDeliveries()->latest('id')->first();
+
+                    if ($existingDelivery instanceof WhatsAppMessageDelivery) {
+                        return $existingDelivery;
+                    }
+                }
+            }
+
             $message = Message::query()->create([
                 'conversation_id' => $conversation->id,
                 'sender' => 'agent',
@@ -196,13 +257,14 @@ class WhatsAppService
                 'content' => $body,
                 'type' => 'text',
                 'provider' => $this->provider->name(),
-                'external_recipient_id' => $to,
+                'external_recipient_id' => $recipient,
                 'delivery_status' => WhatsAppMessageDelivery::STATUS_QUEUED,
                 'metadata' => [
                     'source' => 'whatsapp_service',
                     'provider' => $this->provider->name(),
                     'sender_type' => $attributes['sender_type'] ?? 'human',
                     'sent_by_user_id' => $attributes['sent_by_user_id'] ?? null,
+                    'client_reference' => $clientReference !== '' ? $clientReference : null,
                 ],
             ]);
 
@@ -214,18 +276,18 @@ class WhatsAppService
                 'provider' => $this->provider->name(),
                 'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
                 'message_type' => 'text',
-                'recipient' => $to,
+                'recipient' => $recipient,
                 'status' => WhatsAppMessageDelivery::STATUS_QUEUED,
                 'content_preview' => Str::limit($body, 120),
                 'safe_payload' => [
                     'provider' => $this->provider->name(),
                     'body_length' => strlen($body),
-                    'recipient_present' => $to !== '',
+                    'recipient_present' => $recipient !== '',
                 ],
             ]);
 
             $result = $this->provider->sendTextMessage(new OutgoingWhatsAppMessage(
-                to: $to,
+                to: $recipient,
                 body: $body,
                 phoneNumberId: $account?->phone_number_id,
                 metadata: ['delivery_id' => $delivery->id],
@@ -246,6 +308,102 @@ class WhatsAppService
                 'external_message_id' => $result->providerMessageId,
                 'delivery_status' => $delivery->status,
                 'sent_at' => $delivery->sent_at,
+                'failed_at' => $delivery->failed_at,
+                'error_code' => $result->errorCode,
+            ])->save();
+
+            $conversation->forceFill([
+                'last_business_message_at' => now(),
+                'last_message_at' => now(),
+            ])->save();
+
+            return $delivery->refresh();
+        });
+    }
+
+    public function retryTextMessage(Company $company, Message $message): WhatsAppMessageDelivery
+    {
+        return DB::transaction(function () use ($company, $message): WhatsAppMessageDelivery {
+            $message = Message::query()
+                ->with('conversation')
+                ->whereKey($message->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $conversation = $message->conversation;
+
+            if (! $conversation instanceof Conversation || (int) $conversation->company_id !== (int) $company->id) {
+                throw new DomainException('Mensagem não pertence ao restaurante atual.');
+            }
+
+            if ($message->direction !== WhatsAppMessageDelivery::DIRECTION_OUTBOUND || $message->delivery_status !== WhatsAppMessageDelivery::STATUS_FAILED) {
+                throw new DomainException('Somente mensagens com falha podem ser reenviadas.');
+            }
+
+            $recipient = $this->normalizeWhatsAppRecipient(
+                (string) ($message->external_recipient_id
+                    ?: $conversation->whatsapp_identifier
+                    ?: $conversation->customer()->value('whatsapp_id')
+                    ?: $conversation->customer()->value('phone')),
+            );
+
+            if ($recipient === '') {
+                throw new DomainException('A conversa não possui telefone WhatsApp válido para reenvio.');
+            }
+
+            $account = $this->defaultAccountFor($company);
+
+            $delivery = WhatsAppMessageDelivery::query()->create([
+                'company_id' => $company->id,
+                'whatsapp_account_id' => $account?->id,
+                'conversation_id' => $conversation->id,
+                'message_id' => $message->id,
+                'provider' => $this->provider->name(),
+                'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
+                'message_type' => 'text',
+                'recipient' => $recipient,
+                'status' => WhatsAppMessageDelivery::STATUS_QUEUED,
+                'content_preview' => Str::limit((string) $message->content, 120),
+                'safe_payload' => [
+                    'provider' => $this->provider->name(),
+                    'body_length' => strlen((string) $message->content),
+                    'recipient_present' => true,
+                    'retry_of_message_id' => $message->id,
+                ],
+            ]);
+
+            $message->forceFill([
+                'delivery_status' => WhatsAppMessageDelivery::STATUS_QUEUED,
+                'failed_at' => null,
+                'error_code' => null,
+            ])->save();
+
+            $result = $this->provider->sendTextMessage(new OutgoingWhatsAppMessage(
+                to: $recipient,
+                body: (string) $message->content,
+                phoneNumberId: $account?->phone_number_id,
+                metadata: ['delivery_id' => $delivery->id, 'retry_of_message_id' => $message->id],
+            ));
+
+            $delivery->forceFill([
+                'provider_message_id' => $result->providerMessageId,
+                'status' => $result->successful()
+                    ? WhatsAppMessageDelivery::STATUS_SENT
+                    : WhatsAppMessageDelivery::STATUS_FAILED,
+                'safe_payload' => $result->safePayload,
+                'sent_at' => $result->successful() ? now() : null,
+                'failed_at' => $result->successful() ? null : now(),
+                'error_message' => $result->errorMessage,
+            ])->save();
+
+            $message->forceFill([
+                'external_message_id' => $result->providerMessageId ?: $message->external_message_id,
+                'external_recipient_id' => $recipient,
+                'provider' => $this->provider->name(),
+                'delivery_status' => $delivery->status,
+                'sent_at' => $delivery->sent_at,
+                'failed_at' => $delivery->failed_at,
+                'error_code' => $result->errorCode,
             ])->save();
 
             $conversation->forceFill([
@@ -262,7 +420,7 @@ class WhatsAppService
         $account = $this->resolveAccountForIncoming($incomingMessage, $event);
 
         if ($account === null) {
-            return;
+            throw new DomainException('whatsapp_account_not_resolved');
         }
 
         if ($incomingMessage->providerMessageId !== null && Message::query()
@@ -273,8 +431,21 @@ class WhatsAppService
         }
 
         $company = $account->company()->firstOrFail();
+        $this->inboundTrace->record($event, 'company_resolved', [
+            'account_id' => $account->id,
+            'company_id' => $company->id,
+        ]);
         $customer = $this->resolveCustomerForIncoming($company, $incomingMessage);
+        $this->inboundTrace->record($event, 'customer_resolved', [
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+        ]);
         $conversation = $this->resolveOpenConversation($account->company_id, $customer->id, $incomingMessage);
+        $this->inboundTrace->record($event, 'conversation_resolved', [
+            'company_id' => $company->id,
+            'conversation_id' => $conversation->id,
+            'customer_id' => $customer->id,
+        ]);
         $expectedAutomationVersion = (int) ($conversation->automation_version ?? 0);
         $content = $incomingMessage->text ?: $this->placeholderForMessageType($incomingMessage->messageType);
 
@@ -292,6 +463,13 @@ class WhatsAppService
             'delivery_status' => WhatsAppMessageDelivery::STATUS_RECEIVED,
             'metadata' => $incomingMessage->safeMetadata,
             'received_at' => $incomingMessage->sentAt ?? now(),
+        ]);
+        $this->inboundTrace->record($event, 'message_persisted', [
+            'company_id' => $company->id,
+            'conversation_id' => $conversation->id,
+            'customer_id' => $customer->id,
+            'message_id_suffix' => $this->identifierSuffix($incomingMessage->providerMessageId),
+            'message_type' => $incomingMessage->messageType,
         ]);
 
         WhatsAppMessageDelivery::query()->firstOrCreate(
@@ -356,6 +534,14 @@ class WhatsAppService
 
     private function defaultAccountFor(Company $company): ?WhatsAppAccount
     {
+        if ($this->provider->name() === WhatsAppAccount::PROVIDER_META_CLOUD) {
+            $account = $this->configuredMetaAccountFor($company);
+
+            if ($account instanceof WhatsAppAccount) {
+                return $account;
+            }
+        }
+
         return $company->whatsappAccounts()
             ->where('provider', $this->provider->name())
             ->orderByDesc('is_default')
@@ -370,10 +556,16 @@ class WhatsAppService
         }
 
         if ($message->providerAccountId !== null) {
-            return WhatsAppAccount::query()
+            $account = WhatsAppAccount::query()
                 ->where('provider', $this->provider->name())
                 ->where('phone_number_id', $message->providerAccountId)
                 ->first();
+
+            if ($account instanceof WhatsAppAccount) {
+                return $account;
+            }
+
+            return $this->configuredMetaAccountForDefaultCompany($message->providerAccountId);
         }
 
         return WhatsAppAccount::query()
@@ -394,6 +586,12 @@ class WhatsAppService
                 ->first();
 
             if ($account !== null) {
+                return $account;
+            }
+
+            $account = $this->configuredMetaAccountForDefaultCompany($phoneNumberId);
+
+            if ($account instanceof WhatsAppAccount) {
                 return $account;
             }
         }
@@ -515,6 +713,10 @@ class WhatsAppService
                 $updates['whatsapp_profile_name'] = $name;
             }
 
+            if ($fromWhatsApp) {
+                $updates['last_whatsapp_at'] = now();
+            }
+
             if ($updates !== []) {
                 $customer->forceFill($updates)->save();
             }
@@ -529,6 +731,7 @@ class WhatsAppService
                 'phone' => $normalizedPhone,
                 'whatsapp_id' => $fromWhatsApp ? $normalizedPhone : null,
                 'whatsapp_profile_name' => $fromWhatsApp ? $name : null,
+                'last_whatsapp_at' => $fromWhatsApp ? now() : null,
                 'source_channel' => $fromWhatsApp ? 'whatsapp' : 'manual',
             ],
         );
@@ -747,19 +950,62 @@ class WhatsAppService
             } elseif ($fields['status'] === WhatsAppMessageDelivery::STATUS_READ) {
                 $fields['read_at'] = $timestamp;
             } elseif ($fields['status'] === WhatsAppMessageDelivery::STATUS_FAILED) {
+                $providerError = $this->errors->providerRejection(
+                    400,
+                    is_array($statusRow['errors'][0] ?? null) ? $statusRow['errors'][0] : [],
+                );
                 $fields['failed_at'] = $timestamp;
-                $fields['error_message'] = 'Falha reportada pelo WhatsApp.';
+                $fields['error_message'] = $providerError['message'];
+                $fields['safe_payload'] = array_merge($delivery->safe_payload ?? [], [
+                    'error_code' => $providerError['code'],
+                    ...$providerError['safe_details'],
+                ]);
             }
 
             $delivery->forceFill($fields)->save();
 
             if ($delivery->message) {
-                $delivery->message->forceFill([
+                $message = $delivery->message;
+                $message->forceFill([
                     'delivery_status' => $fields['status'],
-                    'delivered_at' => $fields['delivered_at'] ?? $delivery->message->delivered_at,
-                    'read_at' => $fields['read_at'] ?? $delivery->message->read_at,
-                    'failed_at' => $fields['failed_at'] ?? $delivery->message->failed_at,
+                    'delivered_at' => $fields['delivered_at'] ?? $message->delivered_at,
+                    'read_at' => $fields['read_at'] ?? $message->read_at,
+                    'failed_at' => $fields['failed_at'] ?? $message->failed_at,
+                    'error_code' => $fields['status'] === WhatsAppMessageDelivery::STATUS_FAILED
+                        ? data_get($fields, 'safe_payload.error_code')
+                        : null,
                 ])->save();
+
+                $company = $delivery->company;
+                $alertKey = 'message-send-failed:'.$message->id;
+
+                if ($fields['status'] === WhatsAppMessageDelivery::STATUS_FAILED && $company instanceof Company) {
+                    $this->alerts->open(
+                        company: $company,
+                        type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
+                        severity: ConversationAlert::SEVERITY_WARNING,
+                        title: 'Falha ao enviar mensagem',
+                        message: $fields['error_message'],
+                        conversation: $delivery->conversation,
+                        messageModel: $message,
+                        deduplicationKey: $alertKey,
+                        metadata: [
+                            'delivery_id' => $delivery->id,
+                            'error_code' => data_get($fields, 'safe_payload.error_code'),
+                        ],
+                    );
+                } elseif (in_array($fields['status'], [
+                    WhatsAppMessageDelivery::STATUS_SENT,
+                    WhatsAppMessageDelivery::STATUS_DELIVERED,
+                    WhatsAppMessageDelivery::STATUS_READ,
+                ], true)) {
+                    ConversationAlert::query()
+                        ->where('company_id', $delivery->company_id)
+                        ->where('deduplication_key', $alertKey)
+                        ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+                        ->get()
+                        ->each(fn (ConversationAlert $alert) => $this->alerts->resolve($alert));
+                }
             }
 
             $count++;
@@ -844,13 +1090,29 @@ class WhatsAppService
         return $normalized !== '' && $normalized !== null ? $normalized : $phone;
     }
 
+    private function normalizeWhatsAppRecipient(string $phone): string
+    {
+        $digits = $this->normalizePhone($phone);
+
+        if (str_starts_with($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+
+        if (! str_starts_with($digits, '55') && in_array(strlen($digits), [10, 11], true)) {
+            return '55'.$digits;
+        }
+
+        return $digits;
+    }
+
     private function markDefaultAccountWebhookVerified(): void
     {
         $account = WhatsAppAccount::query()
             ->where('provider', $this->provider->name())
             ->orderByDesc('is_default')
             ->orderBy('id')
-            ->first();
+            ->first()
+            ?: $this->configuredMetaAccountForDefaultCompany();
 
         if ($account === null) {
             return;
@@ -861,5 +1123,95 @@ class WhatsAppService
             'status' => WhatsAppAccount::STATUS_CONNECTED,
             'connected_at' => $account->connected_at ?? now(),
         ])->save();
+    }
+
+    private function configuredMetaAccountFor(Company $company): ?WhatsAppAccount
+    {
+        $phoneNumberId = trim((string) config('chatbotcrm.whatsapp.meta.phone_number_id', ''));
+
+        if ($this->provider->name() !== WhatsAppAccount::PROVIDER_META_CLOUD || $phoneNumberId === '') {
+            return null;
+        }
+
+        $account = WhatsAppAccount::query()->updateOrCreate(
+            [
+                'company_id' => $company->id,
+                'provider' => WhatsAppAccount::PROVIDER_META_CLOUD,
+                'phone_number_id' => $phoneNumberId,
+            ],
+            [
+                'name' => 'WhatsApp Meta Cloud',
+                'business_account_id' => config('chatbotcrm.whatsapp.meta.business_account_id'),
+                'status' => WhatsAppAccount::STATUS_CONNECTED,
+                'is_default' => true,
+                'connected_at' => now(),
+                'settings' => [
+                    'source' => 'config',
+                    'api_version' => config('chatbotcrm.whatsapp.meta.api_version'),
+                ],
+            ],
+        );
+
+        WhatsAppAccount::query()
+            ->where('company_id', $company->id)
+            ->where('provider', WhatsAppAccount::PROVIDER_META_CLOUD)
+            ->whereKeyNot($account->id)
+            ->update(['is_default' => false]);
+
+        return $account->refresh();
+    }
+
+    private function configuredMetaAccountForDefaultCompany(?string $payloadPhoneNumberId = null): ?WhatsAppAccount
+    {
+        $configuredPhoneNumberId = trim((string) config('chatbotcrm.whatsapp.meta.phone_number_id', ''));
+
+        if ($payloadPhoneNumberId !== null && $configuredPhoneNumberId !== '' && $payloadPhoneNumberId !== $configuredPhoneNumberId) {
+            return null;
+        }
+
+        $company = Company::query()->orderBy('id')->first();
+
+        return $company instanceof Company ? $this->configuredMetaAccountFor($company) : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, string|null>
+     */
+    private function traceContextForPayload(array $payload): array
+    {
+        $change = data_get($payload, 'entry.0.changes.0', []);
+        $value = is_array($change) ? ($change['value'] ?? []) : [];
+        $message = is_array($value) ? data_get($value, 'messages.0', []) : [];
+        $status = is_array($value) ? data_get($value, 'statuses.0', []) : [];
+
+        return [
+            'field' => is_array($change) ? ($change['field'] ?? null) : null,
+            'message_type' => is_array($message) ? ($message['type'] ?? null) : null,
+            'message_id_suffix' => $this->identifierSuffix(
+                is_array($message) ? ($message['id'] ?? null) : (is_array($status) ? ($status['id'] ?? null) : null),
+            ),
+            'phone_number_id_suffix' => $this->identifierSuffix(
+                is_array($value) ? data_get($value, 'metadata.phone_number_id') : null,
+            ),
+        ];
+    }
+
+    private function identifierSuffix(mixed $value): ?string
+    {
+        if (! is_scalar($value) || trim((string) $value) === '') {
+            return null;
+        }
+
+        return '...'.substr((string) $value, -6);
+    }
+
+    private function webhookProcessingErrorCode(Throwable $exception): string
+    {
+        if ($exception instanceof DomainException && $exception->getMessage() === 'whatsapp_account_not_resolved') {
+            return 'whatsapp_account_not_resolved';
+        }
+
+        return 'whatsapp_webhook_processing_failed';
     }
 }

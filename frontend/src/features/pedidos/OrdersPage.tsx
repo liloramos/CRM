@@ -335,6 +335,8 @@ function orderItemColumns(showBeneficiary: boolean): DataTableColumn<OrderItem>[
       render: (item) => (
         <div className="table-main">
           <strong>{item.name}</strong>
+          {item.composition && item.composition.length > 0 ? <small>{item.composition.join(', ')}</small> : null}
+          {item.removals && item.removals.length > 0 ? <small className="table-main__removals">{item.removals.join(', ')}</small> : null}
           {item.additions.length > 0 ? <small>{item.additions.join(', ')}</small> : null}
           <span>{item.notes}</span>
         </div>

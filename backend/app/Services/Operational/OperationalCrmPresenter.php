@@ -43,17 +43,41 @@ class OperationalCrmPresenter
 
         $conversations = Conversation::query()
             ->with([
-                'customer',
+                'customer.addresses',
                 'messages' => fn ($query) => $query->latest()->limit(8),
                 'orders' => fn ($query) => $query->latest()->limit(1),
             ])
             ->where('company_id', $company->id)
+            ->when(! config('chatbotcrm.whatsapp.demo_data_enabled'), function ($query): void {
+                $query->whereDoesntHave('customer', function ($customers): void {
+                    $customers->where('source_channel', Customer::SOURCE_CHANNEL_DEMO)
+                        ->orWhere('email', Customer::DEMO_EMAIL)
+                        ->orWhere('email', 'like', Customer::DASHBOARD_DEMO_EMAIL_PREFIX.'%@example.test');
+                });
+            })
             ->latest('started_at')
             ->limit(30)
             ->get();
 
         $customers = Customer::query()
+            ->with('addresses')
             ->where('company_id', $company->id)
+            ->when(! config('chatbotcrm.whatsapp.demo_data_enabled'), function ($query): void {
+                $query->where(function ($nested): void {
+                    $nested->whereNull('source_channel')
+                        ->orWhere('source_channel', '!=', Customer::SOURCE_CHANNEL_DEMO);
+                })
+                    ->where(function ($nested): void {
+                        $nested->whereNull('email')
+                            ->orWhere('email', '!=', Customer::DEMO_EMAIL);
+                    });
+            })
+            ->when(! config('chatbotcrm.whatsapp.demo_data_enabled'), function ($query): void {
+                $query->where(function ($nested): void {
+                    $nested->whereNull('email')
+                        ->orWhere('email', 'not like', Customer::DASHBOARD_DEMO_EMAIL_PREFIX.'%@example.test');
+                });
+            })
             ->orderBy('name')
             ->limit(50)
             ->get();
@@ -119,20 +143,7 @@ class OperationalCrmPresenter
             'amountDue' => $this->cents((int) $order->amount_due_cents),
             'items' => $order->items
                 ->sortBy('sort_order')
-                ->map(fn ($item): array => [
-                    'id' => (string) $item->id,
-                    'name' => $item->product_name,
-                    'quantity' => (int) $item->quantity,
-                    'unitPrice' => $this->cents((int) $item->unit_price_cents),
-                    'totalPrice' => $this->cents((int) $item->total_price_cents),
-                    'notes' => $item->item_notes ?: 'Sem observacao por item.',
-                    'beneficiary' => $item->beneficiary_name ?: null,
-                    'additions' => $item->options
-                        ->map(fn ($option): string => $this->optionLabel($option))
-                        ->values()
-                        ->all(),
-                    'unavailable' => false,
-                ])
+                ->map(fn ($item): array => $this->orderItem($item))
                 ->values(),
             'history' => $order->statusHistories
                 ->map(fn ($history): array => [
@@ -143,6 +154,36 @@ class OperationalCrmPresenter
                 ])
                 ->values(),
             'ticketPreviewUrl' => $order->latestPrintJob?->preview_url,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function orderItem($item): array
+    {
+        $options = $item->options;
+
+        return [
+            'id' => (string) $item->id,
+            'name' => $item->product_name,
+            'quantity' => (int) $item->quantity,
+            'unitPrice' => $this->cents((int) $item->unit_price_cents),
+            'totalPrice' => $this->cents((int) $item->total_price_cents),
+            'notes' => $item->item_notes ?: 'Sem observação por item.',
+            'beneficiary' => $item->beneficiary_name ?: null,
+            'composition' => $options
+                ->reject(fn ($option): bool => $this->isPaidAddition($option))
+                ->map(fn ($option): string => $this->optionLabel($option))
+                ->values()
+                ->all(),
+            'removals' => $this->stringList($item->removed_ingredients),
+            'additions' => $options
+                ->filter(fn ($option): bool => $this->isPaidAddition($option))
+                ->map(fn ($option): string => $this->optionLabel($option))
+                ->values()
+                ->all(),
+            'unavailable' => false,
         ];
     }
 
@@ -211,14 +252,31 @@ class OperationalCrmPresenter
      */
     private function customer(?Customer $customer): array
     {
+        $customer?->loadMissing('addresses');
+        $defaultAddress = $customer?->addresses->firstWhere('is_default', true) ?? $customer?->addresses->first();
+
         return [
             'id' => $customer ? (string) $customer->id : 'pending-customer',
             'name' => $customer?->name ?: 'Cliente a confirmar',
             'phoneLabel' => $customer?->phone ?: 'Sem telefone cadastrado',
-            'tags' => ['Operacao'],
+            'phone' => $customer?->phone,
+            'email' => $customer?->email,
+            'whatsappId' => $customer?->whatsapp_id,
+            'whatsappProfileName' => $customer?->whatsapp_profile_name,
+            'sourceChannel' => $customer?->source_channel,
+            'lastWhatsappAt' => $customer?->last_whatsapp_at?->toIso8601String(),
+            'tags' => [$customer?->source_channel === 'whatsapp' ? 'WhatsApp' : 'Operação'],
             'creditBalance' => $this->cents((int) ($customer?->credit_balance_cents ?? 0)),
             'notes' => $customer?->notes ? [$customer->notes] : [],
             'preferences' => [],
+            'address' => $defaultAddress ? [
+                'street' => $defaultAddress->street,
+                'number' => $defaultAddress->number,
+                'complement' => $defaultAddress->complement,
+                'neighborhood' => $defaultAddress->neighborhood,
+                'city' => $defaultAddress->city,
+                'reference' => $defaultAddress->reference,
+            ] : null,
         ];
     }
 
@@ -552,6 +610,37 @@ class OperationalCrmPresenter
         }
 
         return $option->name.' - '.$this->money((int) $option->price_delta_cents, 'BRL');
+    }
+
+    private function isPaidAddition($option): bool
+    {
+        if ((string) $option->group_code === 'variacao_bife' || data_get($option->metadata, 'meat_mode') === 'beef_only') {
+            return false;
+        }
+
+        return in_array((string) $option->group_code, ['bife_adicional', 'adicionais'], true)
+            || data_get($option->metadata, 'addition_code') !== null
+            || ((int) $option->price_delta_cents > 0 && (string) $option->option_type === 'addon');
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function stringList(mixed $value): array
+    {
+        if ($value === null || $value === '') {
+            return [];
+        }
+
+        if (! is_array($value)) {
+            return [(string) $value];
+        }
+
+        return collect($value)
+            ->map(fn (mixed $item): string => is_scalar($item) ? (string) $item : '')
+            ->filter()
+            ->values()
+            ->all();
     }
 
     private function optionGroupLabel(?string $groupCode): string

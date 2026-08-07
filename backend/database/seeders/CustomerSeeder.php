@@ -26,7 +26,8 @@ class CustomerSeeder extends Seeder
             [
                 'name' => 'Cliente Exemplo',
                 'phone' => null,
-                'notes' => 'Cliente ficticio para seed local.',
+                'source_channel' => Customer::SOURCE_CHANNEL_DEMO,
+                'notes' => 'Cliente fictício para seed local.',
             ],
         );
     }

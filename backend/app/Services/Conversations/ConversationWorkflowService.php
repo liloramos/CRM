@@ -2,11 +2,14 @@
 
 namespace App\Services\Conversations;
 
+use App\Exceptions\WhatsAppMessageSendFailedException;
 use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\ConversationAlert;
+use App\Models\Message;
 use App\Models\PaymentProof;
 use App\Models\User;
+use App\Models\WhatsAppMessageDelivery;
 use App\Services\Ai\AiAutomationService;
 use App\Services\Payments\PaymentWorkflowService;
 use App\Services\WhatsApp\WhatsAppService;
@@ -53,8 +56,13 @@ class ConversationWorkflowService
         });
     }
 
-    public function sendHumanMessage(Company $company, Conversation $conversation, User $user, string $body): Conversation
-    {
+    public function sendHumanMessage(
+        Company $company,
+        Conversation $conversation,
+        User $user,
+        string $body,
+        ?string $clientReference = null,
+    ): Conversation {
         $body = trim($body);
 
         if ($body === '') {
@@ -65,7 +73,9 @@ class ConversationWorkflowService
             throw new DomainException('Conversa nao pertence ao restaurante atual.');
         }
 
-        return DB::transaction(function () use ($company, $conversation, $user, $body): Conversation {
+        $failedDelivery = null;
+
+        $conversation = DB::transaction(function () use ($company, $conversation, $user, $body, $clientReference, &$failedDelivery): Conversation {
             $conversation = Conversation::query()
                 ->where('company_id', $company->id)
                 ->whereKey($conversation->id)
@@ -92,18 +102,24 @@ class ConversationWorkflowService
                 'conversation' => $conversation,
                 'sender_type' => 'human',
                 'sent_by_user_id' => $user->id,
+                'client_reference' => $clientReference,
             ]);
 
             if ($delivery->status === 'failed') {
+                $failedDelivery = $delivery;
+
                 $this->alerts->open(
                     company: $company,
                     type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
                     severity: ConversationAlert::SEVERITY_CRITICAL,
                     title: 'Falha ao enviar mensagem',
-                    message: 'A mensagem nao foi entregue pelo provedor WhatsApp.',
+                    message: $delivery->error_message ?: 'A mensagem não foi entregue pelo provedor WhatsApp.',
                     conversation: $conversation,
-                    deduplicationKey: 'message-send-failed:'.$delivery->id,
-                    metadata: ['delivery_id' => $delivery->id],
+                    deduplicationKey: 'message-send-failed:'.$delivery->message_id,
+                    metadata: [
+                        'delivery_id' => $delivery->id,
+                        'error_code' => data_get($delivery->safe_payload, 'error_code'),
+                    ],
                 );
             }
 
@@ -115,6 +131,59 @@ class ConversationWorkflowService
 
             return $conversation->refresh();
         });
+
+        if ($failedDelivery instanceof WhatsAppMessageDelivery) {
+            throw new WhatsAppMessageSendFailedException(
+                $failedDelivery->error_message ?: 'Não foi possível enviar a mensagem pelo WhatsApp.',
+                (int) $conversation->id,
+                $failedDelivery->message_id ? (int) $failedDelivery->message_id : null,
+                (string) (data_get($failedDelivery->safe_payload, 'error_code') ?: 'whatsapp_provider_rejected'),
+            );
+        }
+
+        return $conversation;
+    }
+
+    public function retryHumanMessage(Company $company, Conversation $conversation, Message $message, User $user): Conversation
+    {
+        if ((int) $conversation->company_id !== (int) $company->id || (int) $message->conversation_id !== (int) $conversation->id) {
+            throw new DomainException('Mensagem não pertence a esta conversa.');
+        }
+
+        $delivery = $this->whatsapp->retryTextMessage($company, $message);
+
+        if ($delivery->status === WhatsAppMessageDelivery::STATUS_FAILED) {
+            $this->alerts->open(
+                company: $company,
+                type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
+                severity: ConversationAlert::SEVERITY_CRITICAL,
+                title: 'Falha ao reenviar mensagem',
+                message: $delivery->error_message ?: 'A mensagem não foi entregue pelo provedor WhatsApp.',
+                conversation: $conversation,
+                deduplicationKey: 'message-send-failed:'.$delivery->message_id,
+                metadata: [
+                    'delivery_id' => $delivery->id,
+                    'actor_id' => $user->id,
+                    'error_code' => data_get($delivery->safe_payload, 'error_code'),
+                ],
+            );
+
+            throw new WhatsAppMessageSendFailedException(
+                $delivery->error_message ?: 'Não foi possível reenviar a mensagem pelo WhatsApp.',
+                (int) $conversation->id,
+                $delivery->message_id ? (int) $delivery->message_id : null,
+                (string) (data_get($delivery->safe_payload, 'error_code') ?: 'whatsapp_provider_rejected'),
+            );
+        }
+
+        ConversationAlert::query()
+            ->where('company_id', $company->id)
+            ->where('deduplication_key', 'message-send-failed:'.$message->id)
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->get()
+            ->each(fn (ConversationAlert $alert) => $this->alerts->resolve($alert, $user));
+
+        return $conversation->refresh();
     }
 
     public function approvePaymentProof(

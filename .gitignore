@@ -58,3 +58,7 @@ Thumbs.db
 .nova/
 .vscode/
 .zed/
+
+# Local visual-validation profiles and screenshots may contain session data.
+.tmp-chrome-login-profile-*/
+.tmp-login-*.png

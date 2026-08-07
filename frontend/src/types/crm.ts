@@ -79,10 +79,24 @@ export type CustomerSummary = {
   id: string
   name: string
   phoneLabel: string
+  phone?: string | null
+  email?: string | null
+  whatsappId?: string | null
+  whatsappProfileName?: string | null
+  sourceChannel?: string | null
+  lastWhatsappAt?: string | null
   tags: string[]
   creditBalance: number
   notes: string[]
   preferences: string[]
+  address?: {
+    street?: string | null
+    number?: string | null
+    complement?: string | null
+    neighborhood?: string | null
+    city?: string | null
+    reference?: string | null
+  } | null
 }
 
 export type OrderItem = {
@@ -93,6 +107,8 @@ export type OrderItem = {
   totalPrice: number
   notes: string
   beneficiary: string | null
+  composition?: string[]
+  removals?: string[]
   additions: string[]
   unavailable?: boolean
 }
@@ -137,7 +153,10 @@ export type ConversationMessage = {
   type?: 'text' | 'image' | 'document' | 'audio' | 'location' | 'interactive' | 'unsupported' | string
   body: string
   timeLabel: string
+  createdAt?: string | null
   status?: string | null
+  errorMessage?: string | null
+  errorCode?: string | null
   media?: Array<{
     id: string
     type: string
@@ -146,6 +165,42 @@ export type ConversationMessage = {
     sizeBytes: number | null
     url: string | null
   }>
+}
+
+export type ConversationQuickReplyCategory =
+  | 'greeting'
+  | 'menu'
+  | 'order'
+  | 'address'
+  | 'payment'
+  | 'payment_proof'
+  | 'unavailable_product'
+  | 'human_support'
+  | 'closing'
+
+export type ConversationQuickReply = {
+  id: string
+  title: string
+  shortcut: string
+  body: string
+  category: ConversationQuickReplyCategory
+  isActive: boolean
+  displayOrder: number
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export type ConversationAiStyle = {
+  establishment_name: string
+  preferred_greeting: string
+  tone: 'warm' | 'direct' | 'casual' | 'professional'
+  formality: 'informal' | 'balanced' | 'formal'
+  emoji_usage: 'none' | 'light' | 'moderate'
+  preferred_words: string[]
+  forbidden_words: string[]
+  human_transfer_message: string
+  payment_proof_received_message: string
+  closing_message: string
 }
 
 export type ConversationAlert = {

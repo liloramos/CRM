@@ -8,12 +8,19 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Customer extends Model
 {
+    public const DEMO_EMAIL = 'cliente.exemplo@example.test';
+
+    public const DASHBOARD_DEMO_EMAIL_PREFIX = 'dashboard.demo.';
+
+    public const SOURCE_CHANNEL_DEMO = 'demo';
+
     protected $fillable = [
         'company_id',
         'name',
         'phone',
         'whatsapp_id',
         'whatsapp_profile_name',
+        'last_whatsapp_at',
         'email',
         'notes',
         'source_channel',
@@ -25,6 +32,7 @@ class Customer extends Model
     {
         return [
             'credit_balance_cents' => 'integer',
+            'last_whatsapp_at' => 'datetime',
         ];
     }
 
@@ -56,5 +64,11 @@ class Customer extends Model
     public function creditMovements(): HasMany
     {
         return $this->hasMany(CustomerCreditMovement::class);
+    }
+
+    public function isDemoRecord(): bool
+    {
+        return $this->source_channel === self::SOURCE_CHANNEL_DEMO
+            || $this->email === self::DEMO_EMAIL;
     }
 }
