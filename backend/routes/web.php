@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\Champs\ChampsSearchController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
+use App\Http\Controllers\Api\UserProfileController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
 use App\Http\Controllers\Printing\PrintJobController;
 use App\Http\Controllers\WhatsApp\WhatsAppStatusController;
@@ -25,6 +26,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
 
     Route::middleware('auth')->group(function () {
         Route::post('logout', [AppSessionController::class, 'logout'])->name('session.logout');
+        Route::patch('profile', [UserProfileController::class, 'update'])->name('profile.update');
+        Route::post('profile/avatar', [UserProfileController::class, 'updateAvatar'])->name('profile.avatar.update');
+        Route::delete('profile/avatar', [UserProfileController::class, 'destroyAvatar'])->name('profile.avatar.destroy');
         Route::get('operational-snapshot', OperationalSnapshotController::class)->name('operational-snapshot');
         Route::patch('menu/options/{productOption}/availability', [MenuOptionAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')

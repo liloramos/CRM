@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\AuthenticatedUserResource;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,7 +30,7 @@ class AppSessionController extends Controller
 
         return response()->json([
             'authenticated' => true,
-            'user' => $this->userPayload($request->user()),
+            'user' => $this->userPayload($request, $request->user()),
         ]);
     }
 
@@ -54,7 +55,7 @@ class AppSessionController extends Controller
 
         return response()->json([
             'authenticated' => true,
-            'user' => $this->userPayload($request->user()),
+            'user' => $this->userPayload($request, $request->user()),
         ]);
     }
 
@@ -73,23 +74,10 @@ class AppSessionController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function userPayload(?User $user): array
+    private function userPayload(Request $request, ?User $user): array
     {
         abort_unless($user, 401);
 
-        $user->loadMissing('company', 'roles.permissions');
-
-        return [
-            'id' => (string) $user->id,
-            'name' => $user->name,
-            'email' => $user->email,
-            'company' => $user->company ? [
-                'id' => (string) $user->company->id,
-                'name' => $user->company->name,
-                'slug' => $user->company->slug,
-            ] : null,
-            'roles' => $user->roleNames(),
-            'permissions' => $user->permissionNames(),
-        ];
+        return (new AuthenticatedUserResource($user))->resolve($request);
     }
 }

@@ -2,6 +2,7 @@ import {
   ArrowRight,
   Bell,
   Bot,
+  Camera,
   ChartNoAxesColumnIncreasing,
   Check,
   ChevronLeft,
@@ -27,6 +28,7 @@ import {
   Sparkles,
   TriangleAlert,
   Truck,
+  Trash2,
   User,
   Users,
   Utensils,
@@ -67,6 +69,8 @@ export type IconName =
   | 'clock'
   | 'spark'
   | 'logout'
+  | 'camera'
+  | 'trash'
 
 type IconProps = {
   name: IconName | string
@@ -107,6 +111,8 @@ const iconComponents: Record<string, LucideIcon> = {
   clock: Clock,
   spark: Sparkles,
   logout: LogOut,
+  camera: Camera,
+  trash: Trash2,
 }
 
 export function Icon({ name, size = 20, className = '' }: IconProps) {

@@ -2,21 +2,23 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthUser } from '../../types/crm'
 import { IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
-import { initialsFromName } from '../../utils/formatters'
+import { UserAvatar } from './UserAvatar'
 
 type TopbarProps = {
   isSyncing: boolean
   lastSyncedAt: Date | null
   onLogout: () => void
+  onOpenProfile: () => void
   onRefresh: () => void
   user: AuthUser | null
 }
 
-export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: TopbarProps) {
+export function Topbar({ isSyncing, lastSyncedAt, onLogout, onOpenProfile, onRefresh, user }: TopbarProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const companyName = user?.company?.name ?? 'Conta comercial atual'
-  const roleLabel = formatRole(user?.roles[0])
+  const userName = user?.name ?? 'Conta autenticada'
+  const roleLabel = user?.jobTitle?.trim() || formatRole(user?.roles[0])
   const syncedLabel = lastSyncedAt
     ? `Atualizado ${lastSyncedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
     : 'Aguardando sincronização'
@@ -79,9 +81,9 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: T
             onKeyDown={handleProfileKeyDown}
             type="button"
           >
-            <span className="avatar">{initialsFromName(user?.name ?? 'Usuario')}</span>
+            <UserAvatar avatarUrl={user?.avatarUrl} name={userName} />
             <span className="user-chip__copy">
-              <strong>{user?.name ?? 'Operador'}</strong>
+              <strong>{userName}</strong>
               <small>{roleLabel}</small>
             </span>
             <Icon name="arrow" size={15} />
@@ -90,13 +92,26 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: T
           {isProfileOpen ? (
             <div className="user-menu__popover" role="menu">
               <div className="user-menu__identity">
-                <span className="avatar avatar--lg">{initialsFromName(user?.name ?? 'Usuario')}</span>
+                <UserAvatar avatarUrl={user?.avatarUrl} name={userName} size="lg" />
                 <div>
-                  <strong>{user?.name ?? 'Operador'}</strong>
-                  <span>{user?.email ?? 'Conta local'}</span>
+                  <strong>{userName}</strong>
+                  <span>{user?.email ?? ''}</span>
+                  <span>{roleLabel}</span>
                   <small>{companyName}</small>
                 </div>
               </div>
+              <button
+                className="user-menu__item"
+                onClick={() => {
+                  setIsProfileOpen(false)
+                  onOpenProfile()
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Icon name="user" size={17} />
+                <span>Meu perfil</span>
+              </button>
               <button
                 className="user-menu__item"
                 onClick={() => {

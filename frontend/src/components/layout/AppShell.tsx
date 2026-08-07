@@ -49,6 +49,7 @@ export function AppShell({
           isSyncing={isSyncing}
           lastSyncedAt={lastSyncedAt}
           onLogout={onLogout}
+          onOpenProfile={() => onNavigate('perfil')}
           onRefresh={onRefresh}
           user={user}
         />

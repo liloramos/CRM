@@ -10,6 +10,7 @@ import { MenuPage } from './features/cardapio/MenuPage'
 import { CustomersPage } from './features/clientes/CustomersPage'
 import { ConversationsPage } from './features/conversas/ConversationsPage'
 import { SettingsPage } from './features/configuracoes/SettingsPage'
+import { ProfilePage } from './features/configuracoes/ProfilePage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DeliveryPage } from './features/entregas/DeliveryPage'
 import { FinancePage } from './features/financeiro/FinancePage'
@@ -344,7 +345,7 @@ function App() {
       case 'ia':
         return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="ia" />
       case 'perfil':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="perfil" />
+        return <ProfilePage />
       case 'configuracoes':
       default:
         return (

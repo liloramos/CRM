@@ -11,6 +11,7 @@ import {
 } from '../mocks/operacional.mock'
 import { ordersMock } from '../mocks/pedidos.mock'
 import type { AuthUser, MenuOption, OperationalSnapshot, PrintPreviewResult, Product, SnapshotSource } from '../types/crm'
+import { adaptAuthUser, type AuthUserResource } from '../features/auth/auth-user'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 const MOCK_FALLBACK_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_FALLBACK === 'true'
@@ -25,6 +26,11 @@ type ApiEnvelope<T> = {
 type SessionResponse = {
   authenticated: boolean
   user: AuthUser | null
+}
+
+type SessionResourceResponse = {
+  authenticated: boolean
+  user: AuthUserResource | null
 }
 
 type SnapshotResponse = {
@@ -145,7 +151,9 @@ export function getMockOperationalSnapshot(): OperationalSnapshot {
 
 export async function getSession(): Promise<SessionResponse> {
   try {
-    return await requestJson<SessionResponse>('/api/app/session')
+    const response = await requestJson<SessionResourceResponse>('/api/app/session')
+
+    return adaptSessionResponse(response)
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
       return { authenticated: false, user: null }
@@ -156,10 +164,12 @@ export async function getSession(): Promise<SessionResponse> {
 }
 
 export async function login(payload: LoginPayload): Promise<SessionResponse> {
-  return requestJson<SessionResponse>('/api/app/login', {
+  const response = await requestJson<SessionResourceResponse>('/api/app/login', {
     body: JSON.stringify(payload),
     method: 'POST',
   })
+
+  return adaptSessionResponse(response)
 }
 
 export async function logout(): Promise<void> {
@@ -326,7 +336,9 @@ export async function requestJson<T = unknown>(path: string, init: RequestInit =
 
   headers.set('Accept', 'application/json')
 
-  if (init.body && !headers.has('Content-Type')) {
+  const hasFormData = typeof FormData !== 'undefined' && init.body instanceof FormData
+
+  if (init.body && !hasFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -354,6 +366,13 @@ export async function requestJson<T = unknown>(path: string, init: RequestInit =
   }
 
   return payload as T
+}
+
+function adaptSessionResponse(response: SessionResourceResponse): SessionResponse {
+  return {
+    authenticated: response.authenticated,
+    user: response.user ? adaptAuthUser(response.user) : null,
+  }
 }
 
 async function getCsrfToken(): Promise<string> {

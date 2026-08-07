@@ -47,6 +47,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('unauthenticated')
   }, [])
 
+  const syncUser = useCallback((nextUser: AuthUser) => {
+    setUser(nextUser)
+  }, [])
+
   const value = useMemo(
     () => ({
       error,
@@ -54,9 +58,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       refresh,
       status,
+      syncUser,
       user,
     }),
-    [error, login, logout, refresh, status, user],
+    [error, login, logout, refresh, status, syncUser, user],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

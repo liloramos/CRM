@@ -9,7 +9,7 @@ type SettingsPageProps = {
   integrations: IntegrationStatus[]
   onNavigate: (route: RouteKey) => void
   onOpenModal: (modal: AppModal) => void
-  variant: 'configuracoes' | 'whatsapp' | 'ia' | 'perfil'
+  variant: 'configuracoes' | 'whatsapp' | 'ia'
 }
 
 export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }: SettingsPageProps) {
@@ -32,33 +32,6 @@ export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }:
         onOpenModal={onOpenModal}
         title="IA e automacao"
       />
-    )
-  }
-
-  if (variant === 'perfil') {
-    return (
-      <PageContainer>
-        <PageHeader description="Preferências do usuário, sessões e segurança de acesso." title="Perfil do usuário" />
-        <div className="split-grid">
-          <Card>
-            <SectionTitle title="Administrador" />
-            <div className="profile-summary">
-              <span className="avatar avatar--lg">AD</span>
-              <div>
-                <h2>Usuário administrativo</h2>
-                <p>Perfil demonstrativo para operação do CRM de prospecção.</p>
-              </div>
-            </div>
-          </Card>
-          <Card>
-            <SectionTitle title="Seguranca" />
-            <p className="muted-text">Sessão local, senha forte e 2FA podem ser configurados pelo backend.</p>
-            <Button icon="settings" variant="secondary">
-              Revisar seguranca
-            </Button>
-          </Card>
-        </div>
-      </PageContainer>
     )
   }
 

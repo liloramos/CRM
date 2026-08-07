@@ -213,6 +213,9 @@ export type AuthUser = {
   id: string
   name: string
   email: string
+  phone: string | null
+  jobTitle: string | null
+  avatarUrl: string | null
   company: CompanySummary | null
   roles: string[]
   permissions: string[]
