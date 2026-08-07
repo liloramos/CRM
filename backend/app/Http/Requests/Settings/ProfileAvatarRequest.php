@@ -18,7 +18,7 @@ class ProfileAvatarRequest extends FormRequest
                 'file',
                 'image',
                 'mimes:jpg,jpeg,png,webp',
-                'max:5120',
+                'max:2048',
             ],
         ];
     }

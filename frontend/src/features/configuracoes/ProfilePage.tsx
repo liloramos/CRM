@@ -15,10 +15,8 @@ import {
   type ProfileFieldErrors,
   type UpdateProfilePayload,
 } from './services/profile.service'
+import { validateProfileAvatar } from './utils/profile-avatar'
 import './ProfilePage.css'
-
-const MAX_AVATAR_SIZE = 5 * 1024 * 1024
-const ACCEPTED_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 export function ProfilePage() {
   const { syncUser, user } = useAuth()
@@ -87,15 +85,11 @@ function ProfileEditor({ initialUser, onUserChange }: ProfileEditorProps) {
       return
     }
 
-    if (!ACCEPTED_AVATAR_TYPES.includes(file.type)) {
-      setSelectedAvatar(null)
-      setFieldErrors((current) => ({ ...current, avatar: 'Use uma imagem JPG, PNG ou WebP.' }))
-      return
-    }
+    const validationError = validateProfileAvatar(file)
 
-    if (file.size > MAX_AVATAR_SIZE) {
+    if (validationError) {
       setSelectedAvatar(null)
-      setFieldErrors((current) => ({ ...current, avatar: 'A imagem deve ter no máximo 5 MB.' }))
+      setFieldErrors((current) => ({ ...current, avatar: validationError }))
       return
     }
 
@@ -188,7 +182,7 @@ function ProfileEditor({ initialUser, onUserChange }: ProfileEditorProps) {
                 type="file"
               />
             </label>
-            <small id="profile-avatar-help">JPG, PNG ou WebP, até 5 MB.</small>
+            <small id="profile-avatar-help">JPG, PNG ou WebP, até 2 MB.</small>
             {selectedAvatar ? <span className="profile-avatar-controls__filename">{selectedAvatar.name}</span> : null}
             {fieldErrors.avatar ? <span className="profile-field-error" id="profile-avatar-error">{fieldErrors.avatar}</span> : null}
             <div className="profile-avatar-controls__actions">

@@ -6,6 +6,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class AppProfileTest extends TestCase
@@ -100,7 +101,42 @@ class AppProfileTest extends TestCase
             ->assertJsonValidationErrors('email');
     }
 
-    public function test_user_can_upload_and_replace_their_avatar(): void
+    #[DataProvider('validAvatarFormats')]
+    public function test_valid_avatar_format_is_accepted(
+        string $fileName,
+        string $fixture,
+        string $expectedMimeType,
+    ): void {
+        Storage::fake('public');
+        $user = User::factory()->create();
+        [$avatar, $temporaryPath] = $this->temporaryUpload(
+            $fileName,
+            $this->imageContent($fixture),
+            $expectedMimeType,
+        );
+
+        try {
+            $this->assertSame($expectedMimeType, $avatar->getMimeType());
+
+            $this->actingAs($user)
+                ->post('/api/app/profile/avatar', [
+                    'avatar' => $avatar,
+                ], ['Accept' => 'application/json'])
+                ->assertOk()
+                ->assertJsonPath('message', 'Foto de perfil atualizada.');
+        } finally {
+            if (is_file($temporaryPath)) {
+                unlink($temporaryPath);
+            }
+        }
+
+        $path = $user->refresh()->avatar_path;
+
+        $this->assertNotNull($path);
+        Storage::disk('public')->assertExists($path);
+    }
+
+    public function test_valid_avatar_replaces_the_previous_avatar(): void
     {
         Storage::fake('public');
 
@@ -109,33 +145,60 @@ class AppProfileTest extends TestCase
         $user->forceFill(['avatar_path' => $oldPath])->save();
         Storage::disk('public')->put($oldPath, 'old-avatar');
 
-        $response = $this->actingAs($user)
+        $this->actingAs($user)
             ->post('/api/app/profile/avatar', [
-                'avatar' => $this->fakePng('profile.png'),
-            ], ['Accept' => 'application/json']);
-
-        $response
+                'avatar' => $this->fakeImage('replacement.webp', 'webp'),
+            ], ['Accept' => 'application/json'])
             ->assertOk()
             ->assertJsonPath('message', 'Foto de perfil atualizada.');
 
-        $path = $user->refresh()->avatar_path;
+        $newPath = $user->refresh()->avatar_path;
 
-        $this->assertNotNull($path);
-        $this->assertStringStartsWith("avatars/{$user->id}/", $path);
-        Storage::disk('public')->assertExists($path);
+        $this->assertNotNull($newPath);
+        $this->assertStringStartsWith("avatars/{$user->id}/", $newPath);
+        $this->assertNotSame($oldPath, $newPath);
+        Storage::disk('public')->assertExists($newPath);
         Storage::disk('public')->assertMissing($oldPath);
-
-        $replacement = $this->actingAs($user)
-            ->post('/api/app/profile/avatar', [
-                'avatar' => $this->fakePng('replacement.png'),
-            ], ['Accept' => 'application/json']);
-
-        $replacement->assertOk();
-        Storage::disk('public')->assertMissing($path);
-        Storage::disk('public')->assertExists($user->refresh()->avatar_path);
     }
 
-    public function test_user_can_remove_their_avatar_without_touching_another_path(): void
+    public function test_svg_avatar_is_rejected_and_preserves_the_previous_avatar(): void
+    {
+        $this->assertInvalidUploadPreservesAvatar(
+            UploadedFile::fake()->createWithContent(
+                'avatar.svg',
+                '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>',
+            ),
+        );
+    }
+
+    public function test_text_file_renamed_as_image_is_rejected_and_preserves_the_previous_avatar(): void
+    {
+        [$avatar, $temporaryPath] = $this->temporaryUpload(
+            'avatar.jpg',
+            'isto não é uma imagem',
+            'image/jpeg',
+        );
+
+        try {
+            $this->assertSame('text/plain', $avatar->getMimeType());
+            $this->assertInvalidUploadPreservesAvatar($avatar);
+        } finally {
+            if (is_file($temporaryPath)) {
+                unlink($temporaryPath);
+            }
+        }
+    }
+
+    public function test_avatar_larger_than_two_megabytes_is_rejected_and_preserves_the_previous_avatar(): void
+    {
+        $content = $this->imageContent('png').str_repeat('x', (2 * 1024 * 1024) + 1);
+
+        $this->assertInvalidUploadPreservesAvatar(
+            UploadedFile::fake()->createWithContent('oversized.png', $content),
+        );
+    }
+
+    public function test_user_can_remove_their_avatar_repeatedly_without_touching_another_path(): void
     {
         Storage::fake('public');
 
@@ -150,35 +213,84 @@ class AppProfileTest extends TestCase
             ->assertOk()
             ->assertJsonPath('user.avatar_url', null);
 
+        $this->actingAs($user)
+            ->deleteJson('/api/app/profile/avatar')
+            ->assertOk()
+            ->assertJsonPath('user.avatar_url', null);
+
         $this->assertNull($user->refresh()->avatar_path);
         Storage::disk('public')->assertMissing($avatarPath);
         Storage::disk('public')->assertExists('avatars/999/protected.png');
     }
 
-    public function test_avatar_upload_rejects_non_image_files(): void
+    /**
+     * @return array<string, array{string, string, string}>
+     */
+    public static function validAvatarFormats(): array
+    {
+        return [
+            'JPG' => ['avatar.jpg', 'jpeg', 'image/jpeg'],
+            'JPEG' => ['avatar.jpeg', 'jpeg', 'image/jpeg'],
+            'PNG' => ['avatar.png', 'png', 'image/png'],
+            'WebP' => ['avatar.webp', 'webp', 'image/webp'],
+        ];
+    }
+
+    private function assertInvalidUploadPreservesAvatar(UploadedFile $avatar): void
     {
         Storage::fake('public');
+
         $user = User::factory()->create();
+        $previousPath = "avatars/{$user->id}/previous.png";
+        $user->forceFill(['avatar_path' => $previousPath])->save();
+        Storage::disk('public')->put($previousPath, $this->imageContent('png'));
 
         $this->actingAs($user)
             ->post('/api/app/profile/avatar', [
-                'avatar' => UploadedFile::fake()->create('payload.txt', 10, 'text/plain'),
+                'avatar' => $avatar,
             ], ['Accept' => 'application/json'])
             ->assertUnprocessable()
             ->assertJsonValidationErrors('avatar');
 
-        $this->assertNull($user->refresh()->avatar_path);
+        $this->assertSame($previousPath, $user->refresh()->avatar_path);
+        Storage::disk('public')->assertExists($previousPath);
+        $this->assertCount(1, Storage::disk('public')->allFiles("avatars/{$user->id}"));
     }
 
-    private function fakePng(string $name): UploadedFile
+    private function fakeImage(string $name, string $fixture): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent($name, $this->imageContent($fixture));
+    }
+
+    /**
+     * @return array{UploadedFile, string}
+     */
+    private function temporaryUpload(string $name, string $content, string $clientMimeType): array
+    {
+        $path = tempnam(sys_get_temp_dir(), 'champs-avatar-');
+        $this->assertIsString($path);
+        $this->assertNotFalse(file_put_contents($path, $content));
+
+        return [
+            new UploadedFile($path, $name, $clientMimeType, UPLOAD_ERR_OK, true),
+            $path,
+        ];
+    }
+
+    private function imageContent(string $fixture): string
     {
         $content = base64_decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+            match ($fixture) {
+                'jpeg' => '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EB//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EB//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EB//2Q==',
+                'png' => 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+                'webp' => 'UklGRkoAAABXRUJQVlA4WAoAAAAQAAAAAAAAAAAAQUxQSAwAAAAQkP8PBAAQAFZQOCAcAAAAMAEAnQEqAQABAAFAJiWkAANwAP7+4f4AAA==',
+                default => throw new \InvalidArgumentException("Fixture de imagem desconhecida: {$fixture}"),
+            },
             true,
         );
 
         $this->assertIsString($content);
 
-        return UploadedFile::fake()->createWithContent($name, $content);
+        return $content;
     }
 }
