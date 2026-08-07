@@ -11,6 +11,7 @@ import { CustomersPage } from './features/clientes/CustomersPage'
 import { ConversationsPage } from './features/conversas/ConversationsPage'
 import { SettingsPage } from './features/configuracoes/SettingsPage'
 import { ProfilePage } from './features/configuracoes/ProfilePage'
+import { CompanyPage } from './features/configuracoes/CompanyPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DeliveryPage } from './features/entregas/DeliveryPage'
 import { FinancePage } from './features/financeiro/FinancePage'
@@ -347,10 +348,9 @@ function App() {
       case 'perfil':
         return <ProfilePage />
       case 'configuracoes':
+        return <CompanyPage />
       default:
-        return (
-          <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="configuracoes" />
-        )
+        return <ChampsPage />
     }
   }
 

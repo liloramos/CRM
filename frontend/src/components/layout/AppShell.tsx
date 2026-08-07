@@ -41,6 +41,7 @@ export function AppShell({
       <Sidebar
         activeRoute={activeRoute}
         collapsed={isSidebarCollapsed}
+        company={user?.company ?? null}
         onNavigate={onNavigate}
         onToggleCollapsed={() => setIsSidebarCollapsed((current) => !current)}
       />
@@ -49,6 +50,7 @@ export function AppShell({
           isSyncing={isSyncing}
           lastSyncedAt={lastSyncedAt}
           onLogout={onLogout}
+          onOpenCompany={() => onNavigate('configuracoes')}
           onOpenProfile={() => onNavigate('perfil')}
           onRefresh={onRefresh}
           user={user}

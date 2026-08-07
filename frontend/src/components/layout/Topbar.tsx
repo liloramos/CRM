@@ -2,21 +2,31 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthUser } from '../../types/crm'
 import { IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
+import { CompanyLogo } from './CompanyLogo'
 import { UserAvatar } from './UserAvatar'
 
 type TopbarProps = {
   isSyncing: boolean
   lastSyncedAt: Date | null
   onLogout: () => void
+  onOpenCompany: () => void
   onOpenProfile: () => void
   onRefresh: () => void
   user: AuthUser | null
 }
 
-export function Topbar({ isSyncing, lastSyncedAt, onLogout, onOpenProfile, onRefresh, user }: TopbarProps) {
+export function Topbar({
+  isSyncing,
+  lastSyncedAt,
+  onLogout,
+  onOpenCompany,
+  onOpenProfile,
+  onRefresh,
+  user,
+}: TopbarProps) {
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
-  const companyName = user?.company?.name ?? 'Conta comercial atual'
+  const companyName = user?.company?.tradeName || user?.company?.name || 'Empresa não vinculada'
   const userName = user?.name ?? 'Conta autenticada'
   const roleLabel = user?.jobTitle?.trim() || formatRole(user?.roles[0])
   const syncedLabel = lastSyncedAt
@@ -59,7 +69,14 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onOpenProfile, onRef
   return (
     <header className="topbar">
       <div className="topbar__left">
-        <span>{syncedLabel}</span>
+        <div className="topbar__workspace">
+          <CompanyLogo logoUrl={user?.company?.logoUrl} name={companyName} />
+          <span>
+            <small>Workspace</small>
+            <strong>{companyName}</strong>
+          </span>
+        </div>
+        <span className="topbar__sync-label">{syncedLabel}</span>
       </div>
 
       <div className="topbar__actions">
@@ -97,9 +114,27 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onOpenProfile, onRef
                   <strong>{userName}</strong>
                   <span>{user?.email ?? ''}</span>
                   <span>{roleLabel}</span>
-                  <small>{companyName}</small>
                 </div>
               </div>
+              <div className="user-menu__workspace">
+                <CompanyLogo logoUrl={user?.company?.logoUrl} name={companyName} />
+                <div>
+                  <small>Empresa atual</small>
+                  <strong>{companyName}</strong>
+                </div>
+              </div>
+              <button
+                className="user-menu__item"
+                onClick={() => {
+                  setIsProfileOpen(false)
+                  onOpenCompany()
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Icon name="settings" size={17} />
+                <span>Configurar empresa</span>
+              </button>
               <button
                 className="user-menu__item"
                 onClick={() => {

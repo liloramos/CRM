@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, type FocusEvent, type MouseEvent } from 'react'
 import { menuItems } from '../../constants/routes'
-import type { RouteKey } from '../../types/crm'
+import type { CompanyIdentity, RouteKey } from '../../types/crm'
 import { Badge } from '../ui/Badge'
 import { Icon } from '../ui/Icon'
-import { SolLogo } from './SolLogo'
+import { CompanyBrand } from './CompanyBrand'
 
 type SidebarProps = {
   activeRoute: RouteKey
   collapsed: boolean
+  company: CompanyIdentity | null
   onNavigate: (route: RouteKey) => void
   onToggleCollapsed: () => void
 }
 
-export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed }: SidebarProps) {
+export function Sidebar({ activeRoute, collapsed, company, onNavigate, onToggleCollapsed }: SidebarProps) {
   const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu'
   const activeItemRef = useRef<HTMLButtonElement | null>(null)
   const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
@@ -35,7 +36,7 @@ export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed 
 
   return (
     <aside className={collapsed ? 'sidebar sidebar--collapsed' : 'sidebar'}>
-      <SolLogo compact={collapsed} />
+      <CompanyBrand company={company} compact={collapsed} />
       <button
         aria-label={toggleLabel}
         className="sidebar__toggle"

@@ -21,11 +21,9 @@ class AuthenticatedUserResource extends JsonResource
             'phone' => $this->phone,
             'job_title' => $this->job_title,
             'avatar_url' => $this->resource->avatarUrl(),
-            'company' => $this->company ? [
-                'id' => (string) $this->company->id,
-                'name' => $this->company->name,
-                'slug' => $this->company->slug,
-            ] : null,
+            'company' => $this->company
+                ? (new CompanyIdentityResource($this->company))->resolve($request)
+                : null,
             'roles' => $this->resource->roleNames(),
             'permissions' => $this->resource->permissionNames(),
         ];

@@ -42,7 +42,7 @@ class UserAccessSeeder extends Seeder
             $roleName = $userData['role'];
             unset($userData['role']);
 
-            $user = User::query()->updateOrCreate(
+            $user = User::query()->firstOrCreate(
                 ['email' => $userData['email']],
                 [
                     ...$userData,

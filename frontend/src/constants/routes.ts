@@ -27,6 +27,12 @@ export const menuItems: MenuItem[] = [
     icon: 'user',
     group: 'configuracao',
   },
+  {
+    key: 'configuracoes',
+    label: 'Empresa',
+    icon: 'settings',
+    group: 'configuracao',
+  },
 ]
 
 export const routeLabels: Record<RouteKey, string> = {
@@ -41,7 +47,7 @@ export const routeLabels: Record<RouteKey, string> = {
   financeiro: 'Financeiro',
   clientes: 'Clientes',
   relatorios: 'Relatorios',
-  configuracoes: 'Configuracoes',
+  configuracoes: 'Empresa',
   whatsapp: 'WhatsApp / API',
   ia: 'IA e Automacao',
   perfil: 'Perfil',

@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Champs\ChampsLeadController;
 use App\Http\Controllers\Api\Champs\ChampsLeadOperationController;
 use App\Http\Controllers\Api\Champs\ChampsSavedLeadController;
 use App\Http\Controllers\Api\Champs\ChampsSearchController;
+use App\Http\Controllers\Api\CompanyController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
@@ -29,6 +30,10 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::patch('profile', [UserProfileController::class, 'update'])->name('profile.update');
         Route::post('profile/avatar', [UserProfileController::class, 'updateAvatar'])->name('profile.avatar.update');
         Route::delete('profile/avatar', [UserProfileController::class, 'destroyAvatar'])->name('profile.avatar.destroy');
+        Route::get('company', [CompanyController::class, 'show'])->name('company.show');
+        Route::patch('company', [CompanyController::class, 'update'])->name('company.update');
+        Route::post('company/logo', [CompanyController::class, 'updateLogo'])->name('company.logo.update');
+        Route::delete('company/logo', [CompanyController::class, 'destroyLogo'])->name('company.logo.destroy');
         Route::get('operational-snapshot', OperationalSnapshotController::class)->name('operational-snapshot');
         Route::patch('menu/options/{productOption}/availability', [MenuOptionAvailabilityController::class, 'update'])
             ->middleware('permission:menu.manage')

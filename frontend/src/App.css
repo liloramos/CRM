@@ -50,35 +50,91 @@
   padding: 22px 12px;
 }
 
-.sol-logo {
+.company-brand {
+  min-width: 0;
+  min-height: 86px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 13px;
+  padding: 10px 8px;
   color: var(--color-text);
-  min-height: 58px;
-  transition: justify-content 180ms ease;
 }
 
-.sidebar--collapsed .sol-logo {
+.company-brand--compact {
+  min-height: 68px;
   justify-content: center;
+  padding: 6px 0;
 }
 
-.sol-logo__navbar {
-  display: block;
-  width: min(212px, 100%);
-  height: auto;
-  max-height: 50px;
-  object-fit: contain;
-  object-position: left center;
+.company-brand:not(.company-brand--compact) .company-logo {
+  width: 60px;
+  height: 54px;
 }
 
-.sol-logo__compact {
+.company-brand__copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.company-brand__copy strong,
+.company-brand__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.company-brand__copy strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.company-brand__copy small {
+  color: var(--color-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.company-logo {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(201, 165, 90, 0.28);
+  border-radius: 10px;
+  background: #090a0c;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.company-logo img {
+  width: 100%;
+  height: 100%;
   display: block;
-  width: 52px;
-  height: 52px;
+  padding: 4px;
   object-fit: contain;
-  object-position: center;
-  filter: drop-shadow(0 10px 28px rgba(128, 99, 41, 0.16));
+}
+
+.company-logo__fallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--color-brand-2);
+  background: rgba(201, 165, 90, 0.1);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.company-logo--xl {
+  width: 126px;
+  height: 108px;
+  border-radius: 8px;
+}
+
+.company-logo--xl .company-logo__fallback {
+  font-size: 30px;
 }
 
 .sidebar__toggle {
@@ -115,55 +171,6 @@
 
 .sidebar__toggle:active {
   transform: translate(1px, -50%) scale(0.96);
-}
-
-.sol-logo__mark {
-  width: 46px;
-  height: 46px;
-  border: 2px solid var(--color-brand);
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 0 28px rgba(201, 165, 90, 0.22);
-}
-
-.sol-logo__image-wrap {
-  width: 48px;
-  height: 48px;
-  flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  border-radius: 50%;
-  border: 1px solid rgba(201, 165, 90, 0.38);
-  background: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
-  box-shadow: 0 0 28px rgba(201, 165, 90, 0.2);
-}
-
-.sol-logo__icon {
-  color: #17120a;
-}
-
-.sol-logo__mark span {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--color-brand);
-}
-
-.sol-logo strong {
-  display: block;
-  font-size: 26px;
-  line-height: 1;
-  color: var(--color-brand);
-}
-
-.sol-logo small {
-  display: block;
-  margin-top: 3px;
-  font-size: 11px;
-  text-transform: uppercase;
-  color: var(--color-brand-soft-text);
 }
 
 .sidebar__nav {
@@ -358,6 +365,50 @@
   align-items: center;
   color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+.topbar__workspace {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar__workspace .company-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+}
+
+.topbar__workspace > span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.topbar__workspace small,
+.topbar__workspace strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar__workspace small {
+  color: var(--color-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.topbar__workspace strong {
+  max-width: 220px;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.topbar__sync-label {
+  margin-left: 14px;
+  color: var(--color-muted);
+  white-space: nowrap;
 }
 
 .search-box {
@@ -569,6 +620,41 @@ label textarea {
 .user-menu__identity span,
 .user-menu__identity small {
   color: var(--color-text-secondary);
+}
+
+.user-menu__workspace {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.user-menu__workspace .company-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.user-menu__workspace div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.user-menu__workspace small,
+.user-menu__workspace strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu__workspace small {
+  color: var(--color-muted);
+  font-size: 10px;
+  text-transform: uppercase;
 }
 
 .user-menu__item {
@@ -4473,12 +4559,6 @@ button.dashboard-chart__legend-row:active {
     grid-template-columns: 1fr;
   }
 
-  .sol-logo__navbar {
-    width: min(188px, 100%);
-    object-fit: contain;
-    object-position: left center;
-  }
-
   .login-screen {
     grid-template-columns: 1fr;
     height: 100dvh;
@@ -6551,40 +6631,6 @@ button.dashboard-chart__legend-row:active {
   box-shadow: inset -1px 0 0 rgba(201, 165, 90, 0.05);
 }
 
-.sol-logo {
-  min-height: 86px;
-  justify-content: center;
-  padding: 6px 4px 12px;
-}
-
-.sidebar--collapsed .sol-logo {
-  min-height: 68px;
-  padding: 4px 0 10px;
-}
-
-.sol-logo__navbar {
-  width: min(220px, 100%);
-  height: 74px;
-  max-height: none;
-  object-fit: contain;
-  object-position: center;
-  filter:
-    contrast(1.06)
-    drop-shadow(0 10px 24px rgba(0, 0, 0, 0.42))
-    drop-shadow(0 0 18px rgba(201, 165, 90, 0.12));
-}
-
-.sol-logo__compact {
-  width: 54px;
-  height: 54px;
-  border: 1px solid rgba(201, 165, 90, 0.26);
-  border-radius: 16px;
-  background: #090a0c;
-  box-shadow:
-    0 12px 28px rgba(0, 0, 0, 0.28),
-    0 0 22px rgba(201, 165, 90, 0.12);
-}
-
 .sidebar__item {
   color: var(--color-text-secondary);
   border-radius: 9px;
@@ -6903,7 +6949,7 @@ button.dashboard-chart__legend-row:active {
     border-radius: 16px;
   }
 
-  .sidebar .sol-logo,
+  .sidebar .company-brand,
   .sidebar__toggle,
   .sidebar__footer {
     display: none;
@@ -6940,6 +6986,10 @@ button.dashboard-chart__legend-row:active {
     gap: 8px;
   }
 
+  .topbar__sync-label {
+    display: none;
+  }
+
   .user-chip__copy {
     display: none;
   }
@@ -6948,6 +6998,17 @@ button.dashboard-chart__legend-row:active {
     min-height: 100dvh;
     height: auto;
     padding: 18px;
+  }
+}
+
+@media (max-width: 430px) {
+  .topbar__workspace > span {
+    display: none;
+  }
+
+  .topbar__workspace .company-logo {
+    width: 36px;
+    height: 36px;
   }
 }
 
@@ -7329,40 +7390,4 @@ button.dashboard-chart__legend-row:active {
   .login-hero-panel h1 {
     font-size: clamp(30px, 2.5vw, 38px);
   }
-}
-
-.sol-logo {
-  min-height: 120px;
-  justify-content: center;
-  padding: 18px 0 16px;
-  box-sizing: border-box;
-}
-
-.sidebar--collapsed .sol-logo {
-  min-height: 76px;
-  padding: 8px 0;
-}
-
-.sol-logo__navbar {
-  width: min(240px, 100%);
-  height: auto;
-  max-height: 72px;
-  object-fit: contain;
-  object-position: center;
-  filter:
-    contrast(1.05)
-    drop-shadow(0 10px 24px rgba(0, 0, 0, 0.36))
-    drop-shadow(0 0 14px rgba(201, 165, 90, 0.12));
-}
-
-.sol-logo__compact {
-  width: 60px;
-  height: 60px;
-  padding: 2px;
-  box-sizing: border-box;
-  object-fit: contain;
-  object-position: center;
-  border: 1px solid rgba(201, 165, 90, 0.26);
-  border-radius: 16px;
-  background: #090a0c;
 }

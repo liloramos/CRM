@@ -142,6 +142,17 @@ export type CompanySummary = {
   id: string
   name: string
   slug: string
+  logoUrl?: string | null
+}
+
+export type CompanyIdentity = CompanySummary & {
+  tradeName: string | null
+  responsibleName: string | null
+  email: string | null
+  phone: string | null
+  timezone: string
+  logoUrl: string | null
+  canManage: boolean
 }
 
 export type DeliveryTask = {
@@ -216,7 +227,7 @@ export type AuthUser = {
   phone: string | null
   jobTitle: string | null
   avatarUrl: string | null
-  company: CompanySummary | null
+  company: CompanyIdentity | null
   roles: string[]
   permissions: string[]
 }
