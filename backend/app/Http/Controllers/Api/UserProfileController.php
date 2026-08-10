@@ -34,7 +34,7 @@ class UserProfileController extends Controller
     {
         $user = $request->user();
         $avatar = $request->file('avatar');
-        $path = $avatar?->storePublicly("avatars/{$user->id}", 'public');
+        $path = $avatar?->storePublicly("avatars/{$user->id}", config('filesystems.default'));
 
         if (! is_string($path) || $path === '') {
             throw ValidationException::withMessages([
@@ -47,7 +47,7 @@ class UserProfileController extends Controller
         try {
             $user->forceFill(['avatar_path' => $path])->save();
         } catch (Throwable $exception) {
-            Storage::disk('public')->delete($path);
+            Storage::disk(config('filesystems.default'))->delete($path);
 
             throw $exception;
         }
@@ -74,7 +74,7 @@ class UserProfileController extends Controller
             return;
         }
 
-        Storage::disk('public')->delete($path);
+        Storage::disk(config('filesystems.default'))->delete($path);
     }
 
     private function profileResponse(

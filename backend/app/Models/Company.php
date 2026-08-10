@@ -25,7 +25,7 @@ class Company extends Model
             return null;
         }
 
-        return Storage::disk('public')->url(ltrim($this->logo_path, '/'));
+        return Storage::disk(config('filesystems.default'))->url(ltrim($this->logo_path, '/'));
     }
 
     public function customers(): HasMany

@@ -39,7 +39,7 @@ class CompanyIdentityService
 
     public function updateLogo(Company $company, UploadedFile $logo): Company
     {
-        $path = $logo->storePublicly("companies/{$company->id}/logo", 'public');
+        $path = $logo->storePublicly("companies/{$company->id}/logo", config('filesystems.default'));
 
         if (! is_string($path) || $path === '') {
             throw new \RuntimeException('Não foi possível armazenar a logo da empresa.');
@@ -52,7 +52,7 @@ class CompanyIdentityService
                 $company->forceFill(['logo_path' => $path])->save();
             });
         } catch (Throwable $exception) {
-            Storage::disk('public')->delete($path);
+            Storage::disk(config('filesystems.default'))->delete($path);
 
             throw $exception;
         }
@@ -87,6 +87,6 @@ class CompanyIdentityService
             return;
         }
 
-        Storage::disk('public')->delete($normalizedPath);
+        Storage::disk(config('filesystems.default'))->delete($normalizedPath);
     }
 }

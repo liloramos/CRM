@@ -51,7 +51,7 @@ class User extends Authenticatable implements PasskeyUser
             return null;
         }
 
-        return Storage::disk('public')->url(ltrim($this->avatar_path, '/'));
+        return Storage::disk(config('filesystems.default'))->url(ltrim($this->avatar_path, '/'));
     }
 
     public function roles(): BelongsToMany

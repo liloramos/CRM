@@ -22,7 +22,7 @@ class AppProfileTest extends TestCase
 
     public function test_session_returns_the_authenticated_users_real_profile(): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
 
         $user = User::factory()->create([
             'name' => 'Marcelo Fictício',
@@ -40,7 +40,7 @@ class AppProfileTest extends TestCase
             ->assertJsonPath('user.name', 'Marcelo Fictício')
             ->assertJsonPath('user.phone', '+55 11 90000-0000')
             ->assertJsonPath('user.job_title', 'Gestor de tráfego')
-            ->assertJsonPath('user.avatar_url', Storage::disk('public')->url($avatarPath));
+            ->assertJsonPath('user.avatar_url', Storage::disk(config('filesystems.default'))->url($avatarPath));
     }
 
     public function test_authenticated_user_can_update_profile_fields(): void
@@ -107,7 +107,7 @@ class AppProfileTest extends TestCase
         string $fixture,
         string $expectedMimeType,
     ): void {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
         $user = User::factory()->create();
         [$avatar, $temporaryPath] = $this->temporaryUpload(
             $fileName,
@@ -133,17 +133,17 @@ class AppProfileTest extends TestCase
         $path = $user->refresh()->avatar_path;
 
         $this->assertNotNull($path);
-        Storage::disk('public')->assertExists($path);
+        Storage::disk(config('filesystems.default'))->assertExists($path);
     }
 
     public function test_valid_avatar_replaces_the_previous_avatar(): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
 
         $user = User::factory()->create();
         $oldPath = "avatars/{$user->id}/old.png";
         $user->forceFill(['avatar_path' => $oldPath])->save();
-        Storage::disk('public')->put($oldPath, 'old-avatar');
+        Storage::disk(config('filesystems.default'))->put($oldPath, 'old-avatar');
 
         $this->actingAs($user)
             ->post('/api/app/profile/avatar', [
@@ -157,8 +157,8 @@ class AppProfileTest extends TestCase
         $this->assertNotNull($newPath);
         $this->assertStringStartsWith("avatars/{$user->id}/", $newPath);
         $this->assertNotSame($oldPath, $newPath);
-        Storage::disk('public')->assertExists($newPath);
-        Storage::disk('public')->assertMissing($oldPath);
+        Storage::disk(config('filesystems.default'))->assertExists($newPath);
+        Storage::disk(config('filesystems.default'))->assertMissing($oldPath);
     }
 
     public function test_svg_avatar_is_rejected_and_preserves_the_previous_avatar(): void
@@ -200,13 +200,13 @@ class AppProfileTest extends TestCase
 
     public function test_user_can_remove_their_avatar_repeatedly_without_touching_another_path(): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
 
         $user = User::factory()->create();
         $avatarPath = "avatars/{$user->id}/profile.png";
         $user->forceFill(['avatar_path' => $avatarPath])->save();
-        Storage::disk('public')->put($avatarPath, 'avatar');
-        Storage::disk('public')->put('avatars/999/protected.png', 'protected');
+        Storage::disk(config('filesystems.default'))->put($avatarPath, 'avatar');
+        Storage::disk(config('filesystems.default'))->put('avatars/999/protected.png', 'protected');
 
         $this->actingAs($user)
             ->deleteJson('/api/app/profile/avatar')
@@ -219,8 +219,8 @@ class AppProfileTest extends TestCase
             ->assertJsonPath('user.avatar_url', null);
 
         $this->assertNull($user->refresh()->avatar_path);
-        Storage::disk('public')->assertMissing($avatarPath);
-        Storage::disk('public')->assertExists('avatars/999/protected.png');
+        Storage::disk(config('filesystems.default'))->assertMissing($avatarPath);
+        Storage::disk(config('filesystems.default'))->assertExists('avatars/999/protected.png');
     }
 
     /**
@@ -238,12 +238,12 @@ class AppProfileTest extends TestCase
 
     private function assertInvalidUploadPreservesAvatar(UploadedFile $avatar): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
 
         $user = User::factory()->create();
         $previousPath = "avatars/{$user->id}/previous.png";
         $user->forceFill(['avatar_path' => $previousPath])->save();
-        Storage::disk('public')->put($previousPath, $this->imageContent('png'));
+        Storage::disk(config('filesystems.default'))->put($previousPath, $this->imageContent('png'));
 
         $this->actingAs($user)
             ->post('/api/app/profile/avatar', [
@@ -253,8 +253,8 @@ class AppProfileTest extends TestCase
             ->assertJsonValidationErrors('avatar');
 
         $this->assertSame($previousPath, $user->refresh()->avatar_path);
-        Storage::disk('public')->assertExists($previousPath);
-        $this->assertCount(1, Storage::disk('public')->allFiles("avatars/{$user->id}"));
+        Storage::disk(config('filesystems.default'))->assertExists($previousPath);
+        $this->assertCount(1, Storage::disk(config('filesystems.default'))->allFiles("avatars/{$user->id}"));
     }
 
     private function fakeImage(string $name, string $fixture): UploadedFile

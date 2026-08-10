@@ -159,7 +159,7 @@ class AppCompanyTest extends TestCase
         string $fixture,
         string $expectedMimeType,
     ): void {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
         $company = $this->company();
         $user = $this->userFor($company, Role::ADMIN_GERENTE);
         [$logo, $temporaryPath] = $this->temporaryUpload(
@@ -190,7 +190,7 @@ class AppCompanyTest extends TestCase
 
         $this->assertNotNull($path);
         $this->assertStringStartsWith("companies/{$company->id}/logo/", $path);
-        Storage::disk('public')->assertExists($path);
+        Storage::disk(config('filesystems.default'))->assertExists($path);
     }
 
     public function test_svg_logo_is_rejected_and_preserves_the_previous_logo(): void
@@ -232,12 +232,12 @@ class AppCompanyTest extends TestCase
 
     public function test_valid_logo_replaces_the_previous_logo(): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
         $company = $this->company();
         $user = $this->userFor($company, Role::ADMIN_GERENTE);
         $oldPath = "companies/{$company->id}/logo/old.png";
         $company->forceFill(['logo_path' => $oldPath])->save();
-        Storage::disk('public')->put($oldPath, 'old-logo');
+        Storage::disk(config('filesystems.default'))->put($oldPath, 'old-logo');
 
         $this->actingAs($user)
             ->post('/api/app/company/logo', [
@@ -249,21 +249,21 @@ class AppCompanyTest extends TestCase
 
         $this->assertNotNull($newPath);
         $this->assertNotSame($oldPath, $newPath);
-        Storage::disk('public')->assertExists($newPath);
-        Storage::disk('public')->assertMissing($oldPath);
+        Storage::disk(config('filesystems.default'))->assertExists($newPath);
+        Storage::disk(config('filesystems.default'))->assertMissing($oldPath);
     }
 
     public function test_logo_removal_is_idempotent_and_never_deletes_another_tenants_file(): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
         $company = $this->company();
         $otherCompany = $this->company('Tenant Protegido', 'tenant-protegido');
         $user = $this->userFor($company, Role::ADMIN_GERENTE);
         $ownPath = "companies/{$company->id}/logo/current.png";
         $otherPath = "companies/{$otherCompany->id}/logo/protected.png";
         $company->forceFill(['logo_path' => $ownPath])->save();
-        Storage::disk('public')->put($ownPath, 'current');
-        Storage::disk('public')->put($otherPath, 'protected');
+        Storage::disk(config('filesystems.default'))->put($ownPath, 'current');
+        Storage::disk(config('filesystems.default'))->put($otherPath, 'protected');
 
         $this->actingAs($user)
             ->deleteJson('/api/app/company/logo')
@@ -274,19 +274,19 @@ class AppCompanyTest extends TestCase
             ->assertOk()
             ->assertJsonPath('company.logo_url', null);
 
-        Storage::disk('public')->assertMissing($ownPath);
-        Storage::disk('public')->assertExists($otherPath);
+        Storage::disk(config('filesystems.default'))->assertMissing($ownPath);
+        Storage::disk(config('filesystems.default'))->assertExists($otherPath);
 
         $company->forceFill(['logo_path' => $otherPath])->save();
         $this->actingAs($user)->deleteJson('/api/app/company/logo')->assertOk();
 
         $this->assertNull($company->refresh()->logo_path);
-        Storage::disk('public')->assertExists($otherPath);
+        Storage::disk(config('filesystems.default'))->assertExists($otherPath);
     }
 
     public function test_session_returns_the_real_company_and_does_not_expose_internal_paths(): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
         $company = $this->company('Workspace Champs Fictício', 'workspace-champs-ficticio');
         $company->setting()->create(['timezone' => 'America/Recife']);
         $logoPath = "companies/{$company->id}/logo/identity.png";
@@ -299,7 +299,7 @@ class AppCompanyTest extends TestCase
             ->assertJsonPath('user.company.id', (string) $company->id)
             ->assertJsonPath('user.company.name', 'Workspace Champs Fictício')
             ->assertJsonPath('user.company.timezone', 'America/Recife')
-            ->assertJsonPath('user.company.logo_url', Storage::disk('public')->url($logoPath))
+            ->assertJsonPath('user.company.logo_url', Storage::disk(config('filesystems.default'))->url($logoPath))
             ->assertJsonPath('user.company.can_manage', true)
             ->assertJsonMissingPath('user.company.logo_path');
 
@@ -384,12 +384,12 @@ class AppCompanyTest extends TestCase
 
     private function assertInvalidUploadPreservesLogo(UploadedFile $logo): void
     {
-        Storage::fake('public');
+        Storage::fake(config('filesystems.default'));
         $company = $this->company();
         $user = $this->userFor($company, Role::ADMIN_GERENTE);
         $previousPath = "companies/{$company->id}/logo/previous.png";
         $company->forceFill(['logo_path' => $previousPath])->save();
-        Storage::disk('public')->put($previousPath, $this->imageContent('png'));
+        Storage::disk(config('filesystems.default'))->put($previousPath, $this->imageContent('png'));
 
         $this->actingAs($user)
             ->post('/api/app/company/logo', [
@@ -399,8 +399,8 @@ class AppCompanyTest extends TestCase
             ->assertJsonValidationErrors('logo');
 
         $this->assertSame($previousPath, $company->refresh()->logo_path);
-        Storage::disk('public')->assertExists($previousPath);
-        $this->assertCount(1, Storage::disk('public')->allFiles("companies/{$company->id}/logo"));
+        Storage::disk(config('filesystems.default'))->assertExists($previousPath);
+        $this->assertCount(1, Storage::disk(config('filesystems.default'))->allFiles("companies/{$company->id}/logo"));
     }
 
     private function fakeImage(string $name, string $fixture): UploadedFile
