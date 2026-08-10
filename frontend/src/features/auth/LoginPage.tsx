@@ -21,7 +21,8 @@ const ACCESS_ROLE_OPTIONS = [
 
 export function LoginPage() {
   const { error, login } = useAuth()
-  const [email, setEmail] = useState(LOCAL_DEMO_EMAIL)
+  const isDev = import.meta.env.DEV
+  const [email, setEmail] = useState(isDev ? LOCAL_DEMO_EMAIL : '')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -30,8 +31,6 @@ export function LoginPage() {
   const [mode, setMode] = useState<'login' | 'access'>('login')
   const [isPasswordVisible, setIsPasswordVisible] = useState(false)
   const [accessRole, setAccessRole] = useState(ACCESS_ROLE_OPTIONS[0].value)
-  const isDev = import.meta.env.DEV
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsSubmitting(true)
