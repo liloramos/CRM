@@ -32,8 +32,14 @@ COPY --from=vendor /var/www/html /var/www/html
 RUN mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache \
     && chown -R www-data:www-data storage bootstrap/cache \
     && sed -ri 's!DocumentRoot /var/www/html!DocumentRoot /var/www/html/public!' /etc/apache2/sites-available/000-default.conf \
-    && printf '<Directory /var/www/html/public>\\n    AllowOverride All\\n    Require all granted\\n</Directory>\\n' > /etc/apache2/conf-available/laravel.conf \
-    && a2enconf laravel
+    && printf '%s\n' \
+        '<Directory /var/www/html/public>' \
+        '    AllowOverride All' \
+        '    Require all granted' \
+        '</Directory>' \
+        > /etc/apache2/conf-available/laravel.conf \
+    && a2enconf laravel \
+    && apache2ctl configtest
 
 EXPOSE 10000
 
