@@ -28,6 +28,8 @@ class Message extends Model
         'read_at',
         'failed_at',
         'error_code',
+        'pinned_at',
+        'pinned_by_user_id',
     ];
 
     protected function casts(): array
@@ -39,6 +41,7 @@ class Message extends Model
             'delivered_at' => 'datetime',
             'read_at' => 'datetime',
             'failed_at' => 'datetime',
+            'pinned_at' => 'datetime',
         ];
     }
 
@@ -50,6 +53,11 @@ class Message extends Model
     public function replyTo(): BelongsTo
     {
         return $this->belongsTo(self::class, 'reply_to_message_id');
+    }
+
+    public function pinnedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'pinned_by_user_id');
     }
 
     public function orderFragments(): HasMany

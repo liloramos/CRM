@@ -142,7 +142,7 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                 ->asJson()
                 ->timeout(12)
                 ->retry(1, 250, throw: false)
-                ->post($url, [
+                ->post($url, array_filter([
                     'messaging_product' => 'whatsapp',
                     'to' => $message->to,
                     'type' => 'text',
@@ -150,7 +150,10 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                         'preview_url' => false,
                         'body' => $message->body,
                     ],
-                ]);
+                    'context' => $message->replyToProviderMessageId !== null
+                        ? ['message_id' => $message->replyToProviderMessageId]
+                        : null,
+                ]));
         } catch (Throwable $exception) {
             $error = $this->errors->networkFailure($exception);
 
@@ -188,6 +191,7 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                 'http_status' => $response->status(),
                 'recipient_present' => $message->to !== '',
                 'body_length' => strlen($message->body),
+                'reply_context_present' => $message->replyToProviderMessageId !== null,
                 'provider_message_id_present' => $providerMessageId !== null,
                 'phone_number_id_present' => $phoneNumberId !== '',
                 'error_code' => $response->successful() ? null : $providerError['code'],

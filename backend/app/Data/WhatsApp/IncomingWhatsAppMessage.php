@@ -20,6 +20,7 @@ class IncomingWhatsAppMessage
         public readonly string $messageType,
         public readonly ?string $text,
         public readonly ?CarbonInterface $sentAt,
+        public readonly ?string $replyToProviderMessageId = null,
         public readonly array $rawPayload = [],
         public readonly array $safeMetadata = [],
     ) {}

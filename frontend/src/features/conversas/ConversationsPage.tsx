@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { PageHeader } from '../../components/layout/PageHeader'
@@ -47,7 +47,6 @@ type ConversationsPageProps = {
   isLoading: boolean
   linkedOrder?: Order | null
   selectedConversation?: Conversation
-  syncLabel: string | null
   onAcknowledgeAlert: (conversationId: string, alertId: string) => void
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
@@ -58,7 +57,8 @@ type ConversationsPageProps = {
   onResolveAlert: (conversationId: string, alertId: string) => void
   onSelectConversation: (conversationId: string) => void
   onRetryMessage: (conversationId: string, messageId: string) => Promise<void>
-  onSendMessage: (conversationId: string, body: string, clientReference: string) => Promise<void>
+  onSendMessage: (conversationId: string, body: string, clientReference: string, replyToMessageId?: string) => Promise<void>
+  onToggleMessagePin: (conversationId: string, messageId: string) => Promise<void>
   onUpdateCustomer: (customerId: string, payload: UpdateCustomerPayload) => Promise<void>
 }
 
@@ -80,15 +80,16 @@ export function ConversationsPage({
   onSelectConversation,
   onRetryMessage,
   onSendMessage,
+  onToggleMessagePin,
   onUpdateCustomer,
   selectedConversation,
-  syncLabel,
 }: ConversationsPageProps) {
   const [activeFilter, setActiveFilter] = useState<ConversationFilter>('all')
   const [activePanel, setActivePanel] = useState<ConversationPanel>('list')
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [composerBody, setComposerBody] = useState('')
+  const [replyingTo, setReplyingTo] = useState<ConversationMessage | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentRejectReason, setPaymentRejectReason] = useState('')
@@ -151,7 +152,7 @@ export function ConversationsPage({
     })
   }, [activeFilter, conversations, search])
 
-  const activeAlerts = (selectedConversation?.alerts ?? []).filter((alert) => alert.status !== 'resolved')
+  const activeAlerts = (selectedConversation?.alerts ?? []).filter((alert) => isOperationalAlert(alert) && alert.status !== 'resolved')
   const bannerAlert = selectBannerAlert(activeAlerts)
   const filteredActiveAlerts = activeAlerts.filter((alert) => (
     alertSeverityFilter === 'all' || alert.severity === alertSeverityFilter
@@ -372,6 +373,7 @@ export function ConversationsPage({
     onSelectConversation(conversationId)
     setActivePanel('chat')
     setLocalError(null)
+    setReplyingTo(null)
   }
 
   function handleOpenContext(event?: { currentTarget?: EventTarget | null }) {
@@ -406,9 +408,10 @@ export function ConversationsPage({
     try {
       const clientReference = clientReferenceRef.current ?? createClientReference()
       clientReferenceRef.current = clientReference
-      await onSendMessage(selectedConversation.id, body, clientReference)
+      await onSendMessage(selectedConversation.id, body, clientReference, replyingTo?.id)
       clientReferenceRef.current = null
       setComposerBody('')
+      setReplyingTo(null)
       setIsQuickReplyOpen(false)
     } catch (sendError) {
       setLocalError(sendError instanceof Error
@@ -510,6 +513,12 @@ export function ConversationsPage({
     window.requestAnimationFrame(() => composerRef.current?.focus())
   }
 
+  function handleReplyToMessage(message: ConversationMessage) {
+    setReplyingTo(message)
+    setLocalError(null)
+    window.requestAnimationFrame(() => composerRef.current?.focus())
+  }
+
   async function handleToggleBrowserNotifications() {
     if (typeof Notification === 'undefined') {
       addToast('Este navegador não oferece notificações do sistema.', 'warning', 'notification-api-unavailable')
@@ -562,7 +571,6 @@ export function ConversationsPage({
         <PageHeader
           actions={
             <div className="conversation-header-actions">
-              {syncLabel ? <span className="conversation-sync-label">Atualizado às {syncLabel}</span> : null}
               <Button icon="orders" onClick={onOpenOrders} variant="secondary">
                 Abrir pedidos
               </Button>
@@ -658,6 +666,7 @@ export function ConversationsPage({
               const presentation = modePresentation(conversation)
               const isActive = selectedConversation?.id === conversation.id
               const openAlerts = openAlertCount(conversation)
+              const hasAttention = openAlerts > 0 || presentation.label === 'Atenção'
 
               return (
                 <button
@@ -669,17 +678,19 @@ export function ConversationsPage({
                   type="button"
                 >
                   <span className="avatar">{initialsFromName(conversation.customer.name)}</span>
-                  <span className="conversation-item__content">
-                    <span className="conversation-item__top">
-                      <strong>{conversation.customer.name}</strong>
+                    <span className="conversation-item__content">
+                      <span className="conversation-item__top">
+                      <span className="conversation-item__identity">
+                        <strong>{conversation.customer.name}</strong>
+                        {hasAttention ? <Badge tone="danger" size="sm">Atenção</Badge> : null}
+                      </span>
                       <time>{formatConversationTime(conversation.lastMessageAt)}</time>
                     </span>
                     <small>{conversation.customer.phoneLabel || 'Sem telefone cadastrado'}</small>
                     <span className="conversation-item__preview">{conversation.lastMessage}</span>
                     <span className="conversation-item__badges">
                       {conversation.unread > 0 ? <Badge tone="brand" size="sm">{`${conversation.unread} não lida${conversation.unread > 1 ? 's' : ''}`}</Badge> : null}
-                      {openAlerts > 0 ? <Badge tone="danger" size="sm">{`${openAlerts} alerta${openAlerts > 1 ? 's' : ''}`}</Badge> : null}
-                      <Badge tone={presentation.tone} size="sm">{presentation.label}</Badge>
+                      {presentation.label !== 'Atenção' ? <Badge tone={presentation.tone} size="sm">{presentation.label}</Badge> : null}
                     </span>
                   </span>
                 </button>
@@ -761,10 +772,22 @@ export function ConversationsPage({
               <MessageTimeline
                 conversationId={selectedConversation.id}
                 messages={selectedConversation.messages}
+                onReply={handleReplyToMessage}
                 onRetryMessage={handleRetryMessage}
+                onTogglePin={(messageId) => onToggleMessagePin(selectedConversation.id, messageId)}
+                onCopyMessage={(body) => addToast('Mensagem copiada', 'success', `message-copied:${body}`)}
               />
 
               <form className="composer" onSubmit={handleSubmitMessage}>
+                {replyingTo ? (
+                  <div className="composer-reply-preview">
+                    <div>
+                      <strong>Respondendo a {quotedSenderLabel(replyingTo.sender)}</strong>
+                      <span>{quotedMessageLabel(replyingTo)}</span>
+                    </div>
+                    <IconButton icon="close" label="Cancelar resposta" onClick={() => setReplyingTo(null)} />
+                  </div>
+                ) : null}
                 {!selectedIsManual ? (
                   <p className="conversation-automation-note">
                     A conversa está no automático. Ao enviar uma resposta manual, o atendimento passa para a equipe.
@@ -1132,11 +1155,17 @@ function ConversationAlertCard({
 function MessageTimeline({
   conversationId,
   messages,
+  onReply,
   onRetryMessage,
+  onTogglePin,
+  onCopyMessage,
 }: {
   conversationId: string
   messages: ConversationMessage[]
+  onReply: (message: ConversationMessage) => void
   onRetryMessage: (messageId: string) => void
+  onTogglePin: (messageId: string) => Promise<void>
+  onCopyMessage: (body: string) => void
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   const lastConversationRef = useRef<string | null>(null)
@@ -1168,14 +1197,23 @@ function MessageTimeline({
     >
       {messages.length > 0 ? (
         messages.map((message) => {
-          const dateKey = message.createdAt ? new Date(message.createdAt).toDateString() : 'current'
+          const messageTimestamp = message.occurredAt ?? message.createdAt
+          const dateKey = messageTimestamp ? new Date(messageTimestamp).toDateString() : message.id
           const shouldShowDate = dateKey !== lastDateKey
           lastDateKey = dateKey
 
           return (
             <div className="message-list__group" key={message.id}>
-              {shouldShowDate ? <div className="message-date-separator">{formatMessageDate(message.createdAt)}</div> : null}
-              <MessageBubble message={message} onRetry={() => onRetryMessage(message.id)} />
+              {shouldShowDate ? <div className="message-date-separator">{formatMessageDate(messageTimestamp)}</div> : null}
+              <MessageBubble
+                boundaryRef={listRef}
+                conversationId={conversationId}
+                message={message}
+                onReply={() => onReply(message)}
+                onRetry={() => onRetryMessage(message.id)}
+                onTogglePin={() => onTogglePin(message.id)}
+                onCopyMessage={onCopyMessage}
+              />
             </div>
           )
         })
@@ -1186,15 +1224,169 @@ function MessageTimeline({
   )
 }
 
-function MessageBubble({ message, onRetry }: { message: ConversationMessage; onRetry: () => void }) {
+function MessageBubble({ boundaryRef, conversationId, message, onReply, onRetry, onTogglePin, onCopyMessage }: {
+  boundaryRef: RefObject<HTMLDivElement | null>
+  conversationId: string
+  message: ConversationMessage
+  onReply: () => void
+  onRetry: () => void
+  onTogglePin: () => Promise<void>
+  onCopyMessage: (body: string) => void
+}) {
   const failed = message.status === 'failed'
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isInfoOpen, setIsInfoOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null)
+  const [selectedReaction, setSelectedReaction] = useState<string | null>(null)
+  const [showMoreReactions, setShowMoreReactions] = useState(false)
+  const bubbleRef = useRef<HTMLDivElement>(null)
+  const menuTriggerRef = useRef<HTMLButtonElement>(null)
+  const overlayRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const hasText = message.body.trim() !== ''
+  const downloadableMedia = message.media?.filter((media) => Boolean(media.url)) ?? []
+
+  const positionContextMenu = useCallback(() => {
+    if (!isMenuOpen || !menuTriggerRef.current || !bubbleRef.current) {
+      return undefined
+    }
+
+    const boundary = boundaryRef.current?.getBoundingClientRect()
+    const bubble = bubbleRef.current.getBoundingClientRect()
+    const viewport = {
+      top: boundary?.top ?? 0,
+      right: boundary?.right ?? window.innerWidth,
+      bottom: boundary?.bottom ?? window.innerHeight,
+      left: boundary?.left ?? 0,
+    }
+    const padding = 10
+    const menuWidth = 190
+    const menuHeight = downloadableMedia.length > 0 ? 230 : 190
+    const reactionHeight = showMoreReactions ? 82 : 42
+    const totalHeight = reactionHeight + 6 + menuHeight
+    const spaceRight = viewport.right - bubble.right
+    const spaceLeft = bubble.left - viewport.left
+    const left = spaceRight >= menuWidth + padding
+      ? bubble.right + 8
+      : spaceLeft >= menuWidth + padding
+        ? bubble.left - menuWidth - 8
+        : Math.min(
+          Math.max(viewport.left + padding, bubble.right - menuWidth),
+          viewport.right - menuWidth - padding,
+        )
+    const top = viewport.bottom - bubble.bottom >= totalHeight + padding
+      ? bubble.bottom + 8
+      : viewport.top + bubble.top >= totalHeight + padding
+        ? bubble.top - totalHeight - 8
+        : Math.min(
+          Math.max(viewport.top + padding, bubble.bottom - totalHeight),
+          viewport.bottom - totalHeight - padding,
+        )
+
+    setMenuPosition({ top, left })
+  }, [boundaryRef, downloadableMedia.length, isMenuOpen, showMoreReactions])
+
+  useLayoutEffect(() => {
+    if (!isMenuOpen) {
+      return undefined
+    }
+
+    positionContextMenu()
+    const boundaryElement = boundaryRef.current
+    window.addEventListener('resize', positionContextMenu)
+    boundaryElement?.addEventListener('scroll', positionContextMenu)
+
+    return () => {
+      window.removeEventListener('resize', positionContextMenu)
+      boundaryElement?.removeEventListener('scroll', positionContextMenu)
+    }
+  }, [boundaryRef, isMenuOpen, positionContextMenu])
+
+  useEffect(() => {
+    if (!isMenuOpen) {
+      return undefined
+    }
+
+    window.requestAnimationFrame(() => menuRef.current?.querySelector<HTMLButtonElement | HTMLAnchorElement>('[role="menuitem"]')?.focus())
+
+    function dismiss(event: MouseEvent) {
+      if (event.target instanceof Node && !overlayRef.current?.contains(event.target) && !menuTriggerRef.current?.contains(event.target)) {
+        setIsMenuOpen(false)
+      }
+    }
+
+    function escape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        setIsMenuOpen(false)
+        menuTriggerRef.current?.focus()
+      }
+    }
+
+    document.addEventListener('mousedown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('mousedown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [isMenuOpen])
+
+  async function copyMessage() {
+    if (!hasText) {
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(message.body)
+    } catch {
+      const textarea = document.createElement('textarea')
+      textarea.value = message.body
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      textarea.remove()
+    }
+
+    onCopyMessage(message.body)
+    setIsMenuOpen(false)
+  }
+
+  function downloadUrl(mediaId: string): string {
+    return `/api/app/conversations/${conversationId}/media/${mediaId}/download`
+  }
 
   return (
-    <div className={`message-bubble message-bubble--${message.sender} ${failed ? 'is-failed' : ''}`}>
+    <>
+    <div
+      className={`message-bubble message-bubble--${message.sender} ${failed ? 'is-failed' : ''}`}
+      ref={bubbleRef}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        setIsMenuOpen(true)
+      }}
+    >
+      <button
+        aria-expanded={isMenuOpen}
+        aria-label={`Ações da mensagem de ${senderLabel(message.sender)}`}
+        className="message-bubble__menu-trigger"
+        onClick={() => setIsMenuOpen((current) => !current)}
+        ref={menuTriggerRef}
+        type="button"
+      >
+        ⌄
+      </button>
       <div className="message-bubble__meta">
         <strong>{senderLabel(message.sender)}</strong>
         <time>{message.timeLabel}</time>
       </div>
+      {message.replyTo ? (
+        <div className="message-bubble__quote">
+          <strong>{quotedSenderLabel(message.replyTo.sender)}</strong>
+          <span>{quotedMessageLabel(message.replyTo)}</span>
+        </div>
+      ) : null}
       {message.body ? <p>{message.body}</p> : <p className="muted-text">{messageTypeLabel(message.type)}</p>}
       {message.media && message.media.length > 0 ? (
         <div className="message-media-list">
@@ -1203,7 +1395,7 @@ function MessageBubble({ message, onRetry }: { message: ConversationMessage; onR
           ))}
         </div>
       ) : null}
-      {message.status ? <small className="message-bubble__status">{messageStatusLabel(message.status)}</small> : null}
+      {message.direction === 'outbound' && message.status ? <small className="message-bubble__status">{messageStatusLabel(message.status)}</small> : null}
       {failed ? (
         <div className="message-bubble__error">
           <strong>Não enviada</strong>
@@ -1213,7 +1405,77 @@ function MessageBubble({ message, onRetry }: { message: ConversationMessage; onR
           </Button>
         </div>
       ) : null}
+      {message.isPinned ? <span className="message-bubble__pin" title="Mensagem fixada">📌</span> : null}
     </div>
+    {isMenuOpen && menuPosition ? createPortal(
+      <div
+        aria-label="Ações da mensagem"
+        className="message-context-overlay"
+        ref={overlayRef}
+        style={{ top: menuPosition.top, left: menuPosition.left }}
+      >
+        <div className="message-reaction-bar" aria-label="Reações rápidas">
+          {['👍', '❤️', '😂', '😮', '😢', '🙏'].map((reaction) => (
+            <button
+              aria-label={`Reagir com ${reaction}`}
+              className={selectedReaction === reaction ? 'is-selected' : ''}
+              key={reaction}
+              onClick={() => setSelectedReaction(reaction)}
+              type="button"
+            >
+              {reaction}
+            </button>
+          ))}
+          <button
+            aria-expanded={showMoreReactions}
+            aria-label="Mais reações"
+            className={showMoreReactions ? 'is-selected' : ''}
+            onClick={() => setShowMoreReactions((current) => !current)}
+            type="button"
+          >
+            +
+          </button>
+          {showMoreReactions ? (
+            <div className="message-reaction-bar__more">
+              {['🎉', '👏', '🔥', '✅', '💯'].map((reaction) => (
+                <button
+                  aria-label={`Reagir com ${reaction}`}
+                  className={selectedReaction === reaction ? 'is-selected' : ''}
+                  key={reaction}
+                  onClick={() => setSelectedReaction(reaction)}
+                  type="button"
+                >
+                  {reaction}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="message-actions-menu" ref={menuRef} role="menu">
+          <button onClick={() => { setIsMenuOpen(false); onReply() }} role="menuitem" type="button">↩ Responder</button>
+          {hasText ? <button onClick={() => void copyMessage()} role="menuitem" type="button">▣ Copiar texto</button> : null}
+          <button onClick={() => { void onTogglePin(); setIsMenuOpen(false) }} role="menuitem" type="button">📌 {message.isPinned ? 'Desafixar' : 'Fixar no CRM'}</button>
+          <button onClick={() => { setIsInfoOpen(true); setIsMenuOpen(false) }} role="menuitem" type="button">ⓘ Dados da mensagem</button>
+          {downloadableMedia.map((media) => (
+            <a download href={downloadUrl(media.id)} key={media.id} role="menuitem">↓ Baixar {media.name}</a>
+          ))}
+        </div>
+      </div>,
+      document.body,
+    ) : null}
+    <Modal open={isInfoOpen} onClose={() => setIsInfoOpen(false)} title="Informações da mensagem" size="md">
+      <dl className="message-info-list">
+        <dt>Enviada por</dt><dd>{senderLabel(message.sender)}</dd>
+        <dt>Direção</dt><dd>{message.direction === 'outbound' ? 'Enviada' : 'Recebida'}</dd>
+        {message.status ? <><dt>Status</dt><dd>{messageStatusLabel(message.status)}</dd></> : null}
+        {message.receivedAt ? <><dt>Recebida</dt><dd>{formatMessageTimestamp(message.receivedAt)}</dd></> : null}
+        {message.sentAt ? <><dt>Enviada</dt><dd>{formatMessageTimestamp(message.sentAt)}</dd></> : null}
+        {message.deliveredAt ? <><dt>Entregue</dt><dd>{formatMessageTimestamp(message.deliveredAt)}</dd></> : null}
+        {message.readAt ? <><dt>{message.direction === 'inbound' ? 'Lida pela equipe' : 'Lida'}</dt><dd>{formatMessageTimestamp(message.readAt)}</dd></> : null}
+        {message.failedAt ? <><dt>Falhou</dt><dd>{formatMessageTimestamp(message.failedAt)}</dd></> : null}
+      </dl>
+    </Modal>
+    </>
   )
 }
 
@@ -1271,7 +1533,11 @@ function hasOpenAlerts(conversation: Conversation): boolean {
 }
 
 function openAlertCount(conversation: Conversation): number {
-  return (conversation.alerts ?? []).filter((alert) => alert.status !== 'resolved').length
+  return (conversation.alerts ?? []).filter((alert) => isOperationalAlert(alert) && alert.status !== 'resolved').length
+}
+
+function isOperationalAlert(alert: ConversationAlert): boolean {
+  return alert.type !== 'unread_message'
 }
 
 function modePresentation(conversation: Conversation): { label: string; tone: BadgeTone } {
@@ -1374,18 +1640,54 @@ function formatConversationTime(value?: string | null): string {
 
 function formatMessageDate(value?: string | null): string {
   if (!value) {
-    return 'Conversa'
+    return 'Data não informada'
   }
 
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
-    return 'Conversa'
+    return 'Data não informada'
+  }
+
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(today.getDate() - 1)
+
+  if (date.toDateString() === today.toDateString()) {
+    return 'Hoje'
+  }
+
+  if (date.toDateString() === yesterday.toDateString()) {
+    return 'Ontem'
   }
 
   return date.toLocaleDateString('pt-BR', {
     day: '2-digit',
     month: 'short',
     weekday: 'long',
+  })
+}
+
+function quotedSenderLabel(sender: ConversationMessage['sender']): string {
+  return sender === 'customer' ? 'Cliente' : sender === 'ai' ? 'Assistente' : 'Você'
+}
+
+function quotedMessageLabel(message: Pick<ConversationMessage, 'body' | 'type'>): string {
+  if (message.body.trim() !== '') {
+    return message.body
+  }
+
+  return messageTypeLabel(message.type)
+}
+
+function formatMessageTimestamp(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return '—'
+  }
+
+  return date.toLocaleString('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
   })
 }
 
@@ -1461,7 +1763,7 @@ function collectNotificationEvents(conversations: Conversation[]): NotificationE
         tone: 'info' as const,
       }))
     const alertEvents = (conversation.alerts ?? [])
-      .filter((alert) => alert.status === 'open')
+      .filter((alert) => isOperationalAlert(alert) && alert.status === 'open')
       .map((alert) => ({
         key: `conversation-alert:${alert.id}`,
         conversationId: conversation.id,

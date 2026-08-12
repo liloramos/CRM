@@ -32,6 +32,8 @@ class ConversationPresenter
             'activeOrder.payments.proofs',
             'messages.mediaFiles',
             'messages.whatsappMessageDeliveries',
+            'messages.replyTo',
+            'messages.pinnedBy',
             'whatsappMessageDeliveries',
             'alerts.payment',
             'alerts.paymentProof',
@@ -43,6 +45,7 @@ class ConversationPresenter
             ->values();
 
         $alerts = $conversation->alerts
+            ->reject(fn (ConversationAlert $alert): bool => $alert->type === ConversationAlert::TYPE_UNREAD_MESSAGE)
             ->sortByDesc('created_at')
             ->map(fn (ConversationAlert $alert): array => $this->alert($alert))
             ->values();
@@ -116,6 +119,12 @@ class ConversationPresenter
             'body' => $message->content,
             'timeLabel' => $message->created_at?->format('H:i') ?? '',
             'createdAt' => $message->created_at?->toIso8601String(),
+            'occurredAt' => ($message->sent_at ?? $message->received_at ?? $message->created_at)?->toIso8601String(),
+            'sentAt' => $message->sent_at?->toIso8601String(),
+            'receivedAt' => $message->received_at?->toIso8601String(),
+            'deliveredAt' => $message->delivered_at?->toIso8601String(),
+            'readAt' => $message->read_at?->toIso8601String(),
+            'failedAt' => $message->failed_at?->toIso8601String(),
             'status' => $message->delivery_status ?: 'received',
             'errorMessage' => $message->delivery_status === 'failed' ? $delivery?->error_message : null,
             'errorCode' => $message->delivery_status === 'failed'
@@ -134,6 +143,14 @@ class ConversationPresenter
                 ])
                 ->values()
                 ->all(),
+            'replyTo' => $message->replyTo ? [
+                'id' => (string) $message->replyTo->id,
+                'sender' => $this->senderFor($message->replyTo),
+                'type' => $message->replyTo->type,
+                'body' => $message->replyTo->content,
+            ] : null,
+            'isPinned' => $message->pinned_at !== null,
+            'pinnedAt' => $message->pinned_at?->toIso8601String(),
         ];
     }
 

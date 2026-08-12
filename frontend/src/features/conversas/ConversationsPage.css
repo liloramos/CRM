@@ -1,8 +1,10 @@
 .conversation-page {
   container-name: conversation-page;
   container-type: inline-size;
+  width: 100%;
   min-width: 0;
   min-height: 0;
+  flex: 1 1 0;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -78,7 +80,7 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   grid-template-columns: minmax(280px, 345px) minmax(0, 1fr);
   gap: 14px;
   overflow: hidden;
@@ -118,6 +120,24 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow-wrap: normal;
+}
+
+.conversation-page .conversation-item__identity {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.conversation-page .conversation-item__identity strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-page .conversation-item__identity .badge {
+  flex: 0 0 auto;
 }
 
 .conversation-page .conversation-mode-actions {
@@ -195,6 +215,229 @@
   padding: 9px;
   border-color: rgba(148, 163, 184, 0.2);
   background: rgba(9, 14, 23, 0.96);
+}
+
+.conversation-page .composer-reply-preview {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border-left: 3px solid rgba(245, 158, 11, 0.8);
+  border-radius: 5px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.conversation-page .composer-reply-preview > div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.conversation-page .composer-reply-preview strong,
+.conversation-page .composer-reply-preview span,
+.conversation-page .message-bubble__quote span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-page .composer-reply-preview span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.conversation-page .message-bubble__quote {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-left: 3px solid rgba(245, 158, 11, 0.62);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  background: rgba(15, 23, 42, 0.3);
+  font-size: 12px;
+}
+
+.conversation-page .message-bubble__quote strong {
+  color: var(--color-text);
+}
+
+.conversation-page .message-bubble__reply {
+  display: none;
+  margin-top: 8px;
+  padding: 2px 0;
+  border: 0;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.conversation-page .message-bubble:hover .message-bubble__reply,
+.conversation-page .message-bubble:focus-within .message-bubble__reply {
+  display: inline-flex;
+}
+
+.conversation-page .message-bubble__reply:hover,
+.conversation-page .message-bubble__reply:focus-visible {
+  color: #fbbf24;
+  text-decoration: underline;
+  outline: none;
+}
+
+.conversation-page .message-bubble__menu-trigger {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.conversation-page .message-bubble {
+  position: relative;
+}
+
+.conversation-page .message-bubble:hover .message-bubble__menu-trigger,
+.conversation-page .message-bubble:focus-within .message-bubble__menu-trigger {
+  opacity: 1;
+}
+
+.conversation-page .message-bubble__menu-trigger:hover,
+.conversation-page .message-bubble__menu-trigger:focus-visible {
+  color: #fbbf24;
+  outline: 2px solid rgba(245, 158, 11, 0.5);
+  outline-offset: 1px;
+}
+
+.message-actions-menu {
+  width: 190px;
+  display: grid;
+  gap: 3px;
+  padding: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 8px;
+  background: #111823;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+}
+
+.message-context-overlay {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  gap: 6px;
+  width: 190px;
+}
+
+.message-reaction-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  min-height: 42px;
+  padding: 4px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: #111823;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.message-reaction-bar button {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--color-text);
+  font-size: 17px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.message-reaction-bar button:hover,
+.message-reaction-bar button:focus-visible,
+.message-reaction-bar button.is-selected {
+  background: rgba(245, 158, 11, 0.16);
+  outline: none;
+}
+
+.message-reaction-bar__more {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: #111823;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.message-context-overlay .message-actions-menu {
+  position: static;
+}
+
+.message-actions-menu button,
+.message-actions-menu a {
+  display: block;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 5px;
+  color: var(--color-text);
+  text-align: left;
+  text-decoration: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.message-actions-menu button:hover,
+.message-actions-menu button:focus-visible,
+.message-actions-menu a:hover,
+.message-actions-menu a:focus-visible {
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.1);
+  outline: none;
+}
+
+.message-info-list {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.message-info-list dt {
+  color: var(--color-text-secondary);
+}
+
+.message-info-list dd {
+  margin: 0;
+  color: var(--color-text);
+}
+
+.conversation-page .message-bubble__pin {
+  display: inline-block;
+  margin-top: 7px;
+  font-size: 12px;
 }
 
 .conversation-page .composer textarea {

@@ -11,6 +11,7 @@ class OutgoingWhatsAppMessage
         public readonly string $to,
         public readonly string $body,
         public readonly ?string $phoneNumberId = null,
+        public readonly ?string $replyToProviderMessageId = null,
         public readonly array $metadata = [],
     ) {}
 }

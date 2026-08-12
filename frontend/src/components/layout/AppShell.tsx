@@ -1,29 +1,22 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AuthUser, RouteKey } from '../../types/crm'
 import { Sidebar } from './Sidebar'
-import { Topbar } from './Topbar'
 
 const SIDEBAR_STORAGE_KEY = 'chatbotcrm.sidebar.v1.collapsed'
 
 type AppShellProps = {
   activeRoute: RouteKey
   children: ReactNode
-  isSyncing: boolean
-  lastSyncedAt: Date | null
   onLogout: () => void
   onNavigate: (route: RouteKey) => void
-  onRefresh: () => void
   user: AuthUser | null
 }
 
 export function AppShell({
   activeRoute,
   children,
-  isSyncing,
-  lastSyncedAt,
   onLogout,
   onNavigate,
-  onRefresh,
   user,
 }: AppShellProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(readInitialSidebarPreference)
@@ -42,18 +35,11 @@ export function AppShell({
         activeRoute={activeRoute}
         collapsed={isSidebarCollapsed}
         onNavigate={onNavigate}
+        onLogout={onLogout}
         onToggleCollapsed={() => setIsSidebarCollapsed((current) => !current)}
+        user={user}
       />
-      <div className="app-shell__content">
-        <Topbar
-          isSyncing={isSyncing}
-          lastSyncedAt={lastSyncedAt}
-          onLogout={onLogout}
-          onRefresh={onRefresh}
-          user={user}
-        />
-        {children}
-      </div>
+      <div className="app-shell__content">{children}</div>
     </div>
   )
 }

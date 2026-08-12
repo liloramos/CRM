@@ -8,7 +8,8 @@
   --dashboard-tone-info: #38bdf8;
   --dashboard-tone-manual: #a78bfa;
   --dashboard-tone-neutral: #94a3b8;
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
   display: grid;
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
   background:
@@ -27,7 +28,10 @@
 }
 
 .app-shell__content {
+  height: 100dvh;
+  min-height: 0;
   min-width: 0;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
 }
@@ -39,8 +43,9 @@
 
 .app-shell__content:has(.conversation-page) > .page-container {
   box-sizing: border-box;
+  height: 100%;
   min-height: 0;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -51,7 +56,7 @@
   top: 0;
   z-index: 8;
   isolation: isolate;
-  height: 100vh;
+  height: 100dvh;
   min-height: 0;
   padding: 24px 18px;
   display: flex;
@@ -285,11 +290,137 @@
 .sidebar__footer {
   margin-top: auto;
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .sidebar--collapsed .sidebar__footer {
   justify-items: center;
+}
+
+.sidebar__profile {
+  position: relative;
+  min-width: 0;
+}
+
+.sidebar__profile-trigger {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--color-text);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar__profile-trigger:hover,
+.sidebar__profile-trigger:focus-visible {
+  border-color: var(--color-border);
+  background: var(--color-surface-raised);
+  outline: 0;
+}
+
+.sidebar__profile-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+}
+
+.sidebar__profile-copy strong,
+.sidebar__profile-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__profile-copy small,
+.sidebar__profile-identity span,
+.sidebar__profile-identity small {
+  color: var(--color-muted);
+}
+
+.sidebar--collapsed .sidebar__profile-trigger {
+  width: 52px;
+  min-height: 52px;
+  justify-content: center;
+  padding: 8px;
+}
+
+.sidebar--collapsed .sidebar__profile-copy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.sidebar__profile-menu {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: 0;
+  z-index: 20;
+  width: min(300px, calc(100vw - 32px));
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(9, 11, 14, 0.98);
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.42);
+}
+
+.sidebar__profile-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.sidebar__profile-identity div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.sidebar__profile-identity strong,
+.sidebar__profile-identity span,
+.sidebar__profile-identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar__profile-action {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sidebar__profile-action:hover,
+.sidebar__profile-action:focus-visible {
+  color: var(--color-text);
+  background: rgba(255, 138, 0, 0.12);
+  outline: 0;
 }
 
 .sidebar__floating-tooltip {
@@ -604,6 +735,7 @@ label textarea {
 }
 
 .page-container {
+  box-sizing: border-box;
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
@@ -1748,7 +1880,6 @@ label textarea {
 }
 
 .conversation-workspace {
-  --conversation-shell-height: minmax(640px, calc(100dvh - 178px));
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -1795,8 +1926,7 @@ label textarea {
 .chat-panel,
 .conversation-context-panel {
   min-width: 0;
-  min-height: var(--conversation-shell-height);
-  max-height: calc(100dvh - 178px);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -1979,7 +2109,7 @@ label textarea {
 
 .chat-panel {
   min-width: 0;
-  min-height: var(--conversation-shell-height);
+  min-height: 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 14px;
@@ -6630,8 +6760,8 @@ button.dashboard-chart__legend-row:active {
   .conversation-list-panel,
   .chat-panel {
     display: none;
-    min-height: calc(100dvh - 236px);
-    max-height: calc(100dvh - 236px);
+    min-height: 0;
+    max-height: none;
   }
 
   .conversation-workspace--list .conversation-list-panel,
@@ -6671,8 +6801,8 @@ button.dashboard-chart__legend-row:active {
 
   .conversation-list-panel,
   .chat-panel {
-    min-height: calc(100dvh - 286px);
-    max-height: calc(100dvh - 286px);
+    min-height: 0;
+    max-height: none;
   }
 
   .conversation-context-panel {
@@ -7606,10 +7736,8 @@ button.dashboard-chart__legend-row:active {
 }
 
 .conversation-workspace {
-  --conversation-available-height: calc(100dvh - 188px);
   grid-template-columns: minmax(300px, 330px) minmax(520px, 1fr) minmax(310px, 350px);
-  min-height: min(720px, var(--conversation-available-height));
-  max-height: var(--conversation-available-height);
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -7617,7 +7745,7 @@ button.dashboard-chart__legend-row:active {
 .chat-panel,
 .conversation-context-panel {
   min-height: 0;
-  max-height: var(--conversation-available-height);
+  max-height: none;
 }
 
 .conversation-list,
@@ -7887,14 +8015,10 @@ button.dashboard-chart__legend-row:active {
 }
 
 @media (max-width: 760px) {
-  .conversation-workspace {
-    --conversation-available-height: calc(100dvh - 286px);
-  }
-
   .conversation-list-panel,
   .chat-panel {
-    min-height: var(--conversation-available-height);
-    max-height: var(--conversation-available-height);
+    min-height: 0;
+    max-height: none;
   }
 
   .conversation-context-panel {

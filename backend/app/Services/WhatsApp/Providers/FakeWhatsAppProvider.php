@@ -78,6 +78,7 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
                 'transport' => 'local_fake',
                 'recipient_present' => $message->to !== '',
                 'body_length' => strlen($message->body),
+                'reply_context_present' => $message->replyToProviderMessageId !== null,
             ],
         );
     }

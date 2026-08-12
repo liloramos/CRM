@@ -51,10 +51,12 @@ class MetaWebhookPayloadParser
                 messageType: $message['type'] ?? 'text',
                 text: $message['text']['body'] ?? $message['text'] ?? null,
                 sentAt: isset($message['timestamp']) ? CarbonImmutable::createFromTimestamp((int) $message['timestamp']) : null,
+                replyToProviderMessageId: $message['context']['id'] ?? null,
                 rawPayload: $message,
                 safeMetadata: [
                     'source' => 'simple_payload',
                     'phone_number_id' => $payload['phone_number_id'] ?? null,
+                    'reply_context_present' => isset($message['context']['id']),
                     ...$this->messageMetadata($message, $message['type'] ?? 'text'),
                 ],
             );
@@ -104,11 +106,13 @@ class MetaWebhookPayloadParser
             messageType: $type,
             text: $this->messageText($message, $type),
             sentAt: isset($message['timestamp']) ? CarbonImmutable::createFromTimestamp((int) $message['timestamp']) : null,
+            replyToProviderMessageId: $message['context']['id'] ?? null,
             rawPayload: $message,
             safeMetadata: [
                 'source' => 'meta_cloud_webhook',
                 'phone_number_id' => $metadata['phone_number_id'] ?? null,
                 'display_phone_number_present' => isset($metadata['display_phone_number']),
+                'reply_context_present' => isset($message['context']['id']),
                 ...$this->messageMetadata($message, $type),
             ],
         );

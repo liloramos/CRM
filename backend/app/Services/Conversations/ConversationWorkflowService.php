@@ -62,6 +62,7 @@ class ConversationWorkflowService
         User $user,
         string $body,
         ?string $clientReference = null,
+        ?int $replyToMessageId = null,
     ): Conversation {
         $body = trim($body);
 
@@ -75,7 +76,7 @@ class ConversationWorkflowService
 
         $failedDelivery = null;
 
-        $conversation = DB::transaction(function () use ($company, $conversation, $user, $body, $clientReference, &$failedDelivery): Conversation {
+        $conversation = DB::transaction(function () use ($company, $conversation, $user, $body, $clientReference, $replyToMessageId, &$failedDelivery): Conversation {
             $conversation = Conversation::query()
                 ->where('company_id', $company->id)
                 ->whereKey($conversation->id)
@@ -98,11 +99,29 @@ class ConversationWorkflowService
                 throw new DomainException('A conversa nao possui telefone WhatsApp valido para envio.');
             }
 
+            $replyToMessage = null;
+            if ($replyToMessageId !== null) {
+                $replyToMessage = Message::query()
+                    ->where('conversation_id', $conversation->id)
+                    ->whereKey($replyToMessageId)
+                    ->first();
+
+                if (! $replyToMessage instanceof Message) {
+                    throw new DomainException('A mensagem citada não pertence a esta conversa.');
+                }
+
+                if (! is_string($replyToMessage->external_message_id) || $replyToMessage->external_message_id === '') {
+                    throw new DomainException('A mensagem citada não possui referência disponível no WhatsApp.');
+                }
+            }
+
             $delivery = $this->whatsapp->sendTextMessage($company, $recipient, $body, [
                 'conversation' => $conversation,
                 'sender_type' => 'human',
                 'sent_by_user_id' => $user->id,
                 'client_reference' => $clientReference,
+                'reply_to_message_id' => $replyToMessage?->id,
+                'reply_to_provider_message_id' => $replyToMessage?->external_message_id,
             ]);
 
             if ($delivery->status === 'failed') {

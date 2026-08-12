@@ -579,13 +579,27 @@ export async function markConversationAsRead(conversationId: string): Promise<Co
   return response.data
 }
 
+export async function toggleConversationMessagePin(conversationId: string, messageId: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(
+    `/api/app/conversations/${conversationId}/messages/${messageId}/pin`,
+    { method: 'POST' },
+  )
+
+  return response.data
+}
+
 export async function sendConversationMessage(
   conversationId: string,
   body: string,
   clientReference?: string,
+  replyToMessageId?: string,
 ): Promise<Conversation> {
   const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/messages`, {
-    body: JSON.stringify({ body, client_reference: clientReference }),
+    body: JSON.stringify({
+      body,
+      client_reference: clientReference,
+      reply_to_message_id: replyToMessageId,
+    }),
     method: 'POST',
   })
 

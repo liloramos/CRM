@@ -137,6 +137,7 @@ class ConversationOperationsController extends Controller
         $validated = $request->validate([
             'body' => ['required', 'string', 'max:4000'],
             'client_reference' => ['nullable', 'string', 'max:120'],
+            'reply_to_message_id' => ['nullable', 'integer'],
         ]);
 
         try {
@@ -146,6 +147,7 @@ class ConversationOperationsController extends Controller
                 $request->user(),
                 $validated['body'],
                 $validated['client_reference'] ?? null,
+                $validated['reply_to_message_id'] ?? null,
             );
         } catch (WhatsAppMessageSendFailedException $exception) {
             $conversation = Conversation::query()
@@ -194,6 +196,26 @@ class ConversationOperationsController extends Controller
         } catch (DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
+
+        return response()->json([
+            'data' => $presenter->conversation($conversation->load($this->conversationRelations())),
+        ]);
+    }
+
+    public function togglePin(
+        Request $request,
+        Conversation $conversation,
+        Message $message,
+        ConversationPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        abort_unless((int) $message->conversation_id === (int) $conversation->id, 404);
+
+        $message->forceFill([
+            'pinned_at' => $message->pinned_at ? null : now(),
+            'pinned_by_user_id' => $message->pinned_at ? null : $request->user()->id,
+        ])->save();
 
         return response()->json([
             'data' => $presenter->conversation($conversation->load($this->conversationRelations())),
@@ -328,6 +350,21 @@ class ConversationOperationsController extends Controller
         ]);
     }
 
+    public function downloadMedia(Request $request, Conversation $conversation, WhatsAppMediaFile $media)
+    {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        abort_unless((int) $media->company_id === $company->id, 404);
+        abort_unless((int) $media->message()->value('conversation_id') === (int) $conversation->id, 404);
+        abort_unless($media->storage_disk && $media->file_path && Storage::disk($media->storage_disk)->exists($media->file_path), 404);
+
+        return Response::make(Storage::disk($media->storage_disk)->get($media->file_path), 200, [
+            'Content-Type' => $media->mime_type ?: 'application/octet-stream',
+            'Content-Disposition' => 'attachment; filename="'.addslashes($media->original_filename ?: 'arquivo-whatsapp').'"',
+            'Cache-Control' => 'private, max-age=60',
+        ]);
+    }
+
     private function assertConversationBelongsToCompany(Conversation $conversation, int $companyId): void
     {
         abort_unless((int) $conversation->company_id === $companyId, 404);
@@ -349,6 +386,8 @@ class ConversationOperationsController extends Controller
             'activeOrder.payments.proofs',
             'messages.mediaFiles',
             'messages.whatsappMessageDeliveries',
+            'messages.replyTo',
+            'messages.pinnedBy',
             'alerts.payment',
             'alerts.paymentProof',
             'orders' => fn ($query) => $query->latest('id')->limit(1),
@@ -363,6 +402,7 @@ class ConversationOperationsController extends Controller
         return ConversationAlert::query()
             ->where('company_id', $company->id)
             ->where('status', '!=', ConversationAlert::STATUS_RESOLVED)
+            ->where('type', '!=', ConversationAlert::TYPE_UNREAD_MESSAGE)
             ->latest()
             ->limit(30)
             ->get()

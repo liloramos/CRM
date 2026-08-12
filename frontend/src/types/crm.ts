@@ -154,9 +154,23 @@ export type ConversationMessage = {
   body: string
   timeLabel: string
   createdAt?: string | null
+  occurredAt?: string | null
   status?: string | null
   errorMessage?: string | null
   errorCode?: string | null
+  isPinned?: boolean
+  pinnedAt?: string | null
+  sentAt?: string | null
+  receivedAt?: string | null
+  deliveredAt?: string | null
+  readAt?: string | null
+  failedAt?: string | null
+  replyTo?: {
+    id: string
+    sender: 'customer' | 'attendant' | 'ai'
+    type?: ConversationMessage['type']
+    body: string
+  } | null
   media?: Array<{
     id: string
     type: string

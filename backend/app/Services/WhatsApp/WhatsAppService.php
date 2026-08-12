@@ -276,6 +276,7 @@ class WhatsAppService
 
             $message = Message::query()->create([
                 'conversation_id' => $conversation->id,
+                'reply_to_message_id' => $attributes['reply_to_message_id'] ?? null,
                 'sender' => 'agent',
                 'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
                 'sender_type' => $attributes['sender_type'] ?? 'human',
@@ -315,6 +316,7 @@ class WhatsAppService
                 to: $recipient,
                 body: $body,
                 phoneNumberId: $account?->phone_number_id,
+                replyToProviderMessageId: $attributes['reply_to_provider_message_id'] ?? null,
                 metadata: ['delivery_id' => $delivery->id],
             ));
 
@@ -350,7 +352,7 @@ class WhatsAppService
     {
         return DB::transaction(function () use ($company, $message): WhatsAppMessageDelivery {
             $message = Message::query()
-                ->with('conversation')
+                ->with(['conversation', 'replyTo'])
                 ->whereKey($message->id)
                 ->lockForUpdate()
                 ->firstOrFail();
@@ -407,6 +409,7 @@ class WhatsAppService
                 to: $recipient,
                 body: (string) $message->content,
                 phoneNumberId: $account?->phone_number_id,
+                replyToProviderMessageId: $message->replyTo?->external_message_id,
                 metadata: ['delivery_id' => $delivery->id, 'retry_of_message_id' => $message->id],
             ));
 
@@ -533,9 +536,16 @@ class WhatsAppService
         ]);
         $expectedAutomationVersion = (int) ($conversation->automation_version ?? 0);
         $content = $incomingMessage->text ?: $this->placeholderForMessageType($incomingMessage->messageType);
+        $replyToMessageId = $incomingMessage->replyToProviderMessageId
+            ? Message::query()
+                ->where('conversation_id', $conversation->id)
+                ->where('external_message_id', $incomingMessage->replyToProviderMessageId)
+                ->value('id')
+            : null;
 
         $message = Message::query()->create([
             'conversation_id' => $conversation->id,
+            'reply_to_message_id' => $replyToMessageId,
             'sender' => 'customer',
             'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
             'sender_type' => 'customer',
@@ -579,17 +589,6 @@ class WhatsAppService
 
         $media = $this->mediaStorage->storeIncomingMedia($company, $account, $message, $event, $incomingMessage);
         $this->updateConversationAfterInboundMessage($conversation, $message, $incomingMessage);
-
-        $this->alerts->open(
-            company: $company,
-            type: ConversationAlert::TYPE_UNREAD_MESSAGE,
-            severity: ConversationAlert::SEVERITY_INFO,
-            title: 'Nova mensagem no WhatsApp',
-            message: 'Cliente enviou uma mensagem e aguarda acompanhamento.',
-            conversation: $conversation,
-            messageModel: $message,
-            deduplicationKey: 'unread-message:'.$message->id,
-        );
 
         if ($this->customerAskedForHuman($content)) {
             $this->alerts->open(

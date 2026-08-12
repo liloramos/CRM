@@ -34,6 +34,7 @@ import {
   getOrderTicketPreviewUrl,
   getOperationalSnapshot,
   markConversationAsRead as markConversationAsReadRequest,
+  toggleConversationMessagePin,
   rejectConversationPaymentProof,
   resolveConversationAlert,
   retryConversationMessage,
@@ -109,11 +110,9 @@ function App() {
   const [snapshotSource, setSnapshotSource] = useState<SnapshotSource>('api')
   const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false)
   const [snapshotError, setSnapshotError] = useState<string | null>(null)
-  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
   const [conversationError, setConversationError] = useState<string | null>(null)
   const [conversationAlerts, setConversationAlerts] = useState<ConversationAlert[]>([])
-  const [conversationSyncAt, setConversationSyncAt] = useState<string | null>(null)
   const conversationSyncAtRef = useRef<string | null>(null)
   const conversationPollingBusyRef = useRef(false)
   const conversationReadBusyRef = useRef<Set<string>>(new Set())
@@ -163,7 +162,6 @@ function App() {
       const response = await getOperationalSnapshot()
       setSnapshot(response.snapshot)
       setSnapshotSource(response.source)
-      setLastSyncedAt(new Date())
       setSelectedOrderId((current) => {
         const currentOrder = current ? response.snapshot.orders.find((order) => order.id === current) : undefined
         const firstActiveOrder = response.snapshot.orders.find(isOrderInActiveQueue)
@@ -261,7 +259,6 @@ function App() {
 
       setConversationAlerts(response.alerts)
       conversationSyncAtRef.current = response.generatedAt ?? new Date().toISOString()
-      setConversationSyncAt(conversationSyncAtRef.current)
       setSnapshot((current) => {
         if (!current) {
           return current
@@ -924,12 +921,17 @@ function App() {
     }
   }
 
-  async function handleConversationSendMessage(conversationId: string, body: string, clientReference: string) {
+  async function handleConversationSendMessage(
+    conversationId: string,
+    body: string,
+    clientReference: string,
+    replyToMessageId?: string,
+  ) {
     setIsActionBusy(true)
     setConversationError(null)
 
     try {
-      const conversation = await sendConversationMessage(conversationId, body, clientReference)
+      const conversation = await sendConversationMessage(conversationId, body, clientReference, replyToMessageId)
       replaceConversation(conversation)
     } catch (error) {
       const failedConversation = conversationFromApiError(error)
@@ -943,6 +945,11 @@ function App() {
     } finally {
       setIsActionBusy(false)
     }
+  }
+
+  async function handleConversationMessagePin(conversationId: string, messageId: string) {
+    const conversation = await toggleConversationMessagePin(conversationId, messageId)
+    replaceConversation(conversation)
   }
 
   async function handleConversationRetryMessage(conversationId: string, messageId: string) {
@@ -1248,9 +1255,9 @@ function App() {
             onSelectConversation={setSelectedConversationId}
             onRetryMessage={handleConversationRetryMessage}
             onSendMessage={handleConversationSendMessage}
+            onToggleMessagePin={handleConversationMessagePin}
             onUpdateCustomer={handleUpdateCustomerFromPage}
             selectedConversation={selectedConversation}
-            syncLabel={conversationSyncAt ? new Date(conversationSyncAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null}
           />
         )
       case 'pedidos':
@@ -1371,11 +1378,8 @@ function App() {
   return (
     <AppShell
       activeRoute={activeRoute}
-      isSyncing={isLoadingSnapshot}
-      lastSyncedAt={lastSyncedAt}
       onLogout={() => void logout()}
       onNavigate={setActiveRoute}
-      onRefresh={() => void loadSnapshot()}
       user={user}
     >
       {renderPage()}

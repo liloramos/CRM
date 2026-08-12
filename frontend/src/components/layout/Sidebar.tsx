@@ -1,25 +1,55 @@
-import { useEffect, useRef, useState, type FocusEvent, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import { menuItems } from '../../constants/routes'
-import type { RouteKey } from '../../types/crm'
+import type { AuthUser, RouteKey } from '../../types/crm'
 import { Badge } from '../ui/Badge'
 import { Icon } from '../ui/Icon'
 import { SolLogo } from './SolLogo'
+import { initialsFromName } from '../../utils/formatters'
 
 type SidebarProps = {
   activeRoute: RouteKey
   collapsed: boolean
+  onLogout: () => void
   onNavigate: (route: RouteKey) => void
   onToggleCollapsed: () => void
+  user: AuthUser | null
 }
 
-export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed }: SidebarProps) {
+export function Sidebar({ activeRoute, collapsed, onLogout, onNavigate, onToggleCollapsed, user }: SidebarProps) {
   const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu'
   const activeItemRef = useRef<HTMLButtonElement | null>(null)
   const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
+  const profileRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     activeItemRef.current?.scrollIntoView({ block: 'nearest' })
   }, [activeRoute, collapsed])
+
+  useEffect(() => {
+    if (!isProfileOpen) {
+      return undefined
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (!profileRef.current?.contains(event.target as Node)) {
+        setIsProfileOpen(false)
+      }
+    }
+
+    function handleEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsProfileOpen(false)
+      }
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [isProfileOpen])
 
   function showTooltip(label: string, event: FocusEvent<HTMLButtonElement> | MouseEvent<HTMLButtonElement>) {
     if (!collapsed) {
@@ -71,6 +101,52 @@ export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed 
         ))}
       </nav>
       <div className="sidebar__footer">
+        <div className="sidebar__profile" ref={profileRef}>
+          <button
+            aria-expanded={isProfileOpen}
+            aria-haspopup="menu"
+            className="sidebar__profile-trigger"
+            onClick={() => setIsProfileOpen((current) => !current)}
+            onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
+              if (event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                setIsProfileOpen(true)
+              }
+            }}
+            type="button"
+          >
+            <span className="avatar">{initialsFromName(user?.name ?? 'Usuario')}</span>
+            <span className="sidebar__profile-copy">
+              <strong>{user?.name ?? 'Operador'}</strong>
+              <small>{formatRole(user?.roles[0])}</small>
+            </span>
+            {!collapsed ? <Icon name="arrow" size={15} /> : null}
+          </button>
+          {isProfileOpen ? (
+            <div className="sidebar__profile-menu" role="menu">
+              <div className="sidebar__profile-identity">
+                <span className="avatar avatar--lg">{initialsFromName(user?.name ?? 'Usuario')}</span>
+                <div>
+                  <strong>{user?.name ?? 'Operador'}</strong>
+                  <span>{user?.email ?? 'Conta local'}</span>
+                  <small>{user?.company?.name ?? 'Restaurante atual'}</small>
+                </div>
+              </div>
+              <button
+                className="sidebar__profile-action"
+                onClick={() => {
+                  setIsProfileOpen(false)
+                  onLogout()
+                }}
+                role="menuitem"
+                type="button"
+              >
+                <Icon name="logout" size={17} />
+                <span>Sair</span>
+              </button>
+            </div>
+          ) : null}
+        </div>
         <button
           aria-label="Ajuda e suporte"
           className="sidebar__item sidebar__item--support"
@@ -91,6 +167,21 @@ export function Sidebar({ activeRoute, collapsed, onNavigate, onToggleCollapsed 
       ) : null}
     </aside>
   )
+}
+
+function formatRole(role?: string): string {
+  switch (role) {
+    case 'super_admin':
+      return 'Super admin'
+    case 'admin_gerente':
+      return 'Gerência'
+    case 'atendente':
+      return 'Atendimento'
+    case 'cozinha':
+      return 'Cozinha'
+    default:
+      return 'Operação'
+  }
 }
 
 function formatCompactBadge(value: string) {

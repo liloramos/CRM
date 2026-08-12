@@ -3,6 +3,7 @@
 namespace Tests\Feature\WhatsApp;
 
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
+use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Jobs\ProcessWhatsAppWebhookEvent;
 use App\Models\AiResponseSuggestion;
 use App\Models\Company;
@@ -605,6 +606,296 @@ class WhatsAppProviderTest extends TestCase
         Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/messages'));
     }
 
+    public function test_human_reply_persists_local_context_and_fake_provider_receives_it(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente de resposta',
+            'phone' => '15550100006',
+            'whatsapp_id' => '15550100006',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'whatsapp_identifier' => '15550100006',
+            'started_at' => now(),
+        ]);
+        $original = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Qual marmita você quer?',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.original-reply',
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages", [
+                'body' => 'Quero a N8.',
+                'reply_to_message_id' => $original->id,
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.messages.1.replyTo.id', (string) $original->id)
+            ->assertJsonPath('data.messages.1.replyTo.body', 'Qual marmita você quer?');
+
+        $reply = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('sender_type', 'human')
+            ->firstOrFail();
+
+        $this->assertSame($original->id, $reply->reply_to_message_id);
+        $this->assertDatabaseHas('whatsapp_message_deliveries', [
+            'message_id' => $reply->id,
+            'safe_payload->reply_context_present' => true,
+        ]);
+    }
+
+    public function test_reply_to_message_from_another_conversation_is_rejected(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente isolado',
+            'phone' => '15550100007',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'started_at' => now(),
+        ]);
+        $otherConversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'started_at' => now(),
+        ]);
+        $otherMessage = Message::query()->create([
+            'conversation_id' => $otherConversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Outra conversa.',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.other-conversation',
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages", [
+                'body' => 'Tentativa inválida.',
+                'reply_to_message_id' => $otherMessage->id,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonPath('message', 'A mensagem citada não pertence a esta conversa.');
+    }
+
+    public function test_reply_endpoint_cannot_access_a_conversation_from_another_company(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente da empresa original',
+            'phone' => '15550100008',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'started_at' => now(),
+        ]);
+        $otherCompany = Company::query()->create(['name' => 'Empresa isolada', 'slug' => 'empresa-isolada']);
+        $user = User::factory()->create(['company_id' => $otherCompany->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages", [
+                'body' => 'Resposta indevida.',
+            ])
+            ->assertNotFound();
+
+        $this->assertDatabaseMissing('messages', [
+            'conversation_id' => $conversation->id,
+            'content' => 'Resposta indevida.',
+        ]);
+    }
+
+    public function test_inbound_contextual_reply_resolves_local_message_without_rejecting_unknown_context(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente contextual',
+            'phone' => '15550100001',
+            'whatsapp_id' => '15550100001',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'whatsapp_identifier' => '15550100001',
+            'started_at' => now(),
+        ]);
+        $original = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'agent',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
+            'sender_type' => 'human',
+            'content' => 'Qual marmita você quer?',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.context-origin',
+        ]);
+        $payload = $this->textPayload('wamid.contextual-inbound', 'Quero a N8.');
+        $payload['entry'][0]['changes'][0]['value']['messages'][0]['context'] = ['id' => 'wamid.context-origin'];
+
+        $this->postJson('/api/webhooks/whatsapp', $payload)->assertOk();
+        $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+
+        $this->assertDatabaseHas('messages', [
+            'external_message_id' => 'wamid.contextual-inbound',
+            'reply_to_message_id' => $original->id,
+        ]);
+
+        $unknownPayload = $this->textPayload('wamid.unknown-context', 'Ainda quero pedir.');
+        $unknownPayload['entry'][0]['changes'][0]['value']['messages'][0]['context'] = ['id' => 'wamid.missing-context'];
+        $this->postJson('/api/webhooks/whatsapp', $unknownPayload)->assertOk();
+        $unknownEvent = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($unknownEvent->id))->handle(app(WhatsAppService::class));
+
+        $this->assertDatabaseHas('messages', [
+            'external_message_id' => 'wamid.unknown-context',
+            'reply_to_message_id' => null,
+        ]);
+    }
+
+    public function test_message_can_be_pinned_and_unpinned_within_its_company(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente fixado',
+            'phone' => '15550100009',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'started_at' => now(),
+        ]);
+        $message = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Mensagem importante.',
+            'type' => 'text',
+            'provider' => 'fake',
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages/{$message->id}/pin")
+            ->assertOk()
+            ->assertJsonPath('data.messages.0.isPinned', true);
+
+        $this->assertDatabaseHas('messages', [
+            'id' => $message->id,
+            'pinned_by_user_id' => $user->id,
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages/{$message->id}/pin")
+            ->assertOk()
+            ->assertJsonPath('data.messages.0.isPinned', false);
+
+        $this->assertDatabaseHas('messages', [
+            'id' => $message->id,
+            'pinned_at' => null,
+            'pinned_by_user_id' => null,
+        ]);
+    }
+
+    public function test_message_pin_rejects_message_from_another_company_or_conversation(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente pin isolado',
+            'phone' => '15550100010',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'started_at' => now(),
+        ]);
+        $otherConversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'started_at' => now(),
+        ]);
+        $message = Message::query()->create([
+            'conversation_id' => $otherConversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Outra conversa.',
+            'type' => 'text',
+        ]);
+        $otherCompany = Company::query()->create(['name' => 'Empresa pin externa', 'slug' => 'empresa-pin-externa']);
+        $user = User::factory()->create(['company_id' => $otherCompany->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages/{$message->id}/pin")
+            ->assertNotFound();
+
+        $sameCompanyUser = User::factory()->create(['company_id' => $company->id]);
+        $sameCompanyUser->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($sameCompanyUser)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages/{$message->id}/pin")
+            ->assertNotFound();
+    }
+
     public function test_meta_provider_is_used_when_configured_and_calls_phone_number_id_endpoint(): void
     {
         $this->seed([CompanySeeder::class]);
@@ -629,6 +920,34 @@ class WhatsAppProviderTest extends TestCase
         $this->assertSame('wamid.sent-by-meta', $delivery->provider_message_id);
         Http::assertSent(fn ($request): bool => $request->url() === 'https://graph.facebook.com/v20.0/safe-phone-number-id/messages'
             && $request['to'] === '5562999990001');
+    }
+
+    public function test_meta_provider_sends_context_only_for_a_reply(): void
+    {
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fake([
+            'https://graph.facebook.com/v20.0/safe-phone-number-id/messages' => Http::response([
+                'messages' => [['id' => 'wamid.reply-sent-by-meta']],
+            ], 200),
+        ]);
+
+        $result = app(WhatsAppProviderInterface::class)->sendTextMessage(new OutgoingWhatsAppMessage(
+            to: '15550100001',
+            body: 'Resposta contextual.',
+            replyToProviderMessageId: 'wamid.original-context',
+        ));
+
+        $this->assertTrue($result->successful());
+        Http::assertSent(function ($request): bool {
+            $payload = $request->data();
+
+            return data_get($payload, 'context.message_id') === 'wamid.original-context'
+                && data_get($payload, 'text.body') === 'Resposta contextual.';
+        });
     }
 
     public function test_meta_send_failure_returns_structured_422_and_retry_reuses_message(): void
