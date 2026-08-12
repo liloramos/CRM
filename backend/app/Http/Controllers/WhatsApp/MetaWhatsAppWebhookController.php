@@ -33,11 +33,16 @@ class MetaWhatsAppWebhookController extends Controller
         WhatsAppInboundTrace $trace,
     ): JsonResponse {
         $correlationId = $trace->newCorrelationId();
-        $trace->log($correlationId, 'webhook_received');
+        $rawPayload = $request->getContent();
+        $trace->log($correlationId, 'webhook_received', [
+            'method' => $request->method(),
+            'path' => '/'.$request->path(),
+        ]);
 
-        if (! $whatsapp->signatureIsValid($request->getContent(), $request->headers->all())) {
+        if (! $whatsapp->signatureIsValid($rawPayload, $request->headers->all())) {
             $trace->log($correlationId, 'signature_rejected', [
                 'error_code' => 'whatsapp_signature_invalid',
+                'http_status' => Response::HTTP_FORBIDDEN,
             ]);
 
             return response()->json([
@@ -48,10 +53,26 @@ class MetaWhatsAppWebhookController extends Controller
         }
 
         $trace->log($correlationId, 'signature_validated');
+        $trace->log($correlationId, 'payload_decode_started');
+
+        $payload = json_decode($rawPayload, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($payload)) {
+            $trace->log($correlationId, 'payload_decode_failed', [
+                'error_code' => 'whatsapp_payload_invalid',
+                'http_status' => Response::HTTP_BAD_REQUEST,
+            ]);
+
+            return response()->json([
+                'message' => 'Payload do WhatsApp invalido.',
+                'code' => 'whatsapp_payload_invalid',
+                'correlation_id' => $correlationId,
+            ], Response::HTTP_BAD_REQUEST);
+        }
 
         try {
             $event = $whatsapp->storeWebhookEvent(
-                payload: $request->all(),
+                payload: $payload,
                 headers: $request->headers->all(),
                 method: $request->method(),
                 sourceIp: $request->ip(),
@@ -65,8 +86,10 @@ class MetaWhatsAppWebhookController extends Controller
                 $trace->record($event, 'job_dispatched');
             }
         } catch (Throwable $exception) {
-            $trace->log($correlationId, 'event_failed', [
+            $trace->log($correlationId, 'event_persist_failed', [
                 'error_code' => 'whatsapp_webhook_persistence_failed',
+                'http_status' => Response::HTTP_INTERNAL_SERVER_ERROR,
+                'exception_type' => class_basename($exception),
             ]);
             report($exception);
 
@@ -76,6 +99,10 @@ class MetaWhatsAppWebhookController extends Controller
                 'correlation_id' => $correlationId,
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
+
+        $trace->log($correlationId, 'webhook_responded', [
+            'http_status' => Response::HTTP_OK,
+        ]);
 
         return response()->json([
             'status' => $event->status,

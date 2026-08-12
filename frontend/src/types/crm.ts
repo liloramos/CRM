@@ -177,6 +177,7 @@ export type ConversationQuickReplyCategory =
   | 'unavailable_product'
   | 'human_support'
   | 'closing'
+  | 'information'
 
 export type ConversationQuickReply = {
   id: string
@@ -268,6 +269,7 @@ export type Product = {
   dailyMeatOptions?: DailyMenuComponent[]
   comboItems?: StructuredComboItem[]
   usesWeeklyMenu?: boolean
+  fixedComponentsRemovable?: boolean
   configurationPending?: boolean
   serviceDays?: ProductServiceDayKey[]
 }
@@ -446,6 +448,7 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
   description: string | null
   menu_rule_code: string | null
   uses_weekly_menu: boolean
+  fixed_components_removable: boolean
   allows_item_notes: boolean
   notes_hint: string | null
   configuration_pending: boolean

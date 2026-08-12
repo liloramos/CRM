@@ -68,6 +68,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'n8-casa' => 1300,
             'n8-tradicional' => 1600,
             'n9-tradicional' => 1800,
+            'separadinha' => 2000,
             'combo-n8-casa-baby' => 1500,
             'combo-n8-com-latinha' => 2000,
         ]);
@@ -342,6 +343,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'n8-casa' => 1300,
             'n8-tradicional' => 1600,
             'n9-tradicional' => 1800,
+            'separadinha' => 2000,
             'combo-n8-casa-baby' => 1500,
             'combo-n8-com-latinha' => 2000,
             'feijoada-250ml' => 800,

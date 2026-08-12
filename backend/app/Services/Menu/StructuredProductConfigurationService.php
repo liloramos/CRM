@@ -63,6 +63,7 @@ class StructuredProductConfigurationService
             'description' => $product->description,
             'menu_rule_code' => $product->menu_rule_code,
             'uses_weekly_menu' => $this->usesWeeklyMenu($product),
+            'fixed_components_removable' => (bool) data_get($product->composition_rules, 'fixed_components_removable', true),
             'allows_item_notes' => (bool) $product->allows_item_notes,
             'notes_hint' => $product->notes_hint,
             'configuration_pending' => $this->hasPendingConfiguration($product),

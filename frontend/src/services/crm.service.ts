@@ -960,6 +960,7 @@ function mapStructuredProduct(
     dailyMeatOptions: product.meat_configuration ? dailyMeats : [],
     comboItems: product.combo_items,
     usesWeeklyMenu: product.uses_weekly_menu,
+    fixedComponentsRemovable: product.fixed_components_removable,
     configurationPending: product.configuration_pending,
     serviceDays: product.service_days,
   }

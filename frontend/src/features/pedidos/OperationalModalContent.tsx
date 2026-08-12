@@ -311,6 +311,7 @@ export function OperationalModalContent({
         ) : null}
         {selectedProduct && visibleStructuredGroups.length > 0 ? (
           <StructuredOptionPicker
+            fixedComponentsRemovable={selectedProduct.fixedComponentsRemovable ?? true}
             groups={visibleStructuredGroups}
             onSelectedOptionsChange={onSelectedOptionsChange}
             selectedOptionIds={selectedOptionIds}
@@ -1020,10 +1021,12 @@ function BeefChoicePicker({
 }
 
 function StructuredOptionPicker({
+  fixedComponentsRemovable,
   groups,
   onSelectedOptionsChange,
   selectedOptionIds,
 }: {
+  fixedComponentsRemovable: boolean
   groups: StructuredProductOptionGroup[]
   onSelectedOptionsChange: (optionIds: string[]) => void
   selectedOptionIds: string[]
@@ -1045,13 +1048,18 @@ function StructuredOptionPicker({
             <div className="option-picker__group" key={group.id}>
               <div className="option-picker__heading">
                 <span>{includedGroupLabel(group.label)}</span>
-                <small>Desmarque somente quando o cliente pedir para retirar.</small>
+                <small>
+                  {fixedComponentsRemovable
+                    ? 'Desmarque somente quando o cliente pedir para retirar.'
+                    : 'Composição fixa da casa, sem remoções ou substituições.'}
+                </small>
               </div>
               <div className="option-picker__grid">
                 {group.component_options.map((option) => {
                   const token = removedComponentToken(option.component_id)
-                  const disabled = !option.link_active || option.requires_confirmation || !option.available
-                  const checked = !disabled && !selectedOptionIds.includes(token)
+                  const unavailable = !option.link_active || option.requires_confirmation || !option.available
+                  const disabled = unavailable || !fixedComponentsRemovable
+                  const checked = !unavailable && (!fixedComponentsRemovable || !selectedOptionIds.includes(token))
 
                   return (
                     <label className={optionChoiceClassName(checked, disabled)} key={option.id}>
@@ -1070,7 +1078,7 @@ function StructuredOptionPicker({
                       <span className="option-choice__box" aria-hidden="true" />
                       <span className="option-choice__content">
                         <strong>{option.name}</strong>
-                        <small>{fixedComponentHint(option, checked)}</small>
+                        <small>{fixedComponentHint(option, checked, fixedComponentsRemovable)}</small>
                       </span>
                     </label>
                   )
@@ -1435,13 +1443,17 @@ function productOptionToken(id: number): string {
   return `product:${id}`
 }
 
-function fixedComponentHint(option: StructuredComponentOption, checked: boolean): string {
+function fixedComponentHint(option: StructuredComponentOption, checked: boolean, removable: boolean): string {
   if (!option.link_active || option.requires_confirmation) {
     return 'Configuração pendente'
   }
 
   if (!option.available) {
     return option.availability.reason ?? 'Indisponível hoje'
+  }
+
+  if (!removable) {
+    return 'Incluído na composição fixa'
   }
 
   return checked ? 'Incluído no preço' : 'Retirar deste item'

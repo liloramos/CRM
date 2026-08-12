@@ -16,11 +16,11 @@ class SolRestaurantProductCatalogSeeder extends Seeder
         $company = $this->solRestaurant();
         $categories = ProductCategory::query()
             ->where('company_id', $company->id)
-            ->whereIn('slug', collect($this->products())->pluck('category')->unique()->all())
+            ->whereIn('slug', collect(self::catalog())->pluck('category')->unique()->all())
             ->get()
             ->keyBy('slug');
 
-        foreach ($this->products() as $row) {
+        foreach (self::catalog() as $row) {
             $category = $categories->get($row['category']);
 
             Product::query()->updateOrCreate(
@@ -56,7 +56,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function products(): array
+    public static function catalog(): array
     {
         return [
             [
@@ -65,7 +65,13 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'name' => 'N5 Casa',
                 'product_type' => Product::TYPE_MARMITA,
                 'menu_rule_code' => 'n5_casa',
+                'description' => 'Marmitex de aproximadamente 500 ml com composição fixa da casa.',
                 'base_price_cents' => 800,
+                'composition_rules' => [
+                    'capacity_ml' => 500,
+                    'fixed_components_removable' => false,
+                    'allows_substitutions' => false,
+                ],
                 'display_order' => 10,
             ],
             [
@@ -74,26 +80,63 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'name' => 'N8 Casa',
                 'product_type' => Product::TYPE_MARMITA,
                 'menu_rule_code' => 'n8_casa',
+                'description' => 'Marmitex de aproximadamente 750 ml com composição fixa da casa.',
                 'base_price_cents' => 1300,
+                'composition_rules' => [
+                    'capacity_ml' => 750,
+                    'fixed_components_removable' => false,
+                    'allows_substitutions' => false,
+                ],
                 'display_order' => 20,
             ],
             [
                 'slug' => 'n8-tradicional',
                 'category' => 'marmitas',
-                'name' => 'N8 Tradicional',
+                'name' => 'N8 Livre',
                 'product_type' => Product::TYPE_MARMITA,
                 'menu_rule_code' => 'n8_tradicional',
+                'description' => 'Marmitex de aproximadamente 750 ml montada com o buffet disponível no dia.',
                 'base_price_cents' => 1600,
+                'composition_rules' => [
+                    'capacity_ml' => 750,
+                    'uses_daily_menu' => true,
+                ],
+                'metadata' => [
+                    'legacy_name' => 'N8 Tradicional',
+                ],
                 'display_order' => 30,
             ],
             [
                 'slug' => 'n9-tradicional',
                 'category' => 'marmitas',
-                'name' => 'N9 Tradicional',
+                'name' => 'N9 Livre',
                 'product_type' => Product::TYPE_MARMITA,
                 'menu_rule_code' => 'n9_tradicional',
+                'description' => 'Marmitex de aproximadamente 1.100 ml montada com o buffet disponível no dia.',
                 'base_price_cents' => 1800,
+                'composition_rules' => [
+                    'capacity_ml' => 1100,
+                    'uses_daily_menu' => true,
+                ],
+                'metadata' => [
+                    'legacy_name' => 'N9 Tradicional',
+                ],
                 'display_order' => 40,
+            ],
+            [
+                'slug' => 'separadinha',
+                'category' => 'marmitas',
+                'name' => 'Separadinha',
+                'product_type' => Product::TYPE_MARMITA,
+                'menu_rule_code' => 'separadinha',
+                'description' => 'Marmitex de aproximadamente 1.000 ml, com três divisórias, montada com o buffet disponível no dia.',
+                'base_price_cents' => 2000,
+                'composition_rules' => [
+                    'capacity_ml' => 1000,
+                    'divisions' => 3,
+                    'uses_daily_menu' => true,
+                ],
+                'display_order' => 45,
             ],
             [
                 'slug' => 'combo-n8-casa-baby',

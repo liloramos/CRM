@@ -336,7 +336,7 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
-    public function test_structured_order_item_persists_default_component_removals(): void
+    public function test_structured_order_item_rejects_removal_from_fixed_house_composition(): void
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
 
@@ -346,40 +346,25 @@ class OrderWorkflowTest extends TestCase
         $order = app(OrderWorkflowService::class)->createDraft($company, [
             'order_date' => CarbonImmutable::create(2026, 7, 6),
         ]);
-        $arroz = $this->menuComponentId($company, 'arroz');
-        $mandioca = $this->menuComponentId($company, 'mandioca');
         $feijao = $this->menuComponentId($company, 'feijao');
         $macarrao = $this->menuComponentId($company, 'macarrao');
 
-        $data = $this->actingAs($user)
+        $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
                 'product_id' => $product->id,
                 'quantity' => 1,
-                'included_component_ids' => [$arroz, $mandioca],
                 'removed_component_ids' => [$feijao, $macarrao],
                 'structured_options' => $this->componentChoiceRows($product, [
                     'salada_casa' => ['beterraba'],
                     'carne' => ['porco'],
                 ]),
             ])
-            ->assertOk()
-            ->json('data.items.0');
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['removed_component_ids']);
 
-        $this->assertContains('Arroz', $data['composition']);
-        $this->assertContains('Mandioca', $data['composition']);
-        $this->assertContains('Beterraba', $data['composition']);
-        $this->assertContains('Porco', $data['composition']);
-        $this->assertNotContains('Feijão', $data['composition']);
-        $this->assertNotContains('Macarrão', $data['composition']);
-        $this->assertContains('Sem Feijão', $data['removals']);
-        $this->assertContains('Sem Macarrão', $data['removals']);
-        $this->assertDatabaseHas('order_items', [
+        $this->assertDatabaseMissing('order_items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
-        ]);
-        $this->assertDatabaseMissing('order_item_options', [
-            'order_item_id' => $order->refresh()->items()->firstOrFail()->id,
-            'name' => 'Feijão',
         ]);
     }
 

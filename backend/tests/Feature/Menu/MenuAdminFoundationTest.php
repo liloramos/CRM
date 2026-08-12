@@ -260,7 +260,7 @@ class MenuAdminFoundationTest extends TestCase
         $company = $this->company();
 
         $this->assertSame([], $this->productServiceDays('feijoada'));
-        $this->assertSame(172, ProductServiceDayModel::query()->where('company_id', $company->id)->count());
+        $this->assertSame(178, ProductServiceDayModel::query()->where('company_id', $company->id)->count());
         $this->assertSame(0, ProductServiceDayModel::query()->where('company_id', $company->id)->where('service_day', ProductServiceDay::Sunday->value)->count());
         $this->assertSame(0, ProductServiceDayModel::query()->where('company_id', $company->id)->where('is_active', false)->count());
         $this->assertSame(

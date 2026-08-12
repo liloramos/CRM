@@ -1,6 +1,7 @@
 <?php
 
 $whatsappAccessToken = env('WHATSAPP_ACCESS_TOKEN', env('META_WHATSAPP_TOKEN'));
+$whatsappAppId = env('WHATSAPP_APP_ID', env('META_WHATSAPP_APP_ID'));
 $whatsappPhoneNumberId = env('WHATSAPP_PHONE_NUMBER_ID', env('META_WHATSAPP_PHONE_NUMBER_ID'));
 $whatsappBusinessAccountId = env('WHATSAPP_BUSINESS_ACCOUNT_ID', env('META_WHATSAPP_BUSINESS_ACCOUNT_ID'));
 $whatsappVerifyToken = env('WHATSAPP_VERIFY_TOKEN', env('META_WHATSAPP_VERIFY_TOKEN'));
@@ -33,6 +34,7 @@ return [
 
         'meta' => [
             'token' => $whatsappAccessToken,
+            'app_id' => $whatsappAppId,
             'phone_number_id' => $whatsappPhoneNumberId,
             'business_account_id' => $whatsappBusinessAccountId,
             'verify_token' => $whatsappVerifyToken,

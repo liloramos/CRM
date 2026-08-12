@@ -35,6 +35,7 @@ const categoryOptions: Array<{ value: ConversationQuickReplyCategory; label: str
   { value: 'unavailable_product', label: 'Produto indisponível' },
   { value: 'human_support', label: 'Atendimento humano' },
   { value: 'closing', label: 'Encerramento' },
+  { value: 'information', label: 'Informações' },
 ]
 
 const emptyQuickReply: ConversationQuickReplyPayload = {

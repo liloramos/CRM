@@ -112,53 +112,77 @@ class WhatsAppService
         ?string $sourceIp = null,
         ?string $correlationId = null,
     ): WhatsAppWebhookEvent {
-        return DB::transaction(function () use ($payload, $headers, $method, $sourceIp, $correlationId): WhatsAppWebhookEvent {
-            $account = $this->resolveAccountFromPayload($payload);
-            $eventType = $this->eventTypeForPayload($payload);
-            $deduplicationKey = $this->deduplicationKey($payload);
+        $traceId = $correlationId ?? $this->inboundTrace->newCorrelationId();
+        $this->inboundTrace->log($traceId, 'event_persist_started');
+        $this->inboundTrace->log($traceId, 'payload_structure_checked', $this->payloadStructureTrace($payload));
 
-            if ($deduplicationKey !== null) {
-                $existing = WhatsAppWebhookEvent::query()
-                    ->where('provider', $this->provider->name())
-                    ->where('deduplication_key', $deduplicationKey)
-                    ->first();
+        foreach ($this->payloadStructureWarnings($payload) as $warning) {
+            $this->inboundTrace->log($traceId, $warning['stage'], [
+                'error_code' => $warning['error_code'],
+            ]);
+        }
 
-                if ($existing instanceof WhatsAppWebhookEvent) {
-                    return $existing;
+        try {
+            return DB::transaction(function () use ($payload, $headers, $method, $sourceIp, $correlationId, $traceId): WhatsAppWebhookEvent {
+                $account = $this->resolveAccountFromPayload($payload);
+                $eventType = $this->eventTypeForPayload($payload);
+                $deduplicationKey = $this->deduplicationKey($payload);
+
+                if ($deduplicationKey !== null) {
+                    $existing = WhatsAppWebhookEvent::query()
+                        ->where('provider', $this->provider->name())
+                        ->where('deduplication_key', $deduplicationKey)
+                        ->first();
+
+                    if ($existing instanceof WhatsAppWebhookEvent) {
+                        $this->inboundTrace->log($traceId, 'event_duplicate', [
+                            'event_id' => $existing->id,
+                            'status' => $existing->status,
+                        ]);
+
+                        return $existing;
+                    }
                 }
-            }
 
-            $sanitizedPayload = $this->sanitizer->sanitize($payload);
+                $sanitizedPayload = $this->sanitizer->sanitize($payload);
 
-            if ($correlationId !== null) {
-                $sanitizedPayload['inbound_trace'] = ['correlation_id' => $correlationId];
-            }
+                if ($correlationId !== null) {
+                    $sanitizedPayload['inbound_trace'] = ['correlation_id' => $correlationId];
+                }
 
-            $event = WhatsAppWebhookEvent::query()->create([
-                'company_id' => $account?->company_id,
-                'whatsapp_account_id' => $account?->id,
-                'provider' => $this->provider->name(),
-                'event_type' => $eventType,
-                'provider_event_id' => $this->providerEventId($payload),
-                'deduplication_key' => $deduplicationKey,
-                'status' => WhatsAppWebhookEvent::STATUS_RECEIVED,
-                'request_method' => $method,
-                'signature_present' => $this->signaturePresent($headers),
-                'source_ip_hash' => $this->sourceIpHash($sourceIp),
-                'raw_payload' => $payload,
-                'sanitized_payload' => $sanitizedPayload,
-                'received_at' => now(),
+                $event = WhatsAppWebhookEvent::query()->create([
+                    'company_id' => $account?->company_id,
+                    'whatsapp_account_id' => $account?->id,
+                    'provider' => $this->provider->name(),
+                    'event_type' => $eventType,
+                    'provider_event_id' => $this->providerEventId($payload),
+                    'deduplication_key' => $deduplicationKey,
+                    'status' => WhatsAppWebhookEvent::STATUS_RECEIVED,
+                    'request_method' => $method,
+                    'signature_present' => $this->signaturePresent($headers),
+                    'source_ip_hash' => $this->sourceIpHash($sourceIp),
+                    'raw_payload' => $payload,
+                    'sanitized_payload' => $sanitizedPayload,
+                    'received_at' => now(),
+                ]);
+
+                $this->inboundTrace->record($event, 'event_persisted', [
+                    ...$this->traceContextForPayload($payload),
+                    'account_id' => $account?->id,
+                    'company_id' => $account?->company_id,
+                    'status' => WhatsAppWebhookEvent::STATUS_RECEIVED,
+                ]);
+
+                return $event->refresh();
+            });
+        } catch (Throwable $exception) {
+            $this->inboundTrace->log($traceId, 'event_persist_failed', [
+                'error_code' => 'whatsapp_webhook_persistence_failed',
+                'exception_type' => class_basename($exception),
             ]);
 
-            $this->inboundTrace->record($event, 'event_persisted', [
-                ...$this->traceContextForPayload($payload),
-                'account_id' => $account?->id,
-                'company_id' => $account?->company_id,
-                'status' => WhatsAppWebhookEvent::STATUS_RECEIVED,
-            ]);
-
-            return $event->refresh();
-        });
+            throw $exception;
+        }
     }
 
     public function processWebhookEvent(WhatsAppWebhookEvent $event): WhatsAppWebhookEvent
@@ -1172,6 +1196,133 @@ class WhatsAppService
         $company = Company::query()->orderBy('id')->first();
 
         return $company instanceof Company ? $this->configuredMetaAccountFor($company) : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, bool|int|string|null>
+     */
+    private function payloadStructureTrace(array $payload): array
+    {
+        $entries = is_array($payload['entry'] ?? null) ? $payload['entry'] : [];
+        $changeCount = 0;
+        $messagesCount = 0;
+        $statusesCount = 0;
+        $messagesPresent = false;
+        $statusesPresent = false;
+        $metadataPhoneNumberIdPresent = false;
+
+        foreach ($entries as $entry) {
+            if (! is_array($entry) || ! is_array($entry['changes'] ?? null)) {
+                continue;
+            }
+
+            foreach ($entry['changes'] as $change) {
+                if (! is_array($change)) {
+                    continue;
+                }
+
+                $changeCount++;
+                $value = $change['value'] ?? null;
+
+                if (! is_array($value)) {
+                    continue;
+                }
+
+                $messages = $value['messages'] ?? null;
+                $statuses = $value['statuses'] ?? null;
+                $messagesPresent = $messagesPresent || is_array($messages);
+                $statusesPresent = $statusesPresent || is_array($statuses);
+                $messagesCount += is_array($messages) ? count($messages) : 0;
+                $statusesCount += is_array($statuses) ? count($statuses) : 0;
+                $metadataPhoneNumberIdPresent = $metadataPhoneNumberIdPresent
+                    || is_scalar(data_get($value, 'metadata.phone_number_id'));
+            }
+        }
+
+        return [
+            'object' => is_scalar($payload['object'] ?? null) ? (string) $payload['object'] : null,
+            'entry_count' => count($entries),
+            'change_count' => $changeCount,
+            'messages_present' => $messagesPresent,
+            'messages_count' => $messagesCount,
+            'statuses_present' => $statusesPresent,
+            'statuses_count' => $statusesCount,
+            'metadata_phone_number_id_present' => $metadataPhoneNumberIdPresent,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return list<array{stage: string, error_code: string}>
+     */
+    private function payloadStructureWarnings(array $payload): array
+    {
+        $warnings = [];
+        $object = $payload['object'] ?? null;
+        $entries = $payload['entry'] ?? null;
+
+        if ($object !== 'whatsapp_business_account') {
+            $warnings[] = [
+                'stage' => 'unsupported_object',
+                'error_code' => 'whatsapp_unsupported_object',
+            ];
+        }
+
+        if (! is_array($entries) || $entries === []) {
+            $warnings[] = [
+                'stage' => 'entry_missing',
+                'error_code' => 'whatsapp_entry_missing',
+            ];
+
+            return $warnings;
+        }
+
+        $hasChanges = false;
+
+        foreach ($entries as $entry) {
+            if (! is_array($entry) || ! is_array($entry['changes'] ?? null)) {
+                continue;
+            }
+
+            $hasChanges = true;
+
+            foreach ($entry['changes'] as $change) {
+                if (! is_array($change)) {
+                    continue;
+                }
+
+                if (! array_key_exists('value', $change) || ! is_array($change['value'])) {
+                    $warnings[] = [
+                        'stage' => 'value_missing',
+                        'error_code' => 'whatsapp_change_value_missing',
+                    ];
+                }
+
+                if (isset($change['field']) && $change['field'] !== 'messages') {
+                    $warnings[] = [
+                        'stage' => 'unsupported_field',
+                        'error_code' => 'whatsapp_unsupported_field',
+                    ];
+                }
+            }
+        }
+
+        if (! $hasChanges) {
+            $warnings[] = [
+                'stage' => 'changes_missing',
+                'error_code' => 'whatsapp_changes_missing',
+            ];
+        }
+
+        if ($this->providerEventId($payload) === null) {
+            $warnings[] = [
+                'stage' => 'provider_event_id_missing',
+                'error_code' => 'whatsapp_provider_event_id_missing',
+            ];
+        }
+
+        return $warnings;
     }
 
     /**

@@ -10,6 +10,7 @@ const quickReplyCategoryLabels: Record<ConversationQuickReplyCategory, string> =
   unavailable_product: 'Produto indisponível',
   human_support: 'Atendimento humano',
   closing: 'Encerramento',
+  information: 'Informações',
 }
 
 export function quickReplyCategoryLabel(category: ConversationQuickReplyCategory): string {

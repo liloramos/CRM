@@ -22,6 +22,18 @@ class WhatsAppInboundTrace
         'phone_number_id_suffix',
         'status',
         'status_count',
+        'method',
+        'path',
+        'http_status',
+        'exception_type',
+        'object',
+        'entry_count',
+        'change_count',
+        'messages_present',
+        'messages_count',
+        'statuses_present',
+        'statuses_count',
+        'metadata_phone_number_id_present',
     ];
 
     public function newCorrelationId(): string

@@ -25,6 +25,8 @@ class ConversationQuickReply extends Model
 
     public const CATEGORY_CLOSING = 'closing';
 
+    public const CATEGORY_INFORMATION = 'information';
+
     /** @var list<string> */
     public const CATEGORIES = [
         self::CATEGORY_GREETING,
@@ -36,6 +38,7 @@ class ConversationQuickReply extends Model
         self::CATEGORY_UNAVAILABLE_PRODUCT,
         self::CATEGORY_HUMAN_SUPPORT,
         self::CATEGORY_CLOSING,
+        self::CATEGORY_INFORMATION,
     ];
 
     protected $fillable = [

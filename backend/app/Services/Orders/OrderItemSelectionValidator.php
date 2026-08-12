@@ -255,6 +255,12 @@ class OrderItemSelectionValidator
         $invalidRemoved = array_values(array_diff($removedComponentIds, $defaultComponentIds));
         $conflicting = array_values(array_intersect($includedComponentIds, $removedComponentIds));
 
+        if ($removedComponentIds !== [] && data_get($product->composition_rules, 'fixed_components_removable', true) === false) {
+            throw ValidationException::withMessages([
+                'removed_component_ids' => ['A composição base deste produto é fixa e não permite remoções.'],
+            ]);
+        }
+
         if ($invalidIncluded !== []) {
             throw ValidationException::withMessages([
                 'included_component_ids' => ['Um dos ingredientes mantidos nao pertence aos itens incluidos por padrao deste produto.'],

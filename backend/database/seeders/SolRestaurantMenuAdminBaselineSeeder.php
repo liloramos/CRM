@@ -197,6 +197,7 @@ class SolRestaurantMenuAdminBaselineSeeder extends Seeder
             'n8-casa' => $mondayToSaturday,
             'n8-tradicional' => $mondayToSaturday,
             'n9-tradicional' => $mondayToSaturday,
+            'separadinha' => $mondayToSaturday,
             'combo-n8-casa-baby' => $mondayToSaturday,
             'combo-n8-com-latinha' => $mondayToSaturday,
             'suco' => $mondayToSaturday,
