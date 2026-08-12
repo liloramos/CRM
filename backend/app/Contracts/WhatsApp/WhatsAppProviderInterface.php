@@ -30,5 +30,7 @@ interface WhatsAppProviderInterface
 
     public function sendTextMessage(OutgoingWhatsAppMessage $message): WhatsAppSendResult;
 
+    public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult;
+
     public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia;
 }

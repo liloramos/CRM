@@ -33,6 +33,7 @@ import {
   getConversations,
   getOrderTicketPreviewUrl,
   getOperationalSnapshot,
+  markConversationAsRead as markConversationAsReadRequest,
   rejectConversationPaymentProof,
   resolveConversationAlert,
   retryConversationMessage,
@@ -115,6 +116,7 @@ function App() {
   const [conversationSyncAt, setConversationSyncAt] = useState<string | null>(null)
   const conversationSyncAtRef = useRef<string | null>(null)
   const conversationPollingBusyRef = useRef(false)
+  const conversationReadBusyRef = useRef<Set<string>>(new Set())
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [activeModal, setActiveModal] = useState<AppModal>(null)
@@ -195,6 +197,32 @@ function App() {
       }
     })
     setSelectedConversationId(conversation.id)
+  }, [])
+
+  const markConversationRead = useCallback(async (conversationId: string) => {
+    if (conversationReadBusyRef.current.has(conversationId)) {
+      return
+    }
+
+    conversationReadBusyRef.current.add(conversationId)
+
+    try {
+      const conversation = await markConversationAsReadRequest(conversationId)
+      setSnapshot((current) => {
+        if (!current) {
+          return current
+        }
+
+        return {
+          ...current,
+          conversations: mergeConversations(current.conversations, [conversation]),
+        }
+      })
+    } catch {
+      // Polling restores the server state if the local read request fails.
+    } finally {
+      conversationReadBusyRef.current.delete(conversationId)
+    }
   }, [])
 
   const replaceCustomer = useCallback((customer: CustomerSummary) => {
@@ -335,6 +363,25 @@ function App() {
 
     return snapshot.conversations.find((conversation) => conversation.id === selectedConversationId) ?? snapshot.conversations[0]
   }, [selectedConversationId, snapshot])
+  const selectedConversationReadId = selectedConversation?.id
+  const selectedConversationUnread = selectedConversation?.unread ?? 0
+
+  useEffect(() => {
+    if (activeRoute !== 'conversas' || document.hidden || !selectedConversationReadId || selectedConversationUnread <= 0) {
+      return undefined
+    }
+
+    const markVisibleConversationRead = () => {
+      if (!document.hidden && selectedConversationUnread > 0) {
+        void markConversationRead(selectedConversationReadId)
+      }
+    }
+
+    markVisibleConversationRead()
+    document.addEventListener('visibilitychange', markVisibleConversationRead)
+
+    return () => document.removeEventListener('visibilitychange', markVisibleConversationRead)
+  }, [activeRoute, markConversationRead, selectedConversationReadId, selectedConversationUnread])
 
   const linkedOrder = selectedConversation?.activeOrder
     ?? (selectedConversation?.linkedOrderId

@@ -429,6 +429,182 @@ class WhatsAppProviderTest extends TestCase
         ]);
     }
 
+    public function test_opening_conversation_marks_only_inbound_messages_read_idempotently(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Http::fake();
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Leitura',
+            'phone' => '15550100002',
+            'whatsapp_id' => '15550100002',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'unread_count' => 2,
+            'whatsapp_identifier' => '15550100002',
+            'started_at' => now(),
+        ]);
+        $firstInbound = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Primeira mensagem.',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.read-first',
+        ]);
+        $secondInbound = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Segunda mensagem.',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.read-second',
+        ]);
+        $outbound = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'agent',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
+            'sender_type' => 'human',
+            'content' => 'Resposta.',
+            'type' => 'text',
+            'provider' => 'fake',
+        ]);
+        $otherConversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'unread_count' => 1,
+            'whatsapp_identifier' => '15550100003',
+            'started_at' => now(),
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/read")
+            ->assertOk()
+            ->assertJsonPath('data.unread', 0);
+
+        $this->assertNotNull($firstInbound->fresh()->read_at);
+        $this->assertNotNull($secondInbound->fresh()->read_at);
+        $this->assertNull($outbound->fresh()->read_at);
+        $this->assertDatabaseHas('conversations', ['id' => $conversation->id, 'unread_count' => 0]);
+        $this->assertDatabaseHas('conversations', ['id' => $otherConversation->id, 'unread_count' => 1]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/read")
+            ->assertOk()
+            ->assertJsonPath('data.unread', 0);
+
+        $this->assertSame(0, Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('direction', WhatsAppMessageDelivery::DIRECTION_INBOUND)
+            ->whereNull('read_at')
+            ->count());
+        Http::assertNothingSent();
+    }
+
+    public function test_mark_read_rejects_a_conversation_from_another_company(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Isolado',
+            'phone' => '15550100005',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'unread_count' => 1,
+            'started_at' => now(),
+        ]);
+        $otherCompany = Company::query()->create(['name' => 'Outra empresa', 'slug' => 'outra-empresa']);
+        $user = User::factory()->create(['company_id' => $otherCompany->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/read")
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('conversations', [
+            'id' => $conversation->id,
+            'unread_count' => 1,
+        ]);
+    }
+
+    public function test_meta_read_receipt_failure_does_not_undo_local_read(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token');
+        Http::fake([
+            'https://graph.facebook.com/*/messages' => Http::response([
+                'error' => ['message' => 'safe provider rejection', 'code' => 131000],
+            ], 400),
+        ]);
+
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Recibo',
+            'phone' => '15550100004',
+            'whatsapp_id' => '15550100004',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'unread_count' => 1,
+            'whatsapp_identifier' => '15550100004',
+            'started_at' => now(),
+        ]);
+        $message = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Recibo.',
+            'type' => 'text',
+            'provider' => 'meta_cloud',
+            'external_message_id' => 'wamid.receipt-fails',
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/read")
+            ->assertOk()
+            ->assertJsonPath('data.unread', 0);
+
+        $this->assertNotNull($message->fresh()->read_at);
+        $this->assertDatabaseHas('conversations', ['id' => $conversation->id, 'unread_count' => 0]);
+        Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/messages'));
+    }
+
     public function test_meta_provider_is_used_when_configured_and_calls_phone_number_id_endpoint(): void
     {
         $this->seed([CompanySeeder::class]);

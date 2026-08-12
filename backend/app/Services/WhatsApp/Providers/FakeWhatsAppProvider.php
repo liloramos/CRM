@@ -82,6 +82,20 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
         );
     }
 
+    public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult
+    {
+        return new WhatsAppSendResult(
+            provider: $this->name(),
+            status: 'sent',
+            safePayload: [
+                'transport' => 'local_fake',
+                'external_api_called' => false,
+                'message_id_present' => $messageId !== '',
+                'phone_number_id_present' => ($phoneNumberId ?? '') !== '',
+            ],
+        );
+    }
+
     public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia
     {
         if ($mediaId === '') {

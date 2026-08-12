@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Badge } from '../../components/ui/Badge'
@@ -101,6 +102,7 @@ export function ConversationsPage({
   const [isConfigurationOpen, setIsConfigurationOpen] = useState(false)
   const [alertSeverityFilter, setAlertSeverityFilter] = useState<AlertSeverityFilter>('all')
   const [toasts, setToasts] = useState<ConversationToast[]>([])
+  const [quickReplyPosition, setQuickReplyPosition] = useState<{ top: number; left: number; width: number } | null>(null)
   const [soundEnabled, setSoundEnabled] = useState(() => readBooleanPreference('conversation-sound-enabled'))
   const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(() => (
     readBooleanPreference('conversation-browser-notifications')
@@ -113,6 +115,8 @@ export function ConversationsPage({
   const notificationsInitializedRef = useRef(false)
   const contextPanelRef = useRef<HTMLElement>(null)
   const contextTriggerRef = useRef<HTMLElement | null>(null)
+  const quickReplyTriggerRef = useRef<HTMLDivElement>(null)
+  const quickReplyPickerRef = useRef<HTMLDivElement>(null)
 
   const filteredConversations = useMemo(() => {
     const needle = normalize(search)
@@ -262,6 +266,99 @@ export function ConversationsPage({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isContextOpen])
+
+  useLayoutEffect(() => {
+    if (!isQuickReplyOpen) {
+      return undefined
+    }
+
+    function positionQuickReplyPicker() {
+      const trigger = quickReplyTriggerRef.current
+      const picker = quickReplyPickerRef.current
+
+      if (!trigger || !picker) {
+        return
+      }
+
+      const triggerRect = trigger.getBoundingClientRect()
+      const pickerRect = picker.getBoundingClientRect()
+      const viewportPadding = 12
+      const preferredLeft = triggerRect.left
+      const left = Math.min(
+        Math.max(viewportPadding, preferredLeft),
+        Math.max(viewportPadding, window.innerWidth - pickerRect.width - viewportPadding),
+      )
+      const spaceAbove = triggerRect.top - viewportPadding
+      const spaceBelow = window.innerHeight - triggerRect.bottom - viewportPadding
+      const opensAbove = spaceAbove >= pickerRect.height || spaceAbove >= spaceBelow
+      const preferredTop = opensAbove
+        ? triggerRect.top - pickerRect.height - 8
+        : triggerRect.bottom + 8
+      const top = Math.min(
+        Math.max(viewportPadding, preferredTop),
+        Math.max(viewportPadding, window.innerHeight - pickerRect.height - viewportPadding),
+      )
+
+      setQuickReplyPosition({ top, left, width: Math.min(430, window.innerWidth - viewportPadding * 2) })
+    }
+
+    const frame = window.requestAnimationFrame(positionQuickReplyPicker)
+    window.addEventListener('resize', positionQuickReplyPicker)
+    window.addEventListener('scroll', positionQuickReplyPicker, true)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('resize', positionQuickReplyPicker)
+      window.removeEventListener('scroll', positionQuickReplyPicker, true)
+    }
+  }, [isQuickReplyOpen, quickReplies, quickReplySearch])
+
+  useEffect(() => {
+    if (!isQuickReplyOpen) {
+      return undefined
+    }
+
+    function handleQuickReplyDismiss(event: MouseEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+
+      if (!quickReplyTriggerRef.current?.contains(target) && !quickReplyPickerRef.current?.contains(target)) {
+        setIsQuickReplyOpen(false)
+      }
+    }
+
+    function handleQuickReplyKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        setIsQuickReplyOpen(false)
+        quickReplyTriggerRef.current?.querySelector('button')?.focus()
+      }
+    }
+
+    document.addEventListener('mousedown', handleQuickReplyDismiss)
+    document.addEventListener('keydown', handleQuickReplyKeyDown)
+
+    return () => {
+      document.removeEventListener('mousedown', handleQuickReplyDismiss)
+      document.removeEventListener('keydown', handleQuickReplyKeyDown)
+    }
+  }, [isQuickReplyOpen])
+
+  useLayoutEffect(() => {
+    const textarea = composerRef.current
+    if (!textarea) {
+      return
+    }
+
+    const minHeight = 42
+    const maxHeight = 96
+    textarea.style.height = 'auto'
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  }, [composerBody])
 
   useEffect(() => {
     if (!isContextOpen) {
@@ -518,12 +615,11 @@ export function ConversationsPage({
         aria-busy={isLoading}
         className={`conversation-workspace conversation-workspace--${activePanel} ${isContextOpen ? 'has-context-open' : ''}`}
       >
-        <Card className="conversation-list-panel">
-          <div className="conversation-list-panel__header">
-            <div>
-              <span className="eyebrow">Caixa de entrada</span>
+          <Card className="conversation-list-panel">
+            <div className="conversation-list-panel__header">
+              <div>
               <h2>Conversas</h2>
-            </div>
+              </div>
             {alerts.length > 0 ? <Badge tone="danger" size="sm">{`${alerts.length} alertas`}</Badge> : null}
           </div>
 
@@ -602,7 +698,10 @@ export function ConversationsPage({
                 <div className="chat-heading">
                   <span className="avatar">{initialsFromName(selectedConversation.customer.name)}</span>
                   <div className="chat-heading__identity">
-                    <h2>{selectedConversation.customer.name}</h2>
+                    <div className="chat-heading__title-row">
+                      <h2>{selectedConversation.customer.name}</h2>
+                      {selectedMode ? <Badge tone={selectedMode.tone}>{selectedMode.label}</Badge> : null}
+                    </div>
                     <div className="chat-heading__meta">
                       <span>{selectedConversation.customer.phoneLabel || 'Sem telefone cadastrado'}</span>
                       <span>{selectedConversation.statusLabel}</span>
@@ -632,7 +731,6 @@ export function ConversationsPage({
                       Manual
                     </button>
                   </div>
-                  {selectedMode ? <Badge tone={selectedMode.tone}>{selectedMode.label}</Badge> : null}
                   {selectedIsManual ? (
                     <Button disabled={isActionBusy} onClick={handleReturnToAutomatic} size="sm" variant="secondary">
                       Devolver para o automático
@@ -683,12 +781,13 @@ export function ConversationsPage({
                     }
                   }}
                   placeholder="Digite uma mensagem..."
-                  rows={3}
+                  rows={1}
                   ref={composerRef}
                   value={composerBody}
                 />
                 <div className="composer__footer">
                   <div className="composer__tools">
+                    <div className="quick-reply-trigger" ref={quickReplyTriggerRef}>
                     <Button
                       aria-expanded={isQuickReplyOpen}
                       aria-haspopup="dialog"
@@ -699,14 +798,26 @@ export function ConversationsPage({
                     >
                       Respostas rápidas
                     </Button>
+                    </div>
                     <span>Enter envia · Shift+Enter quebra linha</span>
                   </div>
                   <Button disabled={isActionBusy || composerBody.trim() === ''} icon="arrow" type="submit" variant="primary">
                     {isActionBusy ? 'Enviando' : 'Enviar'}
                   </Button>
                 </div>
-                {isQuickReplyOpen ? (
-                  <div className="quick-reply-picker" role="dialog" aria-label="Respostas rápidas">
+                {isQuickReplyOpen && typeof document !== 'undefined' ? createPortal(
+                  <div
+                    className="quick-reply-picker quick-reply-picker--portal"
+                    ref={quickReplyPickerRef}
+                    role="dialog"
+                    aria-label="Respostas rápidas"
+                    style={quickReplyPosition ? {
+                      left: quickReplyPosition.left,
+                      top: quickReplyPosition.top,
+                      width: quickReplyPosition.width,
+                      visibility: 'visible',
+                    } : { visibility: 'hidden' }}
+                  >
                     <div className="quick-reply-picker__header">
                       <strong>Respostas rápidas</strong>
                       <IconButton icon="close" label="Fechar respostas rápidas" onClick={() => setIsQuickReplyOpen(false)} />
@@ -735,11 +846,17 @@ export function ConversationsPage({
                         <p className="muted-text">Nenhuma resposta rápida encontrada.</p>
                       ) : null}
                     </div>
-                    <Button onClick={() => setIsConfigurationOpen(true)} size="sm" variant="secondary">
+                    <Button
+                      onClick={() => {
+                        setIsQuickReplyOpen(false)
+                        setIsConfigurationOpen(true)
+                      }}
+                      size="sm"
+                      variant="secondary"
+                    >
                       Gerenciar respostas
                     </Button>
-                  </div>
-                ) : null}
+                  </div>, document.body) : null}
                 {localError ? (
                   <div className="composer__error" role="alert">
                     {localError}
@@ -761,7 +878,7 @@ export function ConversationsPage({
           />
         ) : null}
 
-        <section
+        <aside
           aria-label="Detalhes da conversa"
           aria-modal={isContextOpen ? true : undefined}
           className="card card--default conversation-context-panel"
@@ -773,8 +890,9 @@ export function ConversationsPage({
             <SectionTitle title="Detalhes" />
             <IconButton className="conversation-context-close" icon="close" label="Fechar detalhes" onClick={handleCloseContext} />
           </div>
-          {selectedConversation ? (
-            <>
+          <div className="conversation-context-panel__body">
+            {selectedConversation ? (
+              <>
               <div className="conversation-context-block conversation-customer-card">
                 <span className="avatar">{initialsFromName(selectedConversation.customer.name)}</span>
                 <div>
@@ -915,11 +1033,12 @@ export function ConversationsPage({
                   <p className="muted-text">Nenhum alerta aberto nesta conversa.</p>
                 )}
               </div>
-            </>
-          ) : (
-            <EmptyState description="Selecione uma conversa para ver cliente, pedido e alertas." title="Sem contexto" />
-          )}
-        </section>
+              </>
+            ) : (
+              <EmptyState description="Selecione uma conversa para ver cliente, pedido e alertas." title="Sem contexto" />
+            )}
+          </div>
+        </aside>
         </div>
         <Modal
           closeDisabled={isSavingCustomer}

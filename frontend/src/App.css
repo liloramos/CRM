@@ -21,10 +21,29 @@
   grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
 }
 
+.app-shell:has(.conversation-page) {
+  height: 100dvh;
+  min-height: 100dvh;
+}
+
 .app-shell__content {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+.app-shell__content:has(.conversation-page) {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell__content:has(.conversation-page) > .page-container {
+  box-sizing: border-box;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .sidebar {

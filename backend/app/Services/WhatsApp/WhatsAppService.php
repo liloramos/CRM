@@ -22,6 +22,7 @@ use App\Services\Payments\PaymentWorkflowService;
 use DomainException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -437,6 +438,66 @@ class WhatsAppService
 
             return $delivery->refresh();
         });
+    }
+
+    public function markConversationAsRead(Company $company, Conversation $conversation): Conversation
+    {
+        if ((int) $conversation->company_id !== (int) $company->id) {
+            throw new DomainException('Conversa não pertence ao restaurante atual.');
+        }
+
+        $unreadMessages = DB::transaction(function () use ($conversation): array {
+            $lockedConversation = Conversation::query()
+                ->whereKey($conversation->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $messages = Message::query()
+                ->where('conversation_id', $lockedConversation->id)
+                ->where('direction', WhatsAppMessageDelivery::DIRECTION_INBOUND)
+                ->whereNull('read_at')
+                ->get(['id', 'external_message_id']);
+
+            if ($messages->isNotEmpty()) {
+                Message::query()
+                    ->whereKey($messages->modelKeys())
+                    ->update(['read_at' => now()]);
+            }
+
+            $lockedConversation->forceFill(['unread_count' => 0])->save();
+
+            return $messages
+                ->pluck('external_message_id')
+                ->filter(fn ($messageId): bool => is_string($messageId) && $messageId !== '')
+                ->values()
+                ->all();
+        });
+
+        $account = $this->defaultAccountFor($company);
+
+        foreach ($unreadMessages as $messageId) {
+            try {
+                $result = $this->provider->markMessageAsRead($messageId, $account?->phone_number_id);
+
+                if (! $result->successful()) {
+                    Log::warning('WhatsApp read receipt failed.', [
+                        'conversation_id' => $conversation->id,
+                        'message_id_suffix' => $this->identifierSuffix($messageId),
+                        'provider' => $result->provider,
+                        'error_code' => $result->errorCode,
+                    ]);
+                }
+            } catch (Throwable $exception) {
+                Log::warning('WhatsApp read receipt could not be sent.', [
+                    'conversation_id' => $conversation->id,
+                    'message_id_suffix' => $this->identifierSuffix($messageId),
+                    'provider' => $this->provider->name(),
+                    'error_class' => $exception::class,
+                ]);
+            }
+        }
+
+        return $conversation->refresh();
     }
 
     private function persistIncomingMessage(IncomingWhatsAppMessage $incomingMessage, WhatsAppWebhookEvent $event): void

@@ -14,6 +14,7 @@ use App\Models\WhatsAppMediaFile;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\ConversationWorkflowService;
+use App\Services\WhatsApp\WhatsAppService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -105,6 +106,22 @@ class ConversationOperationsController extends Controller
 
         return response()->json([
             'data' => $presenter->conversation($conversation->load($this->conversationRelations())),
+        ]);
+    }
+
+    public function markRead(
+        Request $request,
+        Conversation $conversation,
+        WhatsAppService $whatsapp,
+        ConversationPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+
+        return response()->json([
+            'data' => $presenter->conversation(
+                $whatsapp->markConversationAsRead($company, $conversation)->load($this->conversationRelations()),
+            ),
         ]);
     }
 

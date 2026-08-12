@@ -571,6 +571,14 @@ export async function getConversation(conversationId: string): Promise<Conversat
   return response.data
 }
 
+export async function markConversationAsRead(conversationId: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>('/api/app/conversations/' + conversationId + '/read', {
+    method: 'POST',
+  })
+
+  return response.data
+}
+
 export async function sendConversationMessage(
   conversationId: string,
   body: string,

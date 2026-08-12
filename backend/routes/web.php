@@ -134,6 +134,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('conversations/{conversation}', [ConversationOperationsController::class, 'show'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.show');
+        Route::post('conversations/{conversation}/read', [ConversationOperationsController::class, 'markRead'])
+            ->middleware('permission:whatsapp.view')
+            ->name('conversations.read');
         Route::post('conversations/{conversation}/messages', [ConversationOperationsController::class, 'sendMessage'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.messages.store');

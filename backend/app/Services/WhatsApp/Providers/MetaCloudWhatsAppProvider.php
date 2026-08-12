@@ -196,6 +196,77 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
         );
     }
 
+    public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult
+    {
+        if (! $this->isConfigured() || $messageId === '') {
+            $error = $this->errors->configurationMissing();
+
+            return new WhatsAppSendResult(
+                provider: $this->name(),
+                status: 'failed',
+                errorMessage: $error['message'],
+                errorCode: $error['code'],
+                safePayload: [
+                    'configured' => $this->isConfigured(),
+                    'message_id_present' => $messageId !== '',
+                    'error_code' => $error['code'],
+                ],
+            );
+        }
+
+        $resolvedPhoneNumberId = $phoneNumberId ?: $this->phoneNumberId();
+        $url = rtrim($this->graphUrl(), '/').'/'.$this->apiVersion().'/'.$resolvedPhoneNumberId.'/messages';
+
+        try {
+            $response = $this->request()
+                ->asJson()
+                ->timeout(12)
+                ->retry(1, 250, throw: false)
+                ->post($url, [
+                    'messaging_product' => 'whatsapp',
+                    'status' => 'read',
+                    'message_id' => $messageId,
+                ]);
+        } catch (Throwable $exception) {
+            $error = $this->errors->networkFailure($exception);
+
+            return new WhatsAppSendResult(
+                provider: $this->name(),
+                status: 'failed',
+                errorMessage: $error['message'],
+                errorCode: $error['code'],
+                safePayload: [
+                    'http_status' => null,
+                    'external_api_called' => true,
+                    'message_id_present' => true,
+                    'phone_number_id_present' => $resolvedPhoneNumberId !== '',
+                    'error_code' => $error['code'],
+                    ...$error['safe_details'],
+                ],
+            );
+        }
+
+        $json = $response->json();
+        $providerError = is_array($json) && is_array($json['error'] ?? null)
+            ? $this->errors->providerRejection($response->status(), $json['error'])
+            : $this->errors->providerRejection($response->status(), []);
+
+        return new WhatsAppSendResult(
+            provider: $this->name(),
+            status: $response->successful() ? 'sent' : 'failed',
+            errorMessage: $response->successful() ? null : $providerError['message'],
+            errorCode: $response->successful() ? null : $providerError['code'],
+            safePayload: [
+                'http_status' => $response->status(),
+                'external_api_called' => true,
+                'message_id_present' => true,
+                'phone_number_id_present' => $resolvedPhoneNumberId !== '',
+                'error_code' => $response->successful() ? null : $providerError['code'],
+                ...($response->successful() ? [] : $providerError['safe_details']),
+            ],
+        );
+    }
+
     public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia
     {
         if (! $this->isConfigured() || $mediaId === '') {
