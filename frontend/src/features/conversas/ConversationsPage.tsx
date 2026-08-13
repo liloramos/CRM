@@ -52,7 +52,6 @@ type ConversationsPageProps = {
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
   onOpenOrders: () => void
   onPreviewTicket: (orderId: string) => void
-  onRefresh: () => void
   onRejectPayment: (conversationId: string, proofId: string, reason: string) => Promise<void>
   onResolveAlert: (conversationId: string, alertId: string) => void
   onSelectConversation: (conversationId: string) => void
@@ -74,7 +73,6 @@ export function ConversationsPage({
   onChangeMode,
   onOpenOrders,
   onPreviewTicket,
-  onRefresh,
   onRejectPayment,
   onResolveAlert,
   onSelectConversation,
@@ -594,7 +592,6 @@ export function ConversationsPage({
                 onClick={() => setIsConfigurationOpen(true)}
                 variant="ghost"
               />
-              <IconButton disabled={isLoading} icon="refresh" label="Atualizar conversas" onClick={onRefresh} variant="ghost" />
             </div>
           }
           description="Atendimento automático e manual em um só lugar."

@@ -37,6 +37,7 @@ class WhatsAppService
         private readonly PaymentWorkflowService $payments,
         private readonly WhatsAppErrorClassifier $errors,
         private readonly WhatsAppInboundTrace $inboundTrace,
+        private readonly WhatsAppPhoneResolver $phoneResolver,
     ) {}
 
     /**
@@ -256,6 +257,8 @@ class WhatsAppService
         return DB::transaction(function () use ($company, $recipient, $body, $attributes): WhatsAppMessageDelivery {
             $account = $this->defaultAccountFor($company);
             $conversation = $this->resolveConversationForOutbound($company, $recipient, $attributes);
+            $recipientResolution = $this->resolveOutboundRecipient($conversation, $recipient);
+            $recipient = $recipientResolution['value'];
             $clientReference = trim((string) ($attributes['client_reference'] ?? ''));
 
             if ($clientReference !== '') {
@@ -309,6 +312,9 @@ class WhatsAppService
                     'provider' => $this->provider->name(),
                     'body_length' => strlen($body),
                     'recipient_present' => $recipient !== '',
+                    'recipient_source' => $recipientResolution['source'],
+                    'recipient_digit_count' => $this->digitCount($recipient),
+                    'recipient_suffix' => $this->identifierSuffix($recipient),
                 ],
             ]);
 
@@ -325,7 +331,7 @@ class WhatsAppService
                 'status' => $result->successful()
                     ? WhatsAppMessageDelivery::STATUS_SENT
                     : WhatsAppMessageDelivery::STATUS_FAILED,
-                'safe_payload' => $result->safePayload,
+                'safe_payload' => array_merge((array) $delivery->safe_payload, $result->safePayload),
                 'sent_at' => $result->successful() ? now() : null,
                 'failed_at' => $result->successful() ? null : now(),
                 'error_message' => $result->errorMessage,
@@ -367,12 +373,11 @@ class WhatsAppService
                 throw new DomainException('Somente mensagens com falha podem ser reenviadas.');
             }
 
-            $recipient = $this->normalizeWhatsAppRecipient(
-                (string) ($message->external_recipient_id
-                    ?: $conversation->whatsapp_identifier
-                    ?: $conversation->customer()->value('whatsapp_id')
-                    ?: $conversation->customer()->value('phone')),
+            $recipientResolution = $this->resolveOutboundRecipient(
+                $conversation,
+                (string) ($message->external_recipient_id ?: ''),
             );
+            $recipient = $recipientResolution['value'];
 
             if ($recipient === '') {
                 throw new DomainException('A conversa não possui telefone WhatsApp válido para reenvio.');
@@ -395,6 +400,9 @@ class WhatsAppService
                     'provider' => $this->provider->name(),
                     'body_length' => strlen((string) $message->content),
                     'recipient_present' => true,
+                    'recipient_source' => $recipientResolution['source'],
+                    'recipient_digit_count' => $this->digitCount($recipient),
+                    'recipient_suffix' => $this->identifierSuffix($recipient),
                     'retry_of_message_id' => $message->id,
                 ],
             ]);
@@ -418,7 +426,7 @@ class WhatsAppService
                 'status' => $result->successful()
                     ? WhatsAppMessageDelivery::STATUS_SENT
                     : WhatsAppMessageDelivery::STATUS_FAILED,
-                'safe_payload' => $result->safePayload,
+                'safe_payload' => array_merge((array) $delivery->safe_payload, $result->safePayload),
                 'sent_at' => $result->successful() ? now() : null,
                 'failed_at' => $result->successful() ? null : now(),
                 'error_message' => $result->errorMessage,
@@ -777,12 +785,18 @@ class WhatsAppService
     private function resolveCustomerForPhone(Company $company, string $phone, ?string $name = null, bool $fromWhatsApp = false): Customer
     {
         $normalizedPhone = $this->normalizePhone($phone);
+        $phoneResolution = $fromWhatsApp ? $this->phoneResolver->resolve($normalizedPhone) : null;
+        $canonicalPhone = $phoneResolution['canonical_phone'] ?? $normalizedPhone;
 
         $customer = Customer::query()
             ->where('company_id', $company->id)
-            ->where(function ($query) use ($normalizedPhone): void {
+            ->where(function ($query) use ($normalizedPhone, $canonicalPhone): void {
                 $query->where('whatsapp_id', $normalizedPhone)
                     ->orWhere('phone', $normalizedPhone);
+
+                if ($canonicalPhone !== null && $canonicalPhone !== $normalizedPhone) {
+                    $query->orWhere('phone', $canonicalPhone);
+                }
             })
             ->first();
 
@@ -791,6 +805,10 @@ class WhatsAppService
 
             if ($fromWhatsApp && ! $customer->whatsapp_id) {
                 $updates['whatsapp_id'] = $normalizedPhone;
+            }
+
+            if ($fromWhatsApp && ! $customer->phone && $canonicalPhone !== null) {
+                $updates['phone'] = $canonicalPhone;
             }
 
             if ($fromWhatsApp && $name && ! $customer->whatsapp_profile_name) {
@@ -812,7 +830,7 @@ class WhatsAppService
             [
                 'company_id' => $company->id,
                 'name' => $name ?: 'Cliente WhatsApp',
-                'phone' => $normalizedPhone,
+                'phone' => $canonicalPhone,
                 'whatsapp_id' => $fromWhatsApp ? $normalizedPhone : null,
                 'whatsapp_profile_name' => $fromWhatsApp ? $name : null,
                 'last_whatsapp_at' => $fromWhatsApp ? now() : null,
@@ -1187,6 +1205,41 @@ class WhatsAppService
         }
 
         return $digits;
+    }
+
+    /**
+     * Keep the provider identity separate from a manually corrected phone
+     * number used for outbound delivery.
+     *
+     * @return array{value: string, source: string}
+     */
+    private function resolveOutboundRecipient(Conversation $conversation, string $fallback): array
+    {
+        $customer = $conversation->relationLoaded('customer')
+            ? $conversation->customer
+            : $conversation->customer()->first();
+        $providerIdentity = (string) ($conversation->whatsapp_identifier ?: $customer?->whatsapp_id ?: $fallback);
+        $resolution = $this->phoneResolver->resolve($providerIdentity, $customer?->phone);
+        $canonicalPhone = $resolution['canonical_phone'];
+
+        if (is_string($canonicalPhone) && trim($canonicalPhone) !== '') {
+            return [
+                'value' => $this->normalizeWhatsAppRecipient($canonicalPhone),
+                'source' => $resolution['source'],
+            ];
+        }
+
+        return [
+            'value' => $this->normalizeWhatsAppRecipient((string) $providerIdentity),
+            'source' => $conversation->whatsapp_identifier !== null
+                ? 'conversation_identifier'
+                : ($customer?->whatsapp_id ? 'provider_wa_id' : 'fallback'),
+        ];
+    }
+
+    private function digitCount(string $value): int
+    {
+        return strlen($this->normalizePhone($value));
     }
 
     private function markDefaultAccountWebhookVerified(): void

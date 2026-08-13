@@ -312,6 +312,12 @@ function App() {
 
     void loadConversations(false)
 
+    const revalidateWhenVisible = () => {
+      if (!document.hidden) {
+        void loadConversations(true)
+      }
+    }
+
     const interval = window.setInterval(() => {
       if (document.hidden) {
         return
@@ -320,8 +326,21 @@ function App() {
       void loadConversations(true)
     }, 3000)
 
-    return () => window.clearInterval(interval)
+    window.addEventListener('focus', revalidateWhenVisible)
+    document.addEventListener('visibilitychange', revalidateWhenVisible)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('focus', revalidateWhenVisible)
+      document.removeEventListener('visibilitychange', revalidateWhenVisible)
+    }
   }, [activeRoute, authStatus, loadConversations])
+
+  useEffect(() => {
+    if (activeRoute === 'conversas' && selectedConversationId && !document.hidden) {
+      void loadConversations(true)
+    }
+  }, [activeRoute, loadConversations, selectedConversationId])
 
   useEffect(() => {
     if (activeModal !== 'new-order' || newCustomerMode) {
@@ -914,6 +933,7 @@ function App() {
             : 'Automação reativada pela interface operacional.',
       })
       replaceConversation(conversation)
+      void loadConversations(true)
     } catch (error) {
       setConversationError(error instanceof Error ? error.message : 'Não foi possível alterar o modo da conversa.')
     } finally {
@@ -933,6 +953,7 @@ function App() {
     try {
       const conversation = await sendConversationMessage(conversationId, body, clientReference, replyToMessageId)
       replaceConversation(conversation)
+      void loadConversations(true)
     } catch (error) {
       const failedConversation = conversationFromApiError(error)
       if (failedConversation) {
@@ -959,6 +980,7 @@ function App() {
     try {
       const conversation = await retryConversationMessage(conversationId, messageId)
       replaceConversation(conversation)
+      void loadConversations(true)
     } catch (error) {
       const failedConversation = conversationFromApiError(error)
       if (failedConversation) {
@@ -1249,7 +1271,6 @@ function App() {
             onChangeMode={handleConversationModeChange}
             onOpenOrders={() => setActiveRoute('pedidos')}
             onPreviewTicket={handleTicketPreview}
-            onRefresh={() => void loadConversations(false)}
             onRejectPayment={handleRejectConversationPayment}
             onResolveAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'resolve')}
             onSelectConversation={setSelectedConversationId}

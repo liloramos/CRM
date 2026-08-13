@@ -922,6 +922,55 @@ class WhatsAppProviderTest extends TestCase
             && $request['to'] === '5562999990001');
     }
 
+    public function test_outbound_prefers_canonical_customer_phone_without_overwriting_provider_identity(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.business_account_id', 'safe-business-account-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+
+        Http::fake([
+            'https://graph.facebook.com/v20.0/safe-phone-number-id/messages' => Http::response([
+                'messages' => [['id' => 'wamid.canonical-recipient']],
+            ], 200),
+        ]);
+
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente com identidade Meta',
+            'phone' => '5562999990009',
+            'whatsapp_id' => '556299990009',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'whatsapp_identifier' => '556299990009',
+            'started_at' => now(),
+        ]);
+
+        $delivery = app(WhatsAppService::class)->sendTextMessage(
+            $company,
+            '556299990009',
+            'Mensagem com destinatário canônico.',
+            ['conversation' => $conversation],
+        );
+
+        $this->assertSame(WhatsAppMessageDelivery::STATUS_SENT, $delivery->status);
+        $this->assertSame('556299990009', $customer->fresh()->whatsapp_id);
+        $this->assertSame('existing_canonical_phone', data_get($delivery->safe_payload, 'recipient_source'));
+        $this->assertSame(13, data_get($delivery->safe_payload, 'recipient_digit_count'));
+        $this->assertSame('...990009', data_get($delivery->safe_payload, 'recipient_suffix'));
+        Http::assertSent(fn ($request): bool => $request['to'] === '5562999990009');
+    }
+
     public function test_meta_provider_sends_context_only_for_a_reply(): void
     {
         Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
