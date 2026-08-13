@@ -606,11 +606,20 @@ export async function sendConversationMessage(
   return response.data
 }
 
-export async function sendConversationMedia(conversationId: string, file: File, mediaType: 'image' | 'document', caption = ''): Promise<Conversation> {
+export type ConversationMediaSendOptions = {
+  recordingSource?: 'browser'
+  recordingMimeType?: string
+  recordingRequestedMimeType?: string
+}
+
+export async function sendConversationMedia(conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio', caption = '', options: ConversationMediaSendOptions = {}): Promise<Conversation> {
   const form = new FormData()
   form.append('file', file)
   form.append('media_type', mediaType)
   form.append('caption', caption)
+  if (options.recordingSource) form.append('recording_source', options.recordingSource)
+  if (options.recordingMimeType) form.append('recording_mime_type', options.recordingMimeType)
+  if (options.recordingRequestedMimeType) form.append('recording_requested_mime_type', options.recordingRequestedMimeType)
   const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/media`, {
     body: form,
     method: 'POST',

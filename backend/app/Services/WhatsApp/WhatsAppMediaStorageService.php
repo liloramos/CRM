@@ -60,7 +60,7 @@ class WhatsAppMediaStorageService
 
         if ($download !== null) {
             $contents = $download->contents;
-            $extension = $this->extensionFor($download->mimeType ?? (string) ($incoming->safeMetadata['mime_type'] ?? ''));
+            $extension = WhatsAppMediaFilename::extensionFor($download->mimeType ?? (string) ($incoming->safeMetadata['mime_type'] ?? ''));
             $filePath = 'whatsapp/'.$company->id.'/'.Str::uuid()->toString().$extension;
             Storage::disk('local')->put($filePath, $contents);
             $checksum = $download->sha256 ?? hash('sha256', $contents);
@@ -82,7 +82,13 @@ class WhatsAppMediaStorageService
             'media_type' => $incoming->messageType,
             'mime_type' => $download?->mimeType ?? $incoming->safeMetadata['mime_type'] ?? null,
             'sha256' => $incoming->safeMetadata['sha256'] ?? null,
-            'original_filename' => $download?->filename ?? $incoming->safeMetadata['filename'] ?? null,
+            'original_filename' => WhatsAppMediaFilename::forMedia(
+                $download?->filename ?? $incoming->safeMetadata['filename'] ?? null,
+                $download?->mimeType ?? $incoming->safeMetadata['mime_type'] ?? null,
+                $incoming->messageType,
+                now()->format('Ymd-His'),
+                $message->id,
+            ),
             'size_bytes' => $sizeBytes,
             'checksum' => $checksum,
             'storage_disk' => $filePath !== null ? 'local' : null,
@@ -90,20 +96,5 @@ class WhatsAppMediaStorageService
             'status' => $status,
             'metadata' => $metadata,
         ]);
-    }
-
-    private function extensionFor(string $mimeType): string
-    {
-        return match ($mimeType) {
-            'image/jpeg' => '.jpg',
-            'image/png' => '.png',
-            'image/webp' => '.webp',
-            'application/pdf' => '.pdf',
-            'audio/ogg' => '.ogg',
-            'audio/mpeg' => '.mp3',
-            'video/mp4' => '.mp4',
-            'text/plain' => '.txt',
-            default => '.bin',
-        };
     }
 }

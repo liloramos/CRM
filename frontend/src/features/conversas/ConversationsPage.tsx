@@ -10,7 +10,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Modal } from '../../components/ui/Modal'
 import { EmptyState } from '../../components/ui/States'
 import { CustomerEditor } from '../clientes/CustomerEditor'
-import { getConversationQuickReplies, type UpdateCustomerPayload } from '../../services/crm.service'
+import { getConversationQuickReplies, type ConversationMediaSendOptions, type UpdateCustomerPayload } from '../../services/crm.service'
 import type {
   BadgeTone,
   Conversation,
@@ -57,7 +57,7 @@ type ConversationsPageProps = {
   onSelectConversation: (conversationId: string) => void
   onRetryMessage: (conversationId: string, messageId: string) => Promise<void>
   onSendMessage: (conversationId: string, body: string, clientReference: string, replyToMessageId?: string) => Promise<void>
-  onSendMedia: (conversationId: string, file: File, mediaType: 'image' | 'document', caption: string) => Promise<void>
+  onSendMedia: (conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio', caption: string, options?: ConversationMediaSendOptions) => Promise<void>
   onToggleMessagePin: (conversationId: string, messageId: string) => Promise<void>
   onUpdateCustomer: (customerId: string, payload: UpdateCustomerPayload) => Promise<void>
 }
@@ -89,10 +89,20 @@ export function ConversationsPage({
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [composerBody, setComposerBody] = useState('')
-  const [attachment, setAttachment] = useState<{ file: File; type: 'image' | 'document' } | null>(null)
+  const [attachment, setAttachment] = useState<{ file: File; type: 'image' | 'video' | 'document' | 'audio' } | null>(null)
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const videoInputRef = useRef<HTMLInputElement>(null)
   const documentInputRef = useRef<HTMLInputElement>(null)
+  const audioInputRef = useRef<HTMLInputElement>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordingStreamRef = useRef<MediaStream | null>(null)
+  const recordingChunksRef = useRef<Blob[]>([])
+  const recordingTimerRef = useRef<number | null>(null)
+  const recordingUrlRef = useRef<string | null>(null)
+  const [recordingState, setRecordingState] = useState<'idle' | 'requesting' | 'recording' | 'preview' | 'failed'>('idle')
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [recordedAudio, setRecordedAudio] = useState<{ file: File; url: string; mimeType: string; requestedMimeType: string | null; sizeBytes: number } | null>(null)
   const [replyingTo, setReplyingTo] = useState<ConversationMessage | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
@@ -133,6 +143,90 @@ export function ConversationsPage({
     document.addEventListener('keydown', escape)
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape) }
   }, [isAttachmentMenuOpen])
+
+  useEffect(() => () => {
+    if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current)
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current)
+  }, [])
+
+  function clearRecordedAudio() {
+    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current)
+    recordingUrlRef.current = null
+    setRecordedAudio(null)
+    setRecordingSeconds(0)
+    setRecordingState('idle')
+  }
+
+  async function startVoiceRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setRecordingState('failed')
+      setLocalError('Seu navegador não oferece gravação de áudio.')
+      return
+    }
+
+    setLocalError(null)
+    setAttachment(null)
+    setRecordingState('requesting')
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const supportedMimeType = [
+        'audio/ogg;codecs=opus',
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+      ].find((mimeType) => MediaRecorder.isTypeSupported(mimeType))
+      if (!supportedMimeType) {
+        stream.getTracks().forEach((track) => track.stop())
+        setRecordingState('failed')
+        setLocalError('Este navegador não grava áudio em um formato aceito pelo WhatsApp.')
+        return
+      }
+      const recorder = new MediaRecorder(stream, { mimeType: supportedMimeType })
+
+      recordingStreamRef.current = stream
+      mediaRecorderRef.current = recorder
+      recordingChunksRef.current = []
+      setRecordingSeconds(0)
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordingChunksRef.current.push(event.data)
+      }
+      recorder.onerror = () => {
+        stream.getTracks().forEach((track) => track.stop())
+        setRecordingState('failed')
+        setLocalError('Não foi possível gravar o áudio. Tente novamente.')
+      }
+      recorder.onstop = () => {
+        const type = recorder.mimeType || supportedMimeType
+        const extension = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm'
+        const blob = new Blob(recordingChunksRef.current, { type })
+        const url = URL.createObjectURL(blob)
+        recordingUrlRef.current = url
+        setRecordedAudio({
+          file: new File([blob], `mensagem-de-voz.${extension}`, { type }),
+          url,
+          mimeType: type,
+          requestedMimeType: supportedMimeType ?? null,
+          sizeBytes: blob.size,
+        })
+        setRecordingState('preview')
+        stream.getTracks().forEach((track) => track.stop())
+      }
+      recorder.start()
+      setRecordingState('recording')
+      recordingTimerRef.current = window.setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000)
+    } catch {
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+      setRecordingState('failed')
+      setLocalError('Permita o uso do microfone para gravar uma mensagem de voz.')
+    }
+  }
+
+  function stopVoiceRecording() {
+    if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current)
+    recordingTimerRef.current = null
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
+  }
 
   const filteredConversations = useMemo(() => {
     const needle = normalize(search)
@@ -417,7 +511,7 @@ export function ConversationsPage({
     }
 
     const body = composerBody.trim()
-    if (!body && !attachment) {
+    if (!body && !attachment && !recordedAudio) {
       setLocalError('Digite uma mensagem para enviar.')
       return
     }
@@ -425,7 +519,14 @@ export function ConversationsPage({
     try {
       const clientReference = clientReferenceRef.current ?? createClientReference()
       clientReferenceRef.current = clientReference
-      if (attachment) {
+      if (recordedAudio) {
+        await onSendMedia(selectedConversation.id, recordedAudio.file, 'audio', '', {
+          recordingSource: 'browser',
+          recordingMimeType: recordedAudio.mimeType,
+          recordingRequestedMimeType: recordedAudio.requestedMimeType ?? undefined,
+        })
+        clearRecordedAudio()
+      } else if (attachment) {
         await onSendMedia(selectedConversation.id, attachment.file, attachment.type, body)
         setAttachment(null)
       } else {
@@ -835,6 +936,7 @@ export function ConversationsPage({
                   onChange={(event) => {
                     const file = event.target.files?.[0]
                     if (file) {
+                      clearRecordedAudio()
                       setAttachment({ file, type: 'image' })
                     }
                     event.currentTarget.value = ''
@@ -843,20 +945,57 @@ export function ConversationsPage({
                   type="file"
                 />
                 <input
+                  accept="video/mp4,video/3gpp"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      clearRecordedAudio()
+                      setAttachment({ file, type: 'video' })
+                    }
+                    event.currentTarget.value = ''
+                  }}
+                  ref={videoInputRef}
+                  type="file"
+                />
+                <input
                   accept=".pdf,.txt,.doc,.docx,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   hidden
                   onChange={(event) => {
                     const file = event.target.files?.[0]
-                    if (file) setAttachment({ file, type: 'document' })
+                    if (file) {
+                      clearRecordedAudio()
+                      setAttachment({ file, type: 'document' })
+                    }
                     event.currentTarget.value = ''
                   }}
                   ref={documentInputRef}
                   type="file"
                 />
+                <input
+                  accept="audio/ogg,audio/mpeg,audio/mp4,audio/aac,audio/amr,audio/opus,audio/webm"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      clearRecordedAudio()
+                      setAttachment({ file, type: 'audio' })
+                    }
+                    event.currentTarget.value = ''
+                  }}
+                  ref={audioInputRef}
+                  type="file"
+                />
                 {attachment ? (
                   <div className="composer-attachment-preview">
-                    <span>{attachment.type === 'image' ? 'Imagem' : 'Documento'}: {attachment.file.name}</span>
+                    <span>{mediaTypeLabel(attachment.type)}: {attachment.file.name}</span>
                     <IconButton icon="close" label="Remover anexo" onClick={() => setAttachment(null)} />
+                  </div>
+                ) : null}
+                {recordedAudio ? (
+                  <div className="composer-attachment-preview composer-audio-preview">
+                    <audio controls src={recordedAudio.url} />
+                    <IconButton icon="close" label="Descartar gravação" onClick={clearRecordedAudio} />
                   </div>
                 ) : null}
                 <div className="composer__footer">
@@ -868,10 +1007,23 @@ export function ConversationsPage({
                       {isAttachmentMenuOpen ? (
                         <div className="attachment-picker__menu" role="menu">
                           <button onClick={() => { setIsAttachmentMenuOpen(false); attachmentInputRef.current?.click() }} role="menuitem" type="button">Imagem</button>
+                          <button onClick={() => { setIsAttachmentMenuOpen(false); videoInputRef.current?.click() }} role="menuitem" type="button">Vídeo</button>
                           <button onClick={() => { setIsAttachmentMenuOpen(false); documentInputRef.current?.click() }} role="menuitem" type="button">Documento</button>
+                          <button onClick={() => { setIsAttachmentMenuOpen(false); audioInputRef.current?.click() }} role="menuitem" type="button">Áudio</button>
                         </div>
                       ) : null}
                     </div>
+                    {!attachment && !recordedAudio ? (
+                      <Button
+                        disabled={isActionBusy || recordingState === 'requesting'}
+                        onClick={recordingState === 'recording' ? stopVoiceRecording : startVoiceRecording}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        {recordingState === 'requesting' ? 'Preparando microfone' : recordingState === 'recording' ? `Parar gravação (${formatRecordingDuration(recordingSeconds)})` : 'Gravar voz'}
+                      </Button>
+                    ) : null}
                     <div className="quick-reply-trigger" ref={quickReplyTriggerRef}>
                     <Button
                       aria-expanded={isQuickReplyOpen}
@@ -886,7 +1038,7 @@ export function ConversationsPage({
                     </div>
                     <span>Enter envia · Shift+Enter quebra linha</span>
                   </div>
-                  <Button disabled={isActionBusy || (composerBody.trim() === '' && !attachment)} icon="arrow" type="submit" variant="primary">
+                  <Button disabled={isActionBusy || recordingState === 'recording' || (composerBody.trim() === '' && !attachment && !recordedAudio)} icon="arrow" type="submit" variant="primary">
                     {isActionBusy ? 'Enviando' : 'Enviar'}
                   </Button>
                 </div>
@@ -1544,6 +1696,7 @@ function MessageBubble({ boundaryRef, conversationId, message, onReply, onRetry,
 function MediaPreview({ media }: { media: NonNullable<ConversationMessage['media']>[number] }) {
   const isImage = media.mimeType?.startsWith('image/') ?? false
   const isAudio = media.mimeType?.startsWith('audio/') ?? false
+  const isVideo = media.mimeType?.startsWith('video/') ?? false
 
   if (isImage && media.url) {
     return (
@@ -1565,6 +1718,17 @@ function MediaPreview({ media }: { media: NonNullable<ConversationMessage['media
     )
   }
 
+  if (isVideo && media.url) {
+    return (
+      <div className="message-media message-media--video">
+        <video controls preload="metadata" src={media.url}>
+          Seu navegador não suporta vídeo.
+        </video>
+        <span>{media.name}</span>
+      </div>
+    )
+  }
+
   if (media.url) {
     return (
       <a className="message-media message-media--file" href={media.url} rel="noreferrer" target="_blank">
@@ -1580,6 +1744,16 @@ function MediaPreview({ media }: { media: NonNullable<ConversationMessage['media
       <span>{mediaLabel(media)}</span>
     </div>
   )
+}
+
+function mediaTypeLabel(type: 'image' | 'video' | 'document' | 'audio'): string {
+  return ({ image: 'Imagem', video: 'Vídeo', document: 'Documento', audio: 'Áudio' })[type]
+}
+
+function formatRecordingDuration(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
 function isManualConversation(conversation: Conversation): boolean {

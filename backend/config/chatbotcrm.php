@@ -28,6 +28,11 @@ return [
         'provider' => $whatsappProvider,
         'demo_data_enabled' => env('DEMO_DATA_ENABLED', false),
 
+        'media' => [
+            'ffmpeg_binary' => env('WHATSAPP_FFMPEG_BINARY', 'ffmpeg'),
+            'ffprobe_binary' => env('WHATSAPP_FFPROBE_BINARY', 'ffprobe'),
+        ],
+
         'fake' => [
             'verify_token' => env('FAKE_WHATSAPP_VERIFY_TOKEN'),
         ],

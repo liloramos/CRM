@@ -1461,3 +1461,16 @@
   color: var(--text-secondary, #b8bec7);
   font-size: 12px;
 }
+
+.conversation-page .composer-audio-preview audio {
+  min-width: min(280px, 100%);
+  max-width: 100%;
+}
+
+.conversation-page .message-media--video video {
+  display: block;
+  width: min(360px, 100%);
+  max-height: 260px;
+  border-radius: 6px;
+  background: #111318;
+}

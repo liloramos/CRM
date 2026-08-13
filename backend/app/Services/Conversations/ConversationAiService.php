@@ -22,6 +22,10 @@ class ConversationAiService
         Message $message,
         int $expectedVersion,
     ): ?AiResponseSuggestion {
+        if ((string) config('chatbotcrm.ai.provider', 'fake') === 'fake') {
+            return null;
+        }
+
         $conversation = Conversation::query()->whereKey($conversation->id)->firstOrFail();
 
         if ((int) $conversation->automation_version !== $expectedVersion) {

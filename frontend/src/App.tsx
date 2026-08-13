@@ -41,6 +41,7 @@ import {
   searchCustomers,
   sendConversationMessage,
   sendConversationMedia,
+  type ConversationMediaSendOptions,
   setConversationAutomationMode,
   updateCustomer,
   updateOrderStatus,
@@ -969,10 +970,10 @@ function App() {
     }
   }
 
-  async function handleConversationSendMedia(conversationId: string, file: File, mediaType: 'image' | 'document', caption: string) {
+  async function handleConversationSendMedia(conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio', caption: string, options?: ConversationMediaSendOptions) {
     setIsActionBusy(true)
     try {
-      const conversation = await sendConversationMedia(conversationId, file, mediaType, caption)
+      const conversation = await sendConversationMedia(conversationId, file, mediaType, caption, options)
       replaceConversation(conversation)
       void loadConversations(true)
     } finally {

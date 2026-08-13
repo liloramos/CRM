@@ -150,7 +150,7 @@ export type ConversationMessage = {
   id: string
   sender: 'customer' | 'attendant' | 'ai'
   direction?: 'inbound' | 'outbound'
-  type?: 'text' | 'image' | 'document' | 'audio' | 'location' | 'interactive' | 'unsupported' | string
+  type?: 'text' | 'image' | 'video' | 'document' | 'audio' | 'location' | 'interactive' | 'unsupported' | string
   body: string
   timeLabel: string
   createdAt?: string | null

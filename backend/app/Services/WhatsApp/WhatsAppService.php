@@ -4,6 +4,7 @@ namespace App\Services\WhatsApp;
 
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Data\WhatsApp\IncomingWhatsAppMessage;
+use App\Data\WhatsApp\NormalizedWhatsAppAudio;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Models\Company;
 use App\Models\Conversation;
@@ -19,6 +20,7 @@ use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
 use App\Services\Conversations\ConversationAiService;
 use App\Services\Conversations\ConversationAlertService;
+use App\Services\Conversations\PaymentProofCandidateClassifier;
 use App\Services\Payments\PaymentWorkflowService;
 use DomainException;
 use Illuminate\Http\UploadedFile;
@@ -36,11 +38,13 @@ class WhatsAppService
         private readonly WhatsAppPayloadSanitizer $sanitizer,
         private readonly WhatsAppMediaStorageService $mediaStorage,
         private readonly ConversationAlertService $alerts,
+        private readonly PaymentProofCandidateClassifier $paymentProofClassifier,
         private readonly ConversationAiService $ai,
         private readonly PaymentWorkflowService $payments,
         private readonly WhatsAppErrorClassifier $errors,
         private readonly WhatsAppInboundTrace $inboundTrace,
         private readonly WhatsAppPhoneResolver $phoneResolver,
+        private readonly WhatsAppAudioNormalizer $audioNormalizer,
     ) {}
 
     /**
@@ -362,20 +366,49 @@ class WhatsAppService
         $allowed = [
             'image' => ['mimes' => ['image/jpeg', 'image/png', 'image/webp'], 'max' => 5 * 1024 * 1024],
             'document' => ['mimes' => ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 'max' => 100 * 1024 * 1024],
+            'video' => ['mimes' => ['video/mp4', 'video/3gpp'], 'max' => 16 * 1024 * 1024],
+            'audio' => ['mimes' => WhatsAppAudioFormat::WHATSAPP_OUTBOUND_AUDIO_TYPES, 'max' => 16 * 1024 * 1024],
         ];
-        if (! isset($allowed[$mediaType]) || ! $file->isValid() || ! in_array((string) $file->getMimeType(), $allowed[$mediaType]['mimes'], true) || $file->getSize() > $allowed[$mediaType]['max']) {
+        if (! $file->isValid()) {
+            throw new DomainException('Não foi possível receber o anexo para envio.');
+        }
+
+        if (! isset($allowed[$mediaType]) || $file->getSize() > $allowed[$mediaType]['max']) {
             throw new DomainException('Este formato ou tamanho não é aceito pelo WhatsApp.');
         }
 
-        return DB::transaction(function () use ($company, $conversation, $file, $mediaType, $caption, $attributes): WhatsAppMessageDelivery {
+        $contents = file_get_contents($file->getRealPath());
+        if (! is_string($contents)) {
+            throw new DomainException('Não foi possível ler o anexo.');
+        }
+
+        $preparedAudio = null;
+        $mimeType = WhatsAppAudioFormat::canonicalize($file->getMimeType());
+        $filename = (string) $file->getClientOriginalName();
+        if ($mediaType === 'audio' && ($attributes['recording_source'] ?? null) === 'browser') {
+            $preparedAudio = $this->audioNormalizer->normalize($contents, $mimeType, $filename);
+            $contents = $preparedAudio->contents;
+            $mimeType = $preparedAudio->mimeType;
+            $filename = $preparedAudio->filename;
+        }
+
+        if (! in_array($mimeType, $allowed[$mediaType]['mimes'], true) || strlen($contents) > $allowed[$mediaType]['max']) {
+            if ($mediaType === 'audio') {
+                throw new DomainException('Este formato de audio nao e aceito pelo WhatsApp. Use OGG/Opus, MP3, M4A, AAC ou AMR.');
+            }
+
+            throw new DomainException('Este formato ou tamanho não é aceito pelo WhatsApp.');
+        }
+
+        return DB::transaction(function () use ($company, $conversation, $file, $mediaType, $caption, $attributes, $mimeType, $contents, $filename, $preparedAudio): WhatsAppMessageDelivery {
             $account = $this->defaultAccountFor($company);
             $recipientResolution = $this->resolveOutboundRecipient($conversation, (string) $conversation->whatsapp_identifier);
             $recipient = $recipientResolution['value'];
-            $contents = file_get_contents($file->getRealPath());
+            $contents = $preparedAudio instanceof NormalizedWhatsAppAudio ? $contents : file_get_contents($file->getRealPath());
             if (! is_string($contents)) {
                 throw new DomainException('Não foi possível ler o anexo.');
             }
-            $upload = $this->provider->uploadMedia($contents, (string) $file->getMimeType(), (string) $file->getClientOriginalName(), $account?->phone_number_id);
+            $upload = $this->provider->uploadMedia($contents, $mimeType, $filename, $account?->phone_number_id);
             if ($upload === null) {
                 throw new DomainException('A Meta não aceitou o anexo.');
             }
@@ -385,14 +418,14 @@ class WhatsAppService
                 'sender_type' => $attributes['sender_type'] ?? 'human', 'content' => $caption, 'type' => $mediaType,
                 'provider' => $this->provider->name(), 'external_recipient_id' => $recipient, 'delivery_status' => WhatsAppMessageDelivery::STATUS_QUEUED,
             ]);
-            $path = 'whatsapp/'.$company->id.'/'.$conversation->id.'/'.Str::uuid()->toString().'.'.($file->extension() ?: 'bin');
+            $path = 'whatsapp/'.$company->id.'/'.$conversation->id.'/'.Str::uuid()->toString().WhatsAppMediaFilename::extensionFor($mimeType);
             Storage::disk('local')->put($path, $contents);
             WhatsAppMediaFile::query()->create([
                 'company_id' => $company->id, 'whatsapp_account_id' => $account?->id, 'message_id' => $message->id,
                 'provider' => $this->provider->name(), 'provider_media_id' => $upload->mediaId, 'media_type' => $mediaType,
-                'mime_type' => $file->getMimeType(), 'original_filename' => $file->getClientOriginalName(), 'size_bytes' => strlen($contents),
+                'mime_type' => $mimeType, 'original_filename' => WhatsAppMediaFilename::forMedia($filename, $mimeType, $mediaType), 'size_bytes' => strlen($contents),
                 'checksum' => hash('sha256', $contents), 'storage_disk' => 'local', 'file_path' => $path, 'status' => WhatsAppMediaFile::STATUS_STORED,
-                'metadata' => ['direction' => 'outbound', ...$upload->safePayload],
+                'metadata' => ['direction' => 'outbound', 'client_filename' => $file->getClientOriginalName(), 'client_mime_type' => $file->getClientMimeType(), 'detected_mime_type' => $file->getMimeType(), 'received_size_bytes' => $file->getSize(), 'recording_source' => $attributes['recording_source'] ?? null, 'recording_mime_type' => $attributes['recording_mime_type'] ?? null, 'recording_requested_mime_type' => $attributes['recording_requested_mime_type'] ?? null, 'audio_normalization' => $preparedAudio instanceof NormalizedWhatsAppAudio ? ['action' => $preparedAudio->action, ...$preparedAudio->metadata] : null, ...$upload->safePayload],
             ]);
             $delivery = WhatsAppMessageDelivery::query()->create([
                 'company_id' => $company->id, 'whatsapp_account_id' => $account?->id, 'conversation_id' => $conversation->id, 'message_id' => $message->id,
@@ -400,7 +433,7 @@ class WhatsAppService
                 'recipient' => $recipient, 'status' => WhatsAppMessageDelivery::STATUS_QUEUED, 'content_preview' => Str::limit($caption, 120),
                 'safe_payload' => ['provider' => $this->provider->name(), 'media_type' => $mediaType, 'recipient_source' => $recipientResolution['source']],
             ]);
-            $result = $this->provider->sendMediaMessage(new OutgoingWhatsAppMessage($recipient, $caption, $account?->phone_number_id, metadata: ['delivery_id' => $delivery->id]), $upload->mediaId, $mediaType, $file->getClientOriginalName());
+            $result = $this->provider->sendMediaMessage(new OutgoingWhatsAppMessage($recipient, $caption, $account?->phone_number_id, metadata: ['delivery_id' => $delivery->id]), $upload->mediaId, $mediaType, $filename);
             $delivery->forceFill(['provider_message_id' => $result->providerMessageId, 'status' => $result->successful() ? WhatsAppMessageDelivery::STATUS_SENT : WhatsAppMessageDelivery::STATUS_FAILED, 'safe_payload' => array_merge((array) $delivery->safe_payload, $result->safePayload), 'sent_at' => $result->successful() ? now() : null, 'failed_at' => $result->successful() ? null : now(), 'error_message' => $result->errorMessage])->save();
             $message->forceFill(['external_message_id' => $result->providerMessageId, 'delivery_status' => $delivery->status, 'sent_at' => $delivery->sent_at, 'failed_at' => $delivery->failed_at, 'error_code' => $result->errorCode])->save();
 
@@ -665,8 +698,9 @@ class WhatsAppService
             );
         }
 
-        if ($media !== null || $this->looksLikePaymentMessage($content)) {
-            $this->handlePossiblePaymentProof($company, $conversation, $message, $media);
+        $paymentProofCandidate = $this->paymentProofClassifier->classify($conversation, $message, $media);
+        if ($paymentProofCandidate !== null) {
+            $this->handlePossiblePaymentProof($company, $conversation, $message, $media, $paymentProofCandidate);
         }
 
         $this->ai->considerIncomingMessage($company, $conversation->refresh(), $message, $expectedAutomationVersion);
@@ -979,37 +1013,10 @@ class WhatsAppService
             || str_contains($normalized, 'beatriz');
     }
 
-    private function looksLikePaymentMessage(string $content): bool
+    /** @param array{order: Order, confidence: string, signals: list<string>} $candidate */
+    private function handlePossiblePaymentProof(Company $company, Conversation $conversation, Message $message, ?WhatsAppMediaFile $media, array $candidate): void
     {
-        $normalized = Str::of($content)->ascii()->lower()->toString();
-
-        return str_contains($normalized, 'comprovante')
-            || str_contains($normalized, 'pix')
-            || str_contains($normalized, 'paguei')
-            || str_contains($normalized, 'pagamento');
-    }
-
-    private function handlePossiblePaymentProof(Company $company, Conversation $conversation, Message $message, $media = null): void
-    {
-        $order = $conversation->activeOrder ?: $conversation->orders()
-            ->whereNotIn('status', [Order::STATUS_CANCELLED, Order::STATUS_FINISHED])
-            ->latest('id')
-            ->first();
-
-        if (! $order instanceof Order || (int) $order->total_cents <= 0) {
-            $this->alerts->open(
-                company: $company,
-                type: 'possible_payment_proof',
-                severity: ConversationAlert::SEVERITY_WARNING,
-                title: 'Possivel comprovante recebido',
-                message: 'Ha uma mensagem sobre pagamento, mas nenhum pedido ativo foi identificado com seguranca.',
-                conversation: $conversation,
-                messageModel: $message,
-                deduplicationKey: 'possible-proof:'.$message->id,
-            );
-
-            return;
-        }
+        $order = $candidate['order'];
 
         if ((int) ($conversation->active_order_id ?? 0) !== (int) $order->id) {
             $conversation->forceFill(['active_order_id' => $order->id])->save();
@@ -1055,6 +1062,7 @@ class WhatsAppService
             payment: $payment,
             paymentProof: $proof,
             deduplicationKey: 'payment-proof:'.$proof->id,
+            metadata: ['classification' => 'deterministic_payment_proof_candidate', 'confidence' => $candidate['confidence'], 'signals' => $candidate['signals']],
         );
 
         if ($conversation->automation_mode !== Conversation::AUTOMATION_MODE_MANUAL) {

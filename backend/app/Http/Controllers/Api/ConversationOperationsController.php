@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\WhatsAppAudioNormalizationException;
 use App\Exceptions\WhatsAppMessageSendFailedException;
 use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
@@ -14,10 +15,12 @@ use App\Models\WhatsAppMediaFile;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\ConversationWorkflowService;
+use App\Services\WhatsApp\WhatsAppMediaFilename;
 use App\Services\WhatsApp\WhatsAppService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -160,6 +163,19 @@ class ConversationOperationsController extends Controller
                 'code' => $exception->errorCode,
                 'data' => $presenter->conversation($conversation),
             ], 422);
+        } catch (WhatsAppAudioNormalizationException $exception) {
+            Log::warning('whatsapp_audio_normalization_failed', [
+                'conversation_id' => $conversation->id,
+                'error_code' => $exception->errorCode,
+                'client_mime_type' => $request->file('file')?->getClientMimeType(),
+                'detected_mime_type' => $request->file('file')?->getMimeType(),
+                'size_bytes' => $request->file('file')?->getSize(),
+                'recording_source' => $validated['recording_source'] ?? null,
+                'recording_mime_type' => $validated['recording_mime_type'] ?? null,
+                'recording_requested_mime_type' => $validated['recording_requested_mime_type'] ?? null,
+            ]);
+
+            return response()->json(['message' => $exception->getMessage(), 'code' => $exception->errorCode], 422);
         } catch (DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
@@ -178,14 +194,20 @@ class ConversationOperationsController extends Controller
         $company = $this->resolveCompany($request);
         $this->assertConversationBelongsToCompany($conversation, $company->id);
         $validated = $request->validate([
-            'media_type' => ['required', Rule::in(['image', 'document'])],
+            'media_type' => ['required', Rule::in(['image', 'video', 'document', 'audio'])],
             'caption' => ['nullable', 'string', 'max:4000'],
             'file' => ['required', 'file', 'max:102400'],
+            'recording_source' => ['nullable', Rule::in(['browser'])],
+            'recording_mime_type' => ['nullable', 'string', 'max:100'],
+            'recording_requested_mime_type' => ['nullable', 'string', 'max:100'],
         ]);
 
         try {
             $whatsapp->sendMediaMessage($company, $conversation, $request->file('file'), $validated['media_type'], (string) ($validated['caption'] ?? ''), [
                 'sender_type' => 'human', 'sent_by_user_id' => $request->user()->id,
+                'recording_source' => $validated['recording_source'] ?? null,
+                'recording_mime_type' => $validated['recording_mime_type'] ?? null,
+                'recording_requested_mime_type' => $validated['recording_requested_mime_type'] ?? null,
             ]);
         } catch (DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
@@ -370,9 +392,13 @@ class ConversationOperationsController extends Controller
         abort_unless((int) $media->company_id === (int) $company->id, 404);
         abort_unless($media->storage_disk && $media->file_path && Storage::disk($media->storage_disk)->exists($media->file_path), 404);
 
-        return Response::make(Storage::disk($media->storage_disk)->get($media->file_path), 200, [
+        $filename = WhatsAppMediaFilename::forMedia($media->original_filename, $media->mime_type, $media->media_type, $media->created_at?->format('Ymd-His'), $media->id);
+        $disk = Storage::disk($media->storage_disk);
+
+        return Response::make($disk->get($media->file_path), 200, [
             'Content-Type' => $media->mime_type ?: 'application/octet-stream',
-            'Content-Disposition' => 'inline; filename="'.addslashes($media->original_filename ?: 'arquivo-whatsapp').'"',
+            'Content-Length' => (string) $disk->size($media->file_path),
+            'Content-Disposition' => 'inline; filename="'.$filename.'"',
             'Cache-Control' => 'private, max-age=60',
         ]);
     }
@@ -385,9 +411,13 @@ class ConversationOperationsController extends Controller
         abort_unless((int) $media->message()->value('conversation_id') === (int) $conversation->id, 404);
         abort_unless($media->storage_disk && $media->file_path && Storage::disk($media->storage_disk)->exists($media->file_path), 404);
 
-        return Response::make(Storage::disk($media->storage_disk)->get($media->file_path), 200, [
+        $filename = WhatsAppMediaFilename::forMedia($media->original_filename, $media->mime_type, $media->media_type, $media->created_at?->format('Ymd-His'), $media->id);
+        $disk = Storage::disk($media->storage_disk);
+
+        return Response::make($disk->get($media->file_path), 200, [
             'Content-Type' => $media->mime_type ?: 'application/octet-stream',
-            'Content-Disposition' => 'attachment; filename="'.addslashes($media->original_filename ?: 'arquivo-whatsapp').'"',
+            'Content-Length' => (string) $disk->size($media->file_path),
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
             'Cache-Control' => 'private, max-age=60',
         ]);
     }

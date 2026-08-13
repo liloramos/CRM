@@ -3,7 +3,9 @@
 namespace Tests\Feature\WhatsApp;
 
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
+use App\Data\WhatsApp\NormalizedWhatsAppAudio;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
+use App\Exceptions\WhatsAppAudioNormalizationException;
 use App\Jobs\ProcessWhatsAppWebhookEvent;
 use App\Models\AiResponseSuggestion;
 use App\Models\Company;
@@ -19,6 +21,7 @@ use App\Models\User;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\WhatsApp\WhatsAppAudioNormalizer;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
 use App\Services\WhatsApp\WhatsAppService;
 use Database\Seeders\CompanySeeder;
@@ -31,6 +34,7 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 class WhatsAppProviderTest extends TestCase
@@ -78,6 +82,152 @@ class WhatsAppProviderTest extends TestCase
         $this->assertTrue(Storage::disk('local')->exists($media->file_path));
     }
 
+    public function test_fake_provider_sends_outbound_video_and_audio(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'fake');
+        Storage::fake('local');
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente mídia', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+
+        $whatsapp = app(WhatsAppService::class);
+        $videoDelivery = $whatsapp->sendMediaMessage($company, $conversation, UploadedFile::fake()->create('video.mp4', 20, 'video/mp4'), 'video');
+        $audioDelivery = $whatsapp->sendMediaMessage($company, $conversation, UploadedFile::fake()->create('voice.ogg', 20, 'audio/ogg'), 'audio');
+
+        $this->assertSame(WhatsAppMessageDelivery::STATUS_SENT, $videoDelivery->status);
+        $this->assertSame(WhatsAppMessageDelivery::STATUS_SENT, $audioDelivery->status);
+        $this->assertSame('video', Message::query()->findOrFail($videoDelivery->message_id)->type);
+        $this->assertSame('audio', Message::query()->findOrFail($audioDelivery->message_id)->type);
+        $this->assertSame('video/mp4', WhatsAppMediaFile::query()->where('message_id', $videoDelivery->message_id)->value('mime_type'));
+        $this->assertSame('audio/ogg', WhatsAppMediaFile::query()->where('message_id', $audioDelivery->message_id)->value('mime_type'));
+    }
+
+    public function test_browser_webm_voice_recording_is_normalized_before_sending_to_whatsapp(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'fake');
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente voz', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+
+        $this->app->instance(WhatsAppAudioNormalizer::class, new class extends WhatsAppAudioNormalizer
+        {
+            public function normalize(string $contents, string $detectedMimeType, string $filename): NormalizedWhatsAppAudio
+            {
+                return new NormalizedWhatsAppAudio('normalized-audio', 'audio/ogg', 'mensagem-de-voz.ogg', 'remux', [
+                    'input_format' => 'matroska,webm',
+                    'input_codec' => 'opus',
+                    'output_format' => 'ogg',
+                    'output_codec' => 'opus',
+                ]);
+            }
+        });
+
+        $delivery = app(WhatsAppService::class)->sendMediaMessage(
+            $company,
+            $conversation,
+            UploadedFile::fake()->create('mensagem-de-voz.webm', 12, 'audio/webm'),
+            'audio',
+            '',
+            ['recording_source' => 'browser', 'recording_mime_type' => 'audio/webm;codecs=opus', 'recording_requested_mime_type' => 'audio/webm;codecs=opus'],
+        );
+
+        $media = WhatsAppMediaFile::query()->where('message_id', $delivery->message_id)->firstOrFail();
+        $this->assertSame('audio/ogg', $media->mime_type);
+        $this->assertSame('browser', data_get($media->metadata, 'recording_source'));
+        $this->assertSame('audio/webm;codecs=opus', data_get($media->metadata, 'recording_mime_type'));
+        $this->assertSame('remux', data_get($media->metadata, 'audio_normalization.action'));
+    }
+
+    public function test_audio_normalizer_remuxes_webm_opus_to_ogg_when_binaries_are_available(): void
+    {
+        $availability = new Process(['ffmpeg', '-version']);
+        $availability->run();
+        if (! $availability->isSuccessful()) {
+            $this->markTestSkipped('FFmpeg is not available in this environment.');
+        }
+
+        $source = sys_get_temp_dir().DIRECTORY_SEPARATOR.'whatsapp-audio-'.bin2hex(random_bytes(8)).'.webm';
+        try {
+            $generator = new Process(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=800:duration=0.2', '-c:a', 'libopus', $source]);
+            $generator->run();
+            $this->assertTrue($generator->isSuccessful());
+
+            $result = app(WhatsAppAudioNormalizer::class)->normalize((string) file_get_contents($source), 'audio/webm', 'mensagem-de-voz.webm');
+
+            $this->assertSame('remux', $result->action);
+            $this->assertSame('audio/ogg', $result->mimeType);
+            $this->assertSame('opus', data_get($result->metadata, 'output_codec'));
+            $this->assertStringEndsWith('.ogg', $result->filename);
+            $this->assertNotSame('', $result->contents);
+        } finally {
+            @unlink($source);
+        }
+    }
+
+    public function test_audio_normalizer_passes_through_mp3_when_binaries_are_available(): void
+    {
+        $availability = new Process(['ffmpeg', '-version']);
+        $availability->run();
+        if (! $availability->isSuccessful()) {
+            $this->markTestSkipped('FFmpeg is not available in this environment.');
+        }
+
+        $source = sys_get_temp_dir().DIRECTORY_SEPARATOR.'whatsapp-audio-'.bin2hex(random_bytes(8)).'.mp3';
+        try {
+            $generator = new Process(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=800:duration=0.2', '-c:a', 'libmp3lame', $source]);
+            $generator->run();
+            $this->assertTrue($generator->isSuccessful());
+
+            $contents = (string) file_get_contents($source);
+            $result = app(WhatsAppAudioNormalizer::class)->normalize($contents, 'audio/mpeg', 'teste.mp3');
+
+            $this->assertSame('pass_through', $result->action);
+            $this->assertSame('audio/mpeg', $result->mimeType);
+            $this->assertSame($contents, $result->contents);
+            $this->assertStringEndsWith('.mp3', $result->filename);
+        } finally {
+            @unlink($source);
+        }
+    }
+
+    public function test_audio_normalizer_rejects_corrupt_browser_input_with_controlled_error(): void
+    {
+        $this->expectException(WhatsAppAudioNormalizationException::class);
+        $this->expectExceptionMessage('Não foi possível processar o áudio gravado.');
+
+        app(WhatsAppAudioNormalizer::class)->normalize('not-audio', 'audio/webm', 'corrupt.webm');
+    }
+
+    public function test_browser_recording_normalization_failure_does_not_persist_or_send_media(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'fake');
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente falha áudio', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $this->app->instance(WhatsAppAudioNormalizer::class, new class extends WhatsAppAudioNormalizer
+        {
+            public function normalize(string $contents, string $detectedMimeType, string $filename): NormalizedWhatsAppAudio
+            {
+                throw new WhatsAppAudioNormalizationException('whatsapp_audio_probe_failed', 'Não foi possível processar o áudio gravado.');
+            }
+        });
+
+        $this->expectException(WhatsAppAudioNormalizationException::class);
+        try {
+            app(WhatsAppService::class)->sendMediaMessage(
+                $company,
+                $conversation,
+                UploadedFile::fake()->create('mensagem.webm', 12, 'audio/webm'),
+                'audio',
+                '',
+                ['recording_source' => 'browser', 'recording_mime_type' => 'audio/webm;codecs=opus'],
+            );
+        } finally {
+            $this->assertSame(0, Message::query()->count());
+            $this->assertSame(0, WhatsAppMessageDelivery::query()->count());
+        }
+    }
+
     public function test_media_download_requires_company_and_conversation_scope(): void
     {
         $company = $this->prepareWhatsApp(withRoles: true);
@@ -92,7 +242,9 @@ class WhatsAppProviderTest extends TestCase
 
         $this->actingAs($user)->getJson("/api/app/conversations/{$conversation->id}/media/{$media->id}/download")
             ->assertOk()
-            ->assertHeader('Content-Type', 'application/pdf');
+            ->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('Content-Length', '9')
+            ->assertHeader('Content-Disposition', 'attachment; filename="secure.pdf"');
 
         $otherCompany = Company::query()->create(['name' => 'Outra empresa', 'slug' => 'outra-empresa-media']);
         $otherUser = User::factory()->create(['company_id' => $otherCompany->id]);
@@ -1279,6 +1431,48 @@ class WhatsAppProviderTest extends TestCase
         ]);
     }
 
+    public function test_non_payment_media_and_normal_text_do_not_create_payment_proof_alerts(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente mídia comum', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $this->createActiveOrder($company, $customer, $conversation);
+
+        foreach ([
+            $this->textPayload('wamid.normal-text', 'oi'),
+            $this->mediaPayload('wamid.normal-audio', 'audio', 'audio/ogg'),
+            $this->mediaPayload('wamid.normal-video', 'video', 'video/mp4'),
+            $this->mediaPayload('wamid.normal-sticker', 'sticker', 'image/webp'),
+            $this->mediaPayload('wamid.normal-image', 'image', 'image/png'),
+            $this->mediaPayload('wamid.normal-document', 'document', 'application/pdf'),
+        ] as $payload) {
+            $this->postJson('/api/webhooks/whatsapp', $payload)->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        }
+
+        $this->assertSame(0, PaymentProof::query()->count());
+        $this->assertSame(0, ConversationAlert::query()->where('type', ConversationAlert::TYPE_PAYMENT_PROOF_RECEIVED)->count());
+        $this->assertSame(0, ConversationAlert::query()->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)->count());
+    }
+
+    public function test_payment_message_followed_by_image_creates_payment_proof_candidate(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente pagamento', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+
+        foreach ([$this->textPayload('wamid.pix-text', 'Enviei o pix.'), $this->mediaPayload('wamid.pix-image', 'image', 'image/png')] as $payload) {
+            $this->postJson('/api/webhooks/whatsapp', $payload)->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        }
+
+        $this->assertDatabaseHas('payment_proofs', ['order_id' => $order->id, 'source_channel' => PaymentProof::SOURCE_WHATSAPP]);
+        $this->assertDatabaseHas('conversation_alerts', ['type' => ConversationAlert::TYPE_PAYMENT_PROOF_RECEIVED]);
+    }
+
     public function test_human_can_approve_payment_proof_once_from_conversation(): void
     {
         $company = $this->prepareWhatsApp(withRoles: true);
@@ -1442,6 +1636,19 @@ class WhatsAppProviderTest extends TestCase
                 'mime_type' => 'image/png',
                 'sha256' => 'fake-media-checksum',
                 'caption' => 'Comprovante pix teste',
+            ],
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function mediaPayload(string $messageId, string $type, string $mimeType): array
+    {
+        return $this->basePayload($messageId, [
+            'type' => $type,
+            $type => [
+                'id' => 'fake-'.$type.'-'.$messageId,
+                'mime_type' => $mimeType,
+                'sha256' => 'fake-media-checksum',
             ],
         ]);
     }
