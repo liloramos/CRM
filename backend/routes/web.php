@@ -146,6 +146,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('conversations/{conversation}/messages/{message}/pin', [ConversationOperationsController::class, 'togglePin'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.messages.pin');
+        Route::post('conversations/{conversation}/media', [ConversationOperationsController::class, 'sendMediaMessage'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.media.send');
         Route::post('conversations/{conversation}/mode', [ConversationOperationsController::class, 'setMode'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.mode');

@@ -40,6 +40,7 @@ import {
   retryConversationMessage,
   searchCustomers,
   sendConversationMessage,
+  sendConversationMedia,
   setConversationAutomationMode,
   updateCustomer,
   updateOrderStatus,
@@ -968,6 +969,17 @@ function App() {
     }
   }
 
+  async function handleConversationSendMedia(conversationId: string, file: File, mediaType: 'image' | 'document', caption: string) {
+    setIsActionBusy(true)
+    try {
+      const conversation = await sendConversationMedia(conversationId, file, mediaType, caption)
+      replaceConversation(conversation)
+      void loadConversations(true)
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
   async function handleConversationMessagePin(conversationId: string, messageId: string) {
     const conversation = await toggleConversationMessagePin(conversationId, messageId)
     replaceConversation(conversation)
@@ -1276,6 +1288,7 @@ function App() {
             onSelectConversation={setSelectedConversationId}
             onRetryMessage={handleConversationRetryMessage}
             onSendMessage={handleConversationSendMessage}
+            onSendMedia={handleConversationSendMedia}
             onToggleMessagePin={handleConversationMessagePin}
             onUpdateCustomer={handleUpdateCustomerFromPage}
             selectedConversation={selectedConversation}

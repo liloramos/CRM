@@ -169,6 +169,33 @@ class ConversationOperationsController extends Controller
         ]);
     }
 
+    public function sendMediaMessage(
+        Request $request,
+        Conversation $conversation,
+        WhatsAppService $whatsapp,
+        ConversationPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        $validated = $request->validate([
+            'media_type' => ['required', Rule::in(['image', 'document'])],
+            'caption' => ['nullable', 'string', 'max:4000'],
+            'file' => ['required', 'file', 'max:102400'],
+        ]);
+
+        try {
+            $whatsapp->sendMediaMessage($company, $conversation, $request->file('file'), $validated['media_type'], (string) ($validated['caption'] ?? ''), [
+                'sender_type' => 'human', 'sent_by_user_id' => $request->user()->id,
+            ]);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->conversation($conversation->refresh()->load($this->conversationRelations())),
+        ]);
+    }
+
     public function retryMessage(
         Request $request,
         Conversation $conversation,

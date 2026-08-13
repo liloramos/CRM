@@ -14,15 +14,18 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppAccount;
+use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
 use App\Services\Conversations\ConversationAiService;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Payments\PaymentWorkflowService;
 use DomainException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -349,6 +352,57 @@ class WhatsAppService
                 'last_business_message_at' => now(),
                 'last_message_at' => now(),
             ])->save();
+
+            return $delivery->refresh();
+        });
+    }
+
+    public function sendMediaMessage(Company $company, Conversation $conversation, UploadedFile $file, string $mediaType, string $caption = '', array $attributes = []): WhatsAppMessageDelivery
+    {
+        $allowed = [
+            'image' => ['mimes' => ['image/jpeg', 'image/png', 'image/webp'], 'max' => 5 * 1024 * 1024],
+            'document' => ['mimes' => ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 'max' => 100 * 1024 * 1024],
+        ];
+        if (! isset($allowed[$mediaType]) || ! $file->isValid() || ! in_array((string) $file->getMimeType(), $allowed[$mediaType]['mimes'], true) || $file->getSize() > $allowed[$mediaType]['max']) {
+            throw new DomainException('Este formato ou tamanho não é aceito pelo WhatsApp.');
+        }
+
+        return DB::transaction(function () use ($company, $conversation, $file, $mediaType, $caption, $attributes): WhatsAppMessageDelivery {
+            $account = $this->defaultAccountFor($company);
+            $recipientResolution = $this->resolveOutboundRecipient($conversation, (string) $conversation->whatsapp_identifier);
+            $recipient = $recipientResolution['value'];
+            $contents = file_get_contents($file->getRealPath());
+            if (! is_string($contents)) {
+                throw new DomainException('Não foi possível ler o anexo.');
+            }
+            $upload = $this->provider->uploadMedia($contents, (string) $file->getMimeType(), (string) $file->getClientOriginalName(), $account?->phone_number_id);
+            if ($upload === null) {
+                throw new DomainException('A Meta não aceitou o anexo.');
+            }
+
+            $message = Message::query()->create([
+                'conversation_id' => $conversation->id, 'sender' => 'agent', 'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
+                'sender_type' => $attributes['sender_type'] ?? 'human', 'content' => $caption, 'type' => $mediaType,
+                'provider' => $this->provider->name(), 'external_recipient_id' => $recipient, 'delivery_status' => WhatsAppMessageDelivery::STATUS_QUEUED,
+            ]);
+            $path = 'whatsapp/'.$company->id.'/'.$conversation->id.'/'.Str::uuid()->toString().'.'.($file->extension() ?: 'bin');
+            Storage::disk('local')->put($path, $contents);
+            WhatsAppMediaFile::query()->create([
+                'company_id' => $company->id, 'whatsapp_account_id' => $account?->id, 'message_id' => $message->id,
+                'provider' => $this->provider->name(), 'provider_media_id' => $upload->mediaId, 'media_type' => $mediaType,
+                'mime_type' => $file->getMimeType(), 'original_filename' => $file->getClientOriginalName(), 'size_bytes' => strlen($contents),
+                'checksum' => hash('sha256', $contents), 'storage_disk' => 'local', 'file_path' => $path, 'status' => WhatsAppMediaFile::STATUS_STORED,
+                'metadata' => ['direction' => 'outbound', ...$upload->safePayload],
+            ]);
+            $delivery = WhatsAppMessageDelivery::query()->create([
+                'company_id' => $company->id, 'whatsapp_account_id' => $account?->id, 'conversation_id' => $conversation->id, 'message_id' => $message->id,
+                'provider' => $this->provider->name(), 'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND, 'message_type' => $mediaType,
+                'recipient' => $recipient, 'status' => WhatsAppMessageDelivery::STATUS_QUEUED, 'content_preview' => Str::limit($caption, 120),
+                'safe_payload' => ['provider' => $this->provider->name(), 'media_type' => $mediaType, 'recipient_source' => $recipientResolution['source']],
+            ]);
+            $result = $this->provider->sendMediaMessage(new OutgoingWhatsAppMessage($recipient, $caption, $account?->phone_number_id, metadata: ['delivery_id' => $delivery->id]), $upload->mediaId, $mediaType, $file->getClientOriginalName());
+            $delivery->forceFill(['provider_message_id' => $result->providerMessageId, 'status' => $result->successful() ? WhatsAppMessageDelivery::STATUS_SENT : WhatsAppMessageDelivery::STATUS_FAILED, 'safe_payload' => array_merge((array) $delivery->safe_payload, $result->safePayload), 'sent_at' => $result->successful() ? now() : null, 'failed_at' => $result->successful() ? null : now(), 'error_message' => $result->errorMessage])->save();
+            $message->forceFill(['external_message_id' => $result->providerMessageId, 'delivery_status' => $delivery->status, 'sent_at' => $delivery->sent_at, 'failed_at' => $delivery->failed_at, 'error_code' => $result->errorCode])->save();
 
             return $delivery->refresh();
         });

@@ -6,6 +6,7 @@ use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Data\WhatsApp\WhatsAppConnectionStatus;
 use App\Data\WhatsApp\WhatsAppDownloadedMedia;
+use App\Data\WhatsApp\WhatsAppMediaUploadResult;
 use App\Data\WhatsApp\WhatsAppSendResult;
 use App\Services\WhatsApp\MetaWebhookPayloadParser;
 use Illuminate\Support\Str;
@@ -81,6 +82,24 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
                 'reply_context_present' => $message->replyToProviderMessageId !== null,
             ],
         );
+    }
+
+    public function uploadMedia(string $contents, string $mimeType, string $filename, ?string $phoneNumberId = null): ?WhatsAppMediaUploadResult
+    {
+        return new WhatsAppMediaUploadResult('fake_media_'.Str::uuid()->toString(), [
+            'transport' => 'local_fake',
+            'mime_type' => $mimeType,
+            'size_bytes' => strlen($contents),
+        ]);
+    }
+
+    public function sendMediaMessage(OutgoingWhatsAppMessage $message, string $mediaId, string $mediaType, ?string $filename = null): WhatsAppSendResult
+    {
+        return new WhatsAppSendResult($this->name(), 'sent', 'fake_'.Str::uuid()->toString(), null, null, [
+            'transport' => 'local_fake',
+            'media_id_present' => $mediaId !== '',
+            'message_type' => $mediaType,
+        ]);
     }
 
     public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult

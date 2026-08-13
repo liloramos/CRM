@@ -606,6 +606,18 @@ export async function sendConversationMessage(
   return response.data
 }
 
+export async function sendConversationMedia(conversationId: string, file: File, mediaType: 'image' | 'document', caption = ''): Promise<Conversation> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('media_type', mediaType)
+  form.append('caption', caption)
+  const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/media`, {
+    body: form,
+    method: 'POST',
+  })
+  return response.data
+}
+
 export type ConversationQuickReplyPayload = {
   title: string
   shortcut: string
@@ -998,7 +1010,7 @@ async function requestJson<T = unknown>(path: string, init: RequestInit = {}): P
 
   headers.set('Accept', 'application/json')
 
-  if (init.body && !headers.has('Content-Type')) {
+  if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 

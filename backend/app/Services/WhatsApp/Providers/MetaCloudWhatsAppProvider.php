@@ -6,6 +6,7 @@ use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Data\WhatsApp\OutgoingWhatsAppMessage;
 use App\Data\WhatsApp\WhatsAppConnectionStatus;
 use App\Data\WhatsApp\WhatsAppDownloadedMedia;
+use App\Data\WhatsApp\WhatsAppMediaUploadResult;
 use App\Data\WhatsApp\WhatsAppSendResult;
 use App\Services\WhatsApp\MetaWebhookPayloadParser;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
@@ -198,6 +199,54 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
                 ...($response->successful() ? [] : $providerError['safe_details']),
             ],
         );
+    }
+
+    public function uploadMedia(string $contents, string $mimeType, string $filename, ?string $phoneNumberId = null): ?WhatsAppMediaUploadResult
+    {
+        $resolvedPhoneNumberId = $phoneNumberId ?: $this->phoneNumberId();
+        $url = rtrim($this->graphUrl(), '/').'/'.$this->apiVersion().'/'.$resolvedPhoneNumberId.'/media';
+
+        try {
+            $response = $this->request()->timeout(20)->attach('file', $contents, $filename, ['Content-Type' => $mimeType])->post($url, [
+                'messaging_product' => 'whatsapp',
+                'type' => $mimeType,
+            ]);
+        } catch (Throwable) {
+            return null;
+        }
+
+        $mediaId = $response->json('id');
+
+        return $response->successful() && is_string($mediaId) && $mediaId !== ''
+            ? new WhatsAppMediaUploadResult($mediaId, ['http_status' => $response->status(), 'mime_type' => $mimeType, 'size_bytes' => strlen($contents)])
+            : null;
+    }
+
+    public function sendMediaMessage(OutgoingWhatsAppMessage $message, string $mediaId, string $mediaType, ?string $filename = null): WhatsAppSendResult
+    {
+        $phoneNumberId = $message->phoneNumberId ?: $this->phoneNumberId();
+        $url = rtrim($this->graphUrl(), '/').'/'.$this->apiVersion().'/'.$phoneNumberId.'/messages';
+        $media = ['id' => $mediaId];
+        if ($message->body !== '') {
+            $media['caption'] = $message->body;
+        }
+        if ($mediaType === 'document' && $filename) {
+            $media['filename'] = $filename;
+        }
+        try {
+            $response = $this->request()->asJson()->timeout(20)->post($url, [
+                'messaging_product' => 'whatsapp', 'to' => $message->to, 'type' => $mediaType, $mediaType => $media,
+            ]);
+        } catch (Throwable $exception) {
+            $error = $this->errors->networkFailure($exception);
+
+            return new WhatsAppSendResult($this->name(), 'failed', null, $error['message'], $error['code'], $error['safe_details']);
+        }
+        $id = $response->json('messages.0.id');
+        $providerError = $response->json('error');
+        $error = is_array($providerError) ? $this->errors->providerRejection($response->status(), $providerError) : null;
+
+        return new WhatsAppSendResult($this->name(), $response->successful() ? 'sent' : 'failed', is_string($id) ? $id : null, $error['message'] ?? null, $error['code'] ?? null, ['http_status' => $response->status(), 'media_id_present' => true, ...($error['safe_details'] ?? [])]);
     }
 
     public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult

@@ -57,6 +57,7 @@ type ConversationsPageProps = {
   onSelectConversation: (conversationId: string) => void
   onRetryMessage: (conversationId: string, messageId: string) => Promise<void>
   onSendMessage: (conversationId: string, body: string, clientReference: string, replyToMessageId?: string) => Promise<void>
+  onSendMedia: (conversationId: string, file: File, mediaType: 'image' | 'document', caption: string) => Promise<void>
   onToggleMessagePin: (conversationId: string, messageId: string) => Promise<void>
   onUpdateCustomer: (customerId: string, payload: UpdateCustomerPayload) => Promise<void>
 }
@@ -78,6 +79,7 @@ export function ConversationsPage({
   onSelectConversation,
   onRetryMessage,
   onSendMessage,
+  onSendMedia,
   onToggleMessagePin,
   onUpdateCustomer,
   selectedConversation,
@@ -87,6 +89,10 @@ export function ConversationsPage({
   const [isContextOpen, setIsContextOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [composerBody, setComposerBody] = useState('')
+  const [attachment, setAttachment] = useState<{ file: File; type: 'image' | 'document' } | null>(null)
+  const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
+  const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const documentInputRef = useRef<HTMLInputElement>(null)
   const [replyingTo, setReplyingTo] = useState<ConversationMessage | null>(null)
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
@@ -116,6 +122,17 @@ export function ConversationsPage({
   const contextTriggerRef = useRef<HTMLElement | null>(null)
   const quickReplyTriggerRef = useRef<HTMLDivElement>(null)
   const quickReplyPickerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!isAttachmentMenuOpen) return undefined
+    const close = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.attachment-picker')) setIsAttachmentMenuOpen(false)
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setIsAttachmentMenuOpen(false) }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', escape)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape) }
+  }, [isAttachmentMenuOpen])
 
   const filteredConversations = useMemo(() => {
     const needle = normalize(search)
@@ -372,6 +389,8 @@ export function ConversationsPage({
     setActivePanel('chat')
     setLocalError(null)
     setReplyingTo(null)
+    setAttachment(null)
+    setIsAttachmentMenuOpen(false)
   }
 
   function handleOpenContext(event?: { currentTarget?: EventTarget | null }) {
@@ -398,7 +417,7 @@ export function ConversationsPage({
     }
 
     const body = composerBody.trim()
-    if (!body) {
+    if (!body && !attachment) {
       setLocalError('Digite uma mensagem para enviar.')
       return
     }
@@ -406,7 +425,12 @@ export function ConversationsPage({
     try {
       const clientReference = clientReferenceRef.current ?? createClientReference()
       clientReferenceRef.current = clientReference
-      await onSendMessage(selectedConversation.id, body, clientReference, replyingTo?.id)
+      if (attachment) {
+        await onSendMedia(selectedConversation.id, attachment.file, attachment.type, body)
+        setAttachment(null)
+      } else {
+        await onSendMessage(selectedConversation.id, body, clientReference, replyingTo?.id)
+      }
       clientReferenceRef.current = null
       setComposerBody('')
       setReplyingTo(null)
@@ -805,8 +829,49 @@ export function ConversationsPage({
                   ref={composerRef}
                   value={composerBody}
                 />
+                <input
+                  accept="image/jpeg,image/png,image/webp"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) {
+                      setAttachment({ file, type: 'image' })
+                    }
+                    event.currentTarget.value = ''
+                  }}
+                  ref={attachmentInputRef}
+                  type="file"
+                />
+                <input
+                  accept=".pdf,.txt,.doc,.docx,application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.target.files?.[0]
+                    if (file) setAttachment({ file, type: 'document' })
+                    event.currentTarget.value = ''
+                  }}
+                  ref={documentInputRef}
+                  type="file"
+                />
+                {attachment ? (
+                  <div className="composer-attachment-preview">
+                    <span>{attachment.type === 'image' ? 'Imagem' : 'Documento'}: {attachment.file.name}</span>
+                    <IconButton icon="close" label="Remover anexo" onClick={() => setAttachment(null)} />
+                  </div>
+                ) : null}
                 <div className="composer__footer">
                   <div className="composer__tools">
+                    <div className="attachment-picker">
+                      <Button aria-expanded={isAttachmentMenuOpen} aria-haspopup="menu" onClick={() => setIsAttachmentMenuOpen((open) => !open)} size="sm" type="button" variant="ghost">
+                        Anexar
+                      </Button>
+                      {isAttachmentMenuOpen ? (
+                        <div className="attachment-picker__menu" role="menu">
+                          <button onClick={() => { setIsAttachmentMenuOpen(false); attachmentInputRef.current?.click() }} role="menuitem" type="button">Imagem</button>
+                          <button onClick={() => { setIsAttachmentMenuOpen(false); documentInputRef.current?.click() }} role="menuitem" type="button">Documento</button>
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="quick-reply-trigger" ref={quickReplyTriggerRef}>
                     <Button
                       aria-expanded={isQuickReplyOpen}
@@ -821,7 +886,7 @@ export function ConversationsPage({
                     </div>
                     <span>Enter envia · Shift+Enter quebra linha</span>
                   </div>
-                  <Button disabled={isActionBusy || composerBody.trim() === ''} icon="arrow" type="submit" variant="primary">
+                  <Button disabled={isActionBusy || (composerBody.trim() === '' && !attachment)} icon="arrow" type="submit" variant="primary">
                     {isActionBusy ? 'Enviando' : 'Enviar'}
                   </Button>
                 </div>

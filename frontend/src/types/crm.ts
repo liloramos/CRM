@@ -175,6 +175,7 @@ export type ConversationMessage = {
     id: string
     type: string
     name: string
+    filename?: string | null
     mimeType: string | null
     sizeBytes: number | null
     url: string | null
