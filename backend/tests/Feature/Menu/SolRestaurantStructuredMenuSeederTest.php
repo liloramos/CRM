@@ -36,7 +36,7 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         $company = $this->solRestaurant();
 
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
-        $this->assertSame(29, Product::query()->where('company_id', $company->id)->count());
+        $this->assertSame(30, Product::query()->where('company_id', $company->id)->count());
         $this->assertSame(64, DB::table('menu_components')->where('company_id', $company->id)->count());
         $this->assertSame(12, DB::table('product_option_groups')->where('company_id', $company->id)->count());
         $this->assertSame(32, DB::table('product_group_components')->count());
@@ -540,6 +540,7 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
             'n8-casa',
             'n8-tradicional',
             'n9-tradicional',
+            'separadinha',
             'combo-n8-casa-baby',
             'combo-n8-com-latinha',
             'feijoada-250ml',

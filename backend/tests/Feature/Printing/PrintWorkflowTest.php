@@ -200,7 +200,7 @@ class PrintWorkflowTest extends TestCase
         $this->assertStringNotContainsString('Para: Nao informado', $html);
     }
 
-    public function test_fixed_n5_casa_composition_rejects_component_removals(): void
+    public function test_fixed_n5_casa_composition_prints_component_removals(): void
     {
         $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
 
@@ -223,8 +223,11 @@ class PrintWorkflowTest extends TestCase
                 'carne' => ['porco'],
             ]),
         ])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('removed_component_ids');
+            ->assertOk();
+
+        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $user)->html_content;
+
+        $this->assertStringContainsString('Sem ', $html);
     }
 
     public function test_ticket_preview_route_keeps_company_isolation(): void

@@ -337,7 +337,7 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
-    public function test_structured_order_item_rejects_removal_from_fixed_house_composition(): void
+    public function test_structured_order_item_persists_removals_from_default_house_composition(): void
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
 
@@ -360,10 +360,18 @@ class OrderWorkflowTest extends TestCase
                     'carne' => ['porco'],
                 ]),
             ])
-            ->assertStatus(422)
-            ->assertJsonValidationErrors(['removed_component_ids']);
+            ->assertOk();
 
-        $this->assertDatabaseMissing('order_items', [
+        $removals = $this->actingAs($user)
+            ->getJson("/api/app/orders/{$order->id}")
+            ->assertOk()
+            ->json('data.items.0.removals');
+
+        $this->assertCount(2, $removals);
+        $this->assertStringStartsWith('Sem ', $removals[0]);
+        $this->assertStringStartsWith('Sem ', $removals[1]);
+
+        $this->assertDatabaseHas('order_items', [
             'order_id' => $order->id,
             'product_id' => $product->id,
         ]);

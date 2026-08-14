@@ -69,7 +69,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'base_price_cents' => 800,
                 'composition_rules' => [
                     'capacity_ml' => 500,
-                    'fixed_components_removable' => false,
+                    'fixed_components_removable' => true,
                     'allows_substitutions' => false,
                 ],
                 'display_order' => 10,
@@ -84,7 +84,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'base_price_cents' => 1300,
                 'composition_rules' => [
                     'capacity_ml' => 750,
-                    'fixed_components_removable' => false,
+                    'fixed_components_removable' => true,
                     'allows_substitutions' => false,
                 ],
                 'display_order' => 20,
