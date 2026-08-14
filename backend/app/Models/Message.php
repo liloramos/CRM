@@ -30,6 +30,8 @@ class Message extends Model
         'error_code',
         'pinned_at',
         'pinned_by_user_id',
+        'hidden_at',
+        'hidden_by_user_id',
     ];
 
     protected function casts(): array
@@ -42,6 +44,7 @@ class Message extends Model
             'read_at' => 'datetime',
             'failed_at' => 'datetime',
             'pinned_at' => 'datetime',
+            'hidden_at' => 'datetime',
         ];
     }
 

@@ -44,7 +44,7 @@ class MetaWebhookPayloadParser
             $messages[] = new IncomingWhatsAppMessage(
                 provider: $provider,
                 providerAccountId: $payload['phone_number_id'] ?? null,
-                providerMessageId: $message['id'] ?? null,
+                providerMessageId: null,
                 from: $message['from'] ?? null,
                 to: $message['to'] ?? ($payload['phone_number_id'] ?? null),
                 senderName: $message['sender_name'] ?? null,
@@ -96,6 +96,27 @@ class MetaWebhookPayloadParser
         $from = $message['from'] ?? null;
         $type = (string) ($message['type'] ?? 'unknown');
 
+        $revokedMessageId = $this->revokedMessageId($message);
+        if ($revokedMessageId !== null) {
+            return new IncomingWhatsAppMessage(
+                provider: $provider,
+                providerAccountId: $metadata['phone_number_id'] ?? null,
+                providerMessageId: $message['id'] ?? null,
+                from: $from,
+                to: $metadata['display_phone_number'] ?? ($metadata['phone_number_id'] ?? null),
+                senderName: $from !== null ? ($contacts[$from] ?? null) : null,
+                messageType: 'message_revoked',
+                text: null,
+                sentAt: isset($message['timestamp']) ? CarbonImmutable::createFromTimestamp((int) $message['timestamp']) : null,
+                rawPayload: $message,
+                safeMetadata: [
+                    'source' => 'meta_cloud_webhook',
+                    'phone_number_id' => $metadata['phone_number_id'] ?? null,
+                    'revoked_message_id_suffix' => substr($revokedMessageId, -8),
+                ],
+            );
+        }
+
         return new IncomingWhatsAppMessage(
             provider: $provider,
             providerAccountId: $metadata['phone_number_id'] ?? null,
@@ -116,6 +137,16 @@ class MetaWebhookPayloadParser
                 ...$this->messageMetadata($message, $type),
             ],
         );
+    }
+
+    private function revokedMessageId(array $message): ?string
+    {
+        $candidate = $message['revoked']['message_id']
+            ?? $message['message_deleted']['id']
+            ?? $message['deleted']['message_id']
+            ?? ($message['type'] === 'revoked' ? ($message['id'] ?? null) : null);
+
+        return is_string($candidate) && $candidate !== '' ? $candidate : null;
     }
 
     private function messageText(array $message, string $type): ?string
@@ -149,6 +180,15 @@ class MetaWebhookPayloadParser
                 'sha256' => $media['sha256'] ?? null,
                 'filename' => $media['filename'] ?? null,
                 'caption_present' => isset($media['caption']),
+                'voice_note' => $type === 'audio' ? (bool) ($media['voice'] ?? false) : false,
+            ];
+        }
+
+        if ($type === 'reaction' && isset($message['reaction']) && is_array($message['reaction'])) {
+            return [
+                'reaction_target_present' => isset($message['reaction']['message_id']),
+                'reaction_emoji' => $message['reaction']['emoji'] ?? null,
+                'reaction_emoji_present' => isset($message['reaction']['emoji']) && $message['reaction']['emoji'] !== '',
             ];
         }
 

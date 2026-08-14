@@ -44,6 +44,7 @@ class WhatsAppMediaStorageService
                 'metadata' => [
                     'media_id_missing' => true,
                     'source' => 'whatsapp_webhook',
+                    'voice_note' => (bool) data_get($incoming->safeMetadata, 'voice_note', false),
                 ],
             ]);
         }
@@ -56,6 +57,7 @@ class WhatsAppMediaStorageService
         $metadata = [
             'source' => 'whatsapp_webhook',
             'download_attempted' => true,
+            'voice_note' => (bool) data_get($incoming->safeMetadata, 'voice_note', false),
         ];
 
         if ($download !== null) {

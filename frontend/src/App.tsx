@@ -35,9 +35,11 @@ import {
   getOperationalSnapshot,
   markConversationAsRead as markConversationAsReadRequest,
   toggleConversationMessagePin,
+  toggleConversationPin,
   rejectConversationPaymentProof,
   resolveConversationAlert,
   retryConversationMessage,
+  reactToConversationMessage,
   searchCustomers,
   sendConversationMessage,
   sendConversationMedia,
@@ -970,7 +972,7 @@ function App() {
     }
   }
 
-  async function handleConversationSendMedia(conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio', caption: string, options?: ConversationMediaSendOptions) {
+  async function handleConversationSendMedia(conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio' | 'sticker', caption: string, options?: ConversationMediaSendOptions) {
     setIsActionBusy(true)
     try {
       const conversation = await sendConversationMedia(conversationId, file, mediaType, caption, options)
@@ -981,9 +983,22 @@ function App() {
     }
   }
 
+  async function handleConversationReaction(conversationId: string, messageId: string, emoji: string) {
+    try {
+      replaceConversation(await reactToConversationMessage(conversationId, messageId, emoji))
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : 'Não foi possível reagir à mensagem.')
+    }
+  }
+
   async function handleConversationMessagePin(conversationId: string, messageId: string) {
     const conversation = await toggleConversationMessagePin(conversationId, messageId)
     replaceConversation(conversation)
+  }
+
+
+  async function handleConversationPin(conversationId: string) {
+    replaceConversation(await toggleConversationPin(conversationId))
   }
 
   async function handleConversationRetryMessage(conversationId: string, messageId: string) {
@@ -1121,7 +1136,7 @@ function App() {
       setPaymentNotes('')
     }
     if (modal === 'toggle-ai') {
-      setAutomationMode(selectedConversation?.mode === 'manual' || selectedConversation?.mode === 'atencao' ? 'manual' : 'assisted')
+      setAutomationMode(selectedConversation?.mode === 'manual' ? 'manual' : 'assisted')
     }
     setActiveModal(modal)
   }
@@ -1288,9 +1303,11 @@ function App() {
             onResolveAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'resolve')}
             onSelectConversation={setSelectedConversationId}
             onRetryMessage={handleConversationRetryMessage}
+            onReactMessage={handleConversationReaction}
             onSendMessage={handleConversationSendMessage}
             onSendMedia={handleConversationSendMedia}
             onToggleMessagePin={handleConversationMessagePin}
+            onToggleConversationPin={handleConversationPin}
             onUpdateCustomer={handleUpdateCustomerFromPage}
             selectedConversation={selectedConversation}
           />
@@ -1820,6 +1837,7 @@ function mergeConversations(current: Conversation[], incoming: Conversation[]): 
   })
 
   return Array.from(byId.values()).sort((first, second) => {
+    if (Boolean(first.isPinned) !== Boolean(second.isPinned)) return first.isPinned ? -1 : 1
     const firstTime = first.lastMessageAt ? Date.parse(first.lastMessageAt) : 0
     const secondTime = second.lastMessageAt ? Date.parse(second.lastMessageAt) : 0
 

@@ -131,21 +131,34 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('conversations', [ConversationOperationsController::class, 'index'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.index');
+        Route::get('conversations/sticker-favorites', [ConversationOperationsController::class, 'stickerFavorites'])
+            ->middleware('permission:whatsapp.view')->name('conversations.sticker-favorites.index');
         Route::get('conversations/{conversation}', [ConversationOperationsController::class, 'show'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.show');
         Route::post('conversations/{conversation}/read', [ConversationOperationsController::class, 'markRead'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.read');
+        Route::post('conversations/{conversation}/pin', [ConversationOperationsController::class, 'toggleConversationPin'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.pin');
+        Route::post('conversations/sticker-favorites/toggle', [ConversationOperationsController::class, 'toggleStickerFavorite'])
+            ->middleware('permission:whatsapp.manage')->name('conversations.sticker-favorites.toggle');
         Route::post('conversations/{conversation}/messages', [ConversationOperationsController::class, 'sendMessage'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.messages.store');
         Route::post('conversations/{conversation}/messages/{message}/retry', [ConversationOperationsController::class, 'retryMessage'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.messages.retry');
+        Route::post('conversations/{conversation}/messages/{message}/reaction', [ConversationOperationsController::class, 'reactToMessage'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.messages.reaction');
         Route::post('conversations/{conversation}/messages/{message}/pin', [ConversationOperationsController::class, 'togglePin'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.messages.pin');
+        Route::post('conversations/{conversation}/messages/{message}/hide', [ConversationOperationsController::class, 'hideMessage'])
+            ->middleware('permission:whatsapp.manage')
+            ->name('conversations.messages.hide');
         Route::post('conversations/{conversation}/media', [ConversationOperationsController::class, 'sendMediaMessage'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.media.send');

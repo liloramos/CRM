@@ -368,6 +368,7 @@ class WhatsAppService
             'document' => ['mimes' => ['application/pdf', 'text/plain', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'], 'max' => 100 * 1024 * 1024],
             'video' => ['mimes' => ['video/mp4', 'video/3gpp'], 'max' => 16 * 1024 * 1024],
             'audio' => ['mimes' => WhatsAppAudioFormat::WHATSAPP_OUTBOUND_AUDIO_TYPES, 'max' => 16 * 1024 * 1024],
+            'sticker' => ['mimes' => ['image/webp'], 'max' => 500 * 1024],
         ];
         if (! $file->isValid()) {
             throw new DomainException('Não foi possível receber o anexo para envio.');
@@ -439,6 +440,51 @@ class WhatsAppService
 
             return $delivery->refresh();
         });
+    }
+
+    public function sendReaction(Company $company, Conversation $conversation, Message $target, string $emoji, ?int $userId = null): Conversation
+    {
+        $allowed = ['👍', '❤️', '😂', '😮', '😢', '🙏', '🎉', '👏', '🔥', '✅', '💯'];
+        if (! in_array($emoji, $allowed, true)) {
+            throw new DomainException('Esta reação não está disponível.');
+        }
+
+        if ((int) $target->conversation_id !== (int) $conversation->id) {
+            throw new DomainException('A mensagem não pertence a esta conversa.');
+        }
+
+        $target->loadMissing('conversation');
+        if ((int) $target->conversation?->company_id !== (int) $company->id || ! $target->external_message_id) {
+            throw new DomainException('Esta mensagem não pode receber reação.');
+        }
+
+        $recipient = $this->resolveOutboundRecipient($conversation, (string) $conversation->whatsapp_identifier)['value'];
+        $account = $this->defaultAccountFor($company);
+        $result = $this->provider->sendReactionMessage(
+            new OutgoingWhatsAppMessage($recipient, '', $account?->phone_number_id),
+            (string) $target->external_message_id,
+            $emoji,
+        );
+
+        if (! $result->successful()) {
+            throw new DomainException($result->errorMessage ?: 'Não foi possível enviar a reação.');
+        }
+
+        $metadata = (array) $target->metadata;
+        $reactions = collect((array) ($metadata['whatsapp_reactions'] ?? []))
+            ->reject(fn (mixed $reaction): bool => data_get($reaction, 'actor_key') === 'operator:'.($userId ?? 'current'))
+            ->values()
+            ->all();
+        $reactions[] = [
+            'actor_key' => 'operator:'.($userId ?? 'current'),
+            'emoji' => $emoji,
+            'source' => 'operator',
+            'created_at' => now()->toIso8601String(),
+        ];
+        $metadata['whatsapp_reactions'] = $reactions;
+        $target->forceFill(['metadata' => $metadata])->save();
+
+        return $conversation->refresh();
     }
 
     public function retryTextMessage(Company $company, Message $message): WhatsAppMessageDelivery
@@ -629,6 +675,19 @@ class WhatsAppService
             'conversation_id' => $conversation->id,
             'customer_id' => $customer->id,
         ]);
+
+        if ($incomingMessage->messageType === 'message_revoked') {
+            $this->applyIncomingRevocation($conversation, $incomingMessage);
+
+            return;
+        }
+
+        if ($incomingMessage->messageType === 'reaction') {
+            $this->applyIncomingReaction($conversation, $incomingMessage);
+
+            return;
+        }
+
         $expectedAutomationVersion = (int) ($conversation->automation_version ?? 0);
         $content = $incomingMessage->text ?: $this->placeholderForMessageType($incomingMessage->messageType);
         $replyToMessageId = $incomingMessage->replyToProviderMessageId
@@ -710,6 +769,65 @@ class WhatsAppService
             'last_webhook_at' => now(),
             'connected_at' => $account->connected_at ?? now(),
         ])->save();
+    }
+
+    private function applyIncomingReaction(Conversation $conversation, IncomingWhatsAppMessage $incomingMessage): void
+    {
+        $targetProviderMessageId = data_get($incomingMessage->rawPayload, 'reaction.message_id');
+        $emoji = (string) data_get($incomingMessage->rawPayload, 'reaction.emoji', '');
+        if (! is_string($targetProviderMessageId) || $targetProviderMessageId === '') {
+            return;
+        }
+
+        $target = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('external_message_id', $targetProviderMessageId)
+            ->first();
+        if (! $target) {
+            return;
+        }
+
+        $metadata = (array) $target->metadata;
+        $actorKey = 'customer:'.($incomingMessage->from ?? 'unknown');
+        $reactions = collect((array) ($metadata['whatsapp_reactions'] ?? []))
+            ->reject(fn (mixed $reaction): bool => data_get($reaction, 'actor_key') === $actorKey)
+            ->values()
+            ->all();
+        if ($emoji !== '') {
+            $reactions[] = [
+                'actor_key' => $actorKey,
+                'emoji' => $emoji,
+                'source' => 'customer',
+                'created_at' => now()->toIso8601String(),
+            ];
+        }
+        $metadata['whatsapp_reactions'] = $reactions;
+        $target->forceFill(['metadata' => $metadata])->save();
+    }
+
+    private function applyIncomingRevocation(Conversation $conversation, IncomingWhatsAppMessage $incomingMessage): void
+    {
+        $targetProviderMessageId = data_get($incomingMessage->rawPayload, 'revoked.message_id')
+            ?? data_get($incomingMessage->rawPayload, 'message_deleted.id')
+            ?? data_get($incomingMessage->rawPayload, 'deleted.message_id')
+            ?? data_get($incomingMessage->rawPayload, 'id');
+
+        if (! is_string($targetProviderMessageId) || $targetProviderMessageId === '') {
+            return;
+        }
+
+        $target = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('external_message_id', $targetProviderMessageId)
+            ->first();
+        if (! $target) {
+            return;
+        }
+
+        $metadata = (array) $target->metadata;
+        $metadata['message_revoked'] = true;
+        $metadata['revoked_at'] = now()->toIso8601String();
+        $target->forceFill(['content' => null, 'metadata' => $metadata])->save();
     }
 
     private function defaultAccountFor(Company $company): ?WhatsAppAccount

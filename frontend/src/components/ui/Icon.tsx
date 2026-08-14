@@ -6,6 +6,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ClipboardList,
   Clock,
   CodeXml,
@@ -16,6 +17,9 @@ import {
   LayoutDashboard,
   Lock,
   LogOut,
+  Mic,
+  Paperclip,
+  Pin,
   Mail,
   MessageCircle,
   Pencil,
@@ -23,6 +27,8 @@ import {
   Printer,
   RefreshCw,
   Search,
+  Smile,
+  Sticker,
   Settings,
   Sparkles,
   TriangleAlert,
@@ -64,6 +70,7 @@ export type IconName =
   | 'arrow'
   | 'chevron-left'
   | 'chevron-right'
+  | 'chevron-down'
   | 'close'
   | 'edit'
   | 'clock'
@@ -71,6 +78,11 @@ export type IconName =
   | 'sound'
   | 'sound-off'
   | 'logout'
+  | 'mic'
+  | 'paperclip'
+  | 'pin'
+  | 'smile'
+  | 'sticker'
 
 type IconProps = {
   name: IconName | string
@@ -106,6 +118,7 @@ const iconComponents: Record<string, LucideIcon> = {
   arrow: ArrowRight,
   'chevron-left': ChevronLeft,
   'chevron-right': ChevronRight,
+  'chevron-down': ChevronDown,
   close: X,
   edit: Pencil,
   clock: Clock,
@@ -113,6 +126,11 @@ const iconComponents: Record<string, LucideIcon> = {
   sound: Volume2,
   'sound-off': VolumeX,
   logout: LogOut,
+  mic: Mic,
+  paperclip: Paperclip,
+  pin: Pin,
+  smile: Smile,
+  sticker: Sticker,
 }
 
 export function Icon({ name, size = 20, className = '' }: IconProps) {

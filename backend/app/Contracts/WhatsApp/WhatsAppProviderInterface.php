@@ -35,6 +35,8 @@ interface WhatsAppProviderInterface
 
     public function sendMediaMessage(OutgoingWhatsAppMessage $message, string $mediaId, string $mediaType, ?string $filename = null): WhatsAppSendResult;
 
+    public function sendReactionMessage(OutgoingWhatsAppMessage $message, string $targetMessageId, string $emoji): WhatsAppSendResult;
+
     public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult;
 
     public function downloadMedia(string $mediaId): ?WhatsAppDownloadedMedia;

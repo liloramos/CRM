@@ -102,6 +102,15 @@ class FakeWhatsAppProvider implements WhatsAppProviderInterface
         ]);
     }
 
+    public function sendReactionMessage(OutgoingWhatsAppMessage $message, string $targetMessageId, string $emoji): WhatsAppSendResult
+    {
+        return new WhatsAppSendResult($this->name(), 'sent', 'fake_reaction_'.Str::uuid()->toString(), null, null, [
+            'transport' => 'local_fake',
+            'target_message_id_present' => $targetMessageId !== '',
+            'emoji_present' => $emoji !== '',
+        ]);
+    }
+
     public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult
     {
         return new WhatsAppSendResult(

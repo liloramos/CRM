@@ -227,7 +227,7 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
         $phoneNumberId = $message->phoneNumberId ?: $this->phoneNumberId();
         $url = rtrim($this->graphUrl(), '/').'/'.$this->apiVersion().'/'.$phoneNumberId.'/messages';
         $media = ['id' => $mediaId];
-        if ($message->body !== '') {
+        if ($message->body !== '' && in_array($mediaType, ['image', 'video', 'document'], true)) {
             $media['caption'] = $message->body;
         }
         if ($mediaType === 'document' && $filename) {
@@ -247,6 +247,31 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
         $error = is_array($providerError) ? $this->errors->providerRejection($response->status(), $providerError) : null;
 
         return new WhatsAppSendResult($this->name(), $response->successful() ? 'sent' : 'failed', is_string($id) ? $id : null, $error['message'] ?? null, $error['code'] ?? null, ['http_status' => $response->status(), 'media_id_present' => true, ...($error['safe_details'] ?? [])]);
+    }
+
+    public function sendReactionMessage(OutgoingWhatsAppMessage $message, string $targetMessageId, string $emoji): WhatsAppSendResult
+    {
+        $phoneNumberId = $message->phoneNumberId ?: $this->phoneNumberId();
+        $url = rtrim($this->graphUrl(), '/').'/'.$this->apiVersion().'/'.$phoneNumberId.'/messages';
+
+        try {
+            $response = $this->request()->asJson()->timeout(20)->post($url, [
+                'messaging_product' => 'whatsapp',
+                'to' => $message->to,
+                'type' => 'reaction',
+                'reaction' => ['message_id' => $targetMessageId, 'emoji' => $emoji],
+            ]);
+        } catch (Throwable $exception) {
+            $error = $this->errors->networkFailure($exception);
+
+            return new WhatsAppSendResult($this->name(), 'failed', null, $error['message'], $error['code'], $error['safe_details']);
+        }
+
+        $id = $response->json('messages.0.id');
+        $providerError = $response->json('error');
+        $error = is_array($providerError) ? $this->errors->providerRejection($response->status(), $providerError) : null;
+
+        return new WhatsAppSendResult($this->name(), $response->successful() ? 'sent' : 'failed', is_string($id) ? $id : null, $error['message'] ?? null, $error['code'] ?? null, ['http_status' => $response->status(), 'target_message_id_present' => true, ...($error['safe_details'] ?? [])]);
     }
 
     public function markMessageAsRead(string $messageId, ?string $phoneNumberId = null): WhatsAppSendResult

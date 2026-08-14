@@ -52,6 +52,8 @@ class Conversation extends Model
         'last_ai_suggestion_at',
         'ai_context_summary',
         'last_message_at',
+        'pinned_at',
+        'pinned_by_user_id',
         'last_customer_message_at',
         'last_business_message_at',
         'ai_paused_at',
@@ -70,6 +72,7 @@ class Conversation extends Model
             'automation_paused_until' => 'datetime',
             'last_ai_suggestion_at' => 'datetime',
             'last_message_at' => 'datetime',
+            'pinned_at' => 'datetime',
             'last_customer_message_at' => 'datetime',
             'last_business_message_at' => 'datetime',
             'ai_paused_at' => 'datetime',
@@ -106,6 +109,11 @@ class Conversation extends Model
     public function assignedUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'assigned_user_id');
+    }
+
+    public function pinnedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'pinned_by_user_id');
     }
 
     public function whatsappMessageDeliveries(): HasMany

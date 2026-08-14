@@ -12,6 +12,7 @@ use App\Models\Customer;
 use App\Models\Message;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppMediaFile;
+use App\Models\WhatsAppStickerFavorite;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\ConversationWorkflowService;
@@ -86,6 +87,7 @@ class ConversationOperationsController extends Controller
             ->when($mode === 'attention', fn ($query) => $query->where('human_review_required', true))
             ->when($mode === 'unread', fn ($query) => $query->where('unread_count', '>', 0))
             ->when($mode === 'alerts', fn ($query) => $query->whereHas('alerts', fn ($alerts) => $alerts->where('status', '!=', ConversationAlert::STATUS_RESOLVED)))
+            ->orderByRaw('CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('last_message_at')
             ->orderByDesc('updated_at')
             ->limit(50)
@@ -126,6 +128,50 @@ class ConversationOperationsController extends Controller
                 $whatsapp->markConversationAsRead($company, $conversation)->load($this->conversationRelations()),
             ),
         ]);
+    }
+
+    public function toggleConversationPin(Request $request, Conversation $conversation, ConversationPresenter $presenter): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+
+        $conversation->forceFill([
+            'pinned_at' => $conversation->pinned_at ? null : now(),
+            'pinned_by_user_id' => $conversation->pinned_at ? null : $request->user()->id,
+        ])->save();
+
+        return response()->json(['data' => $presenter->conversation($conversation->load($this->conversationRelations()))]);
+    }
+
+    public function stickerFavorites(Request $request): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+
+        return response()->json(['data' => WhatsAppStickerFavorite::query()
+            ->where('company_id', $company->id)->pluck('content_hash')->values()]);
+    }
+
+    public function toggleStickerFavorite(Request $request): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+        $validated = $request->validate([
+            'content_hash' => ['required', 'string', 'max:128'],
+            'media_id' => ['nullable', 'integer'],
+        ]);
+        $query = WhatsAppStickerFavorite::query()->where('company_id', $company->id)->where('content_hash', $validated['content_hash']);
+        $favorite = $query->first();
+        if ($favorite) {
+            $favorite->delete();
+
+            return response()->json(['data' => ['favorited' => false]]);
+        }
+        $mediaId = $validated['media_id'] ?? null;
+        if ($mediaId !== null) {
+            abort_unless(WhatsAppMediaFile::query()->where('id', $mediaId)->where('company_id', $company->id)->exists(), 422);
+        }
+        WhatsAppStickerFavorite::query()->create(['company_id' => $company->id, 'content_hash' => $validated['content_hash'], 'whatsapp_media_file_id' => $mediaId]);
+
+        return response()->json(['data' => ['favorited' => true]]);
     }
 
     public function sendMessage(
@@ -194,7 +240,7 @@ class ConversationOperationsController extends Controller
         $company = $this->resolveCompany($request);
         $this->assertConversationBelongsToCompany($conversation, $company->id);
         $validated = $request->validate([
-            'media_type' => ['required', Rule::in(['image', 'video', 'document', 'audio'])],
+            'media_type' => ['required', Rule::in(['image', 'video', 'document', 'audio', 'sticker'])],
             'caption' => ['nullable', 'string', 'max:4000'],
             'file' => ['required', 'file', 'max:102400'],
             'recording_source' => ['nullable', Rule::in(['browser'])],
@@ -251,6 +297,27 @@ class ConversationOperationsController extends Controller
         ]);
     }
 
+    public function reactToMessage(
+        Request $request,
+        Conversation $conversation,
+        Message $message,
+        WhatsAppService $whatsapp,
+        ConversationPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        abort_unless((int) $message->conversation_id === (int) $conversation->id, 404);
+        $validated = $request->validate(['emoji' => ['required', 'string', 'max:16']]);
+
+        try {
+            $conversation = $whatsapp->sendReaction($company, $conversation, $message, $validated['emoji'], $request->user()->id);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $presenter->conversation($conversation->load($this->conversationRelations()))]);
+    }
+
     public function togglePin(
         Request $request,
         Conversation $conversation,
@@ -269,6 +336,20 @@ class ConversationOperationsController extends Controller
         return response()->json([
             'data' => $presenter->conversation($conversation->load($this->conversationRelations())),
         ]);
+    }
+
+    public function hideMessage(Request $request, Conversation $conversation, Message $message, ConversationPresenter $presenter): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        abort_unless((int) $message->conversation_id === (int) $conversation->id, 404);
+
+        $message->forceFill([
+            'hidden_at' => $message->hidden_at ? null : now(),
+            'hidden_by_user_id' => $message->hidden_at ? null : $request->user()->id,
+        ])->save();
+
+        return response()->json(['data' => $presenter->conversation($conversation->load($this->conversationRelations()))]);
     }
 
     public function setMode(
@@ -435,6 +516,7 @@ class ConversationOperationsController extends Controller
         return [
             'customer.addresses',
             'assignedUser',
+            'pinnedBy',
             'manualTakeoverBy',
             'activeOrder.payerCustomer',
             'activeOrder.items.options',

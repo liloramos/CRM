@@ -151,7 +151,7 @@ export type ConversationMessage = {
   sender: 'customer' | 'attendant' | 'ai'
   direction?: 'inbound' | 'outbound'
   type?: 'text' | 'image' | 'video' | 'document' | 'audio' | 'location' | 'interactive' | 'unsupported' | string
-  body: string
+  body: string | null
   timeLabel: string
   createdAt?: string | null
   occurredAt?: string | null
@@ -159,6 +159,7 @@ export type ConversationMessage = {
   errorMessage?: string | null
   errorCode?: string | null
   isPinned?: boolean
+  isRevoked?: boolean
   pinnedAt?: string | null
   sentAt?: string | null
   receivedAt?: string | null
@@ -179,6 +180,13 @@ export type ConversationMessage = {
     mimeType: string | null
     sizeBytes: number | null
     url: string | null
+    isVoiceNote?: boolean
+    contentHash?: string | null
+  }>
+  reactions?: Array<{
+    emoji: string
+    source: 'customer' | 'operator'
+    createdAt?: string | null
   }>
 }
 
@@ -247,6 +255,14 @@ export type ConversationPaymentReview = {
   mediaUrl: string | null
 } | null
 
+export type ConversationOperationalStatus = {
+  code: 'IDLE' | 'IN_SERVICE' | 'AWAITING_PAYMENT' | 'PAYMENT_REVIEW' | 'PREPARING' | 'AWAITING_DELIVERY' | 'OUT_FOR_DELIVERY' | 'COMPLETED' | 'ATTENTION'
+  label: string
+  tone: 'gray' | 'blue' | 'yellow' | 'orange' | 'cyan' | 'purple' | 'teal' | 'green' | 'red'
+  reason?: string | null
+  priority: number
+}
+
 export type Conversation = {
   id: string
   customer: CustomerSummary
@@ -256,6 +272,7 @@ export type Conversation = {
   automationVersion?: number
   unread: number
   statusLabel: string
+  operationalStatus?: ConversationOperationalStatus
   lastMessage: string
   messages: ConversationMessage[]
   linkedOrderId?: string
@@ -264,6 +281,8 @@ export type Conversation = {
   manualTakeoverBy?: { id: string; name: string } | null
   handoffReason?: string | null
   lastMessageAt?: string | null
+  isPinned?: boolean
+  pinnedAt?: string | null
   alerts?: ConversationAlert[]
   paymentReview?: ConversationPaymentReview
 }

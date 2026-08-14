@@ -588,6 +588,30 @@ export async function toggleConversationMessagePin(conversationId: string, messa
   return response.data
 }
 
+export async function hideConversationMessage(conversationId: string, messageId: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(
+    `/api/app/conversations/${conversationId}/messages/${messageId}/hide`, { method: 'POST' },
+  )
+  return response.data
+}
+
+export async function toggleConversationPin(conversationId: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/pin`, { method: 'POST' })
+  return response.data
+}
+
+export async function getConversationStickerFavorites(): Promise<string[]> {
+  const response = await requestJson<ApiEnvelope<string[]>>('/api/app/conversations/sticker-favorites')
+  return response.data
+}
+
+export async function toggleConversationStickerFavorite(contentHash: string, mediaId: string): Promise<boolean> {
+  const response = await requestJson<ApiEnvelope<{ favorited: boolean }>>('/api/app/conversations/sticker-favorites/toggle', {
+    body: JSON.stringify({ content_hash: contentHash, media_id: Number(mediaId) }), method: 'POST',
+  })
+  return response.data.favorited
+}
+
 export async function sendConversationMessage(
   conversationId: string,
   body: string,
@@ -612,7 +636,7 @@ export type ConversationMediaSendOptions = {
   recordingRequestedMimeType?: string
 }
 
-export async function sendConversationMedia(conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio', caption = '', options: ConversationMediaSendOptions = {}): Promise<Conversation> {
+export async function sendConversationMedia(conversationId: string, file: File, mediaType: 'image' | 'video' | 'document' | 'audio' | 'sticker', caption = '', options: ConversationMediaSendOptions = {}): Promise<Conversation> {
   const form = new FormData()
   form.append('file', file)
   form.append('media_type', mediaType)
@@ -624,6 +648,15 @@ export async function sendConversationMedia(conversationId: string, file: File, 
     body: form,
     method: 'POST',
   })
+  return response.data
+}
+
+export async function reactToConversationMessage(conversationId: string, messageId: string, emoji: string): Promise<Conversation> {
+  const response = await requestJson<ApiEnvelope<Conversation>>(`/api/app/conversations/${conversationId}/messages/${messageId}/reaction`, {
+    body: JSON.stringify({ emoji }),
+    method: 'POST',
+  })
+
   return response.data
 }
 

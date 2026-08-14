@@ -613,7 +613,8 @@ class WhatsAppProviderTest extends TestCase
             ])
             ->assertOk()
             ->assertJsonPath('data.automationMode', Conversation::AUTOMATION_MODE_MANUAL)
-            ->assertJsonPath('data.mode', 'atencao');
+            ->assertJsonPath('data.mode', 'manual')
+            ->assertJsonPath('data.operationalStatus.code', 'ATTENTION');
 
         $this->assertDatabaseHas('messages', [
             'conversation_id' => $conversation->id,
@@ -1192,6 +1193,33 @@ class WhatsAppProviderTest extends TestCase
 
             return data_get($payload, 'context.message_id') === 'wamid.original-context'
                 && data_get($payload, 'text.body') === 'Resposta contextual.';
+        });
+    }
+
+    public function test_meta_provider_sends_reaction_to_the_original_message(): void
+    {
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fake([
+            'https://graph.facebook.com/v20.0/safe-phone-number-id/messages' => Http::response([
+                'messages' => [['id' => 'wamid.reaction-sent-by-meta']],
+            ], 200),
+        ]);
+
+        $result = app(WhatsAppProviderInterface::class)->sendReactionMessage(
+            new OutgoingWhatsAppMessage('15550100001', ''),
+            'wamid.original-message',
+            '❤️',
+        );
+
+        $this->assertTrue($result->successful());
+        Http::assertSent(function ($request): bool {
+            return data_get($request->data(), 'type') === 'reaction'
+                && data_get($request->data(), 'reaction.message_id') === 'wamid.original-message'
+                && data_get($request->data(), 'reaction.emoji') === '❤️';
         });
     }
 
