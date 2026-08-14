@@ -7,11 +7,13 @@ use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\ConversationAlert;
 use App\Models\Message;
+use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\User;
 use App\Models\WhatsAppMessageDelivery;
 use App\Services\Ai\AiAutomationService;
 use App\Services\Payments\PaymentWorkflowService;
+use App\Services\Printing\PrintWorkflowService;
 use App\Services\WhatsApp\WhatsAppService;
 use DomainException;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +24,7 @@ class ConversationWorkflowService
         private readonly AiAutomationService $automation,
         private readonly ConversationAlertService $alerts,
         private readonly PaymentWorkflowService $payments,
+        private readonly PrintWorkflowService $printing,
         private readonly WhatsAppService $whatsapp,
     ) {}
 
@@ -216,10 +219,20 @@ class ConversationWorkflowService
         $this->assertProofBelongsToConversation($company, $conversation, $proof);
 
         $payment = $proof->payment()->firstOrFail();
+
+        if ($proof->status === PaymentProof::STATUS_ACCEPTED && $payment->status === Payment::STATUS_CONFIRMED) {
+            return $conversation->refresh();
+        }
+
         $this->payments->confirmPayment($payment, $user, [
             'confirmed_amount_cents' => $confirmedAmountCents,
             'notes' => $notes,
         ]);
+
+        $order = $proof->order()->firstOrFail()->refresh();
+        if ($order->items()->exists() && $order->latest_print_job_id === null) {
+            $this->printing->generateTicket($order, $user);
+        }
 
         $proof->forceFill([
             'status' => PaymentProof::STATUS_ACCEPTED,
@@ -233,7 +246,7 @@ class ConversationWorkflowService
             title: 'Pagamento aprovado',
             message: 'Comprovante aprovado por atendente.',
             conversation: $conversation,
-            order: $proof->order()->first(),
+            order: $order,
             payment: $payment,
             paymentProof: $proof,
             deduplicationKey: 'payment-approved:'.$proof->id,
@@ -273,6 +286,10 @@ class ConversationWorkflowService
 
         $this->assertProofBelongsToConversation($company, $conversation, $proof);
         $payment = $proof->payment()->firstOrFail();
+
+        if ($proof->status === PaymentProof::STATUS_REJECTED && $payment->status === Payment::STATUS_REJECTED) {
+            return $conversation->refresh();
+        }
 
         $this->payments->rejectPayment($payment, $user, $reason, $reason);
 

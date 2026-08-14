@@ -186,21 +186,21 @@ class PrintWorkflowTest extends TestCase
 
         $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
 
-        $this->assertStringContainsString('1x N8 Tradicional', $html);
+        $this->assertStringContainsString('1x N8 Livre', $html);
         $this->assertStringContainsString('1x Somente bife', $html);
         $this->assertStringContainsString('R$ 20,00', $html);
         $this->assertStringContainsString('1x Porco', $html);
         $this->assertStringContainsString('1x Frango ao molho', $html);
         $this->assertStringContainsString('1x Bife adicional', $html);
         $this->assertStringContainsString('R$ 23,00', $html);
-        $this->assertStringContainsString('1x N9 Tradicional', $html);
+        $this->assertStringContainsString('1x N9 Livre', $html);
         $this->assertStringContainsString('R$ 22,00', $html);
         $this->assertStringContainsString('R$ 25,00', $html);
         $this->assertStringNotContainsString('Almondega', $html);
         $this->assertStringNotContainsString('Para: Nao informado', $html);
     }
 
-    public function test_ticket_prints_removed_default_components_without_selected_noise(): void
+    public function test_fixed_n5_casa_composition_rejects_component_removals(): void
     {
         $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
 
@@ -222,17 +222,9 @@ class PrintWorkflowTest extends TestCase
                 'salada_casa' => ['beterraba'],
                 'carne' => ['porco'],
             ]),
-        ])->assertOk();
-
-        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
-
-        $this->assertStringContainsString('1x N5 Casa', $html);
-        $this->assertStringContainsString('1x Arroz', $html);
-        $this->assertStringContainsString('1x Beterraba', $html);
-        $this->assertStringContainsString('1x Porco', $html);
-        $this->assertStringContainsString('Sem Feijão', $html);
-        $this->assertStringNotContainsString('1x Feijão', $html);
-        $this->assertStringNotContainsString('Repolho com tomate', $html);
+        ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('removed_component_ids');
     }
 
     public function test_ticket_preview_route_keeps_company_isolation(): void

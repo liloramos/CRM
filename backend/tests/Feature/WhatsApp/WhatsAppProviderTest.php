@@ -14,6 +14,7 @@ use App\Models\ConversationAlert;
 use App\Models\Customer;
 use App\Models\Message;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\Role;
@@ -1556,6 +1557,15 @@ class WhatsAppProviderTest extends TestCase
             'started_at' => now(),
         ]);
         $order = $this->createActiveOrder($company, $customer, $conversation, totalCents: 3200);
+        OrderItem::query()->create([
+            'order_id' => $order->id,
+            'product_name' => 'Marmita de teste',
+            'quantity' => 1,
+            'unit_price_cents' => 3200,
+            'total_price_cents' => 3200,
+            'currency' => 'BRL',
+            'sort_order' => 1,
+        ]);
         $payment = Payment::query()->create([
             'company_id' => $company->id,
             'order_id' => $order->id,
@@ -1595,6 +1605,19 @@ class WhatsAppProviderTest extends TestCase
             'id' => $proof->id,
             'status' => PaymentProof::STATUS_ACCEPTED,
         ]);
+        $this->assertDatabaseHas('print_jobs', [
+            'order_id' => $order->id,
+            'job_type' => 'order_ticket',
+        ]);
+        $this->assertNotNull($order->refresh()->latest_print_job_id);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$proof->id}/approve", [
+                'confirmed_amount_cents' => 3200,
+            ])
+            ->assertOk();
+
+        $this->assertSame(1, $order->printJobs()->count());
     }
 
     public function test_meta_provider_status_does_not_expose_token_value(): void
