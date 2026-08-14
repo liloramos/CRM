@@ -29,6 +29,8 @@ export const deliveryTasksMock: DeliveryTask[] = [
 export const financeEntriesMock: FinanceEntry[] = [
   {
     id: 'fin-001',
+    orderId: 'pedido-002',
+    paymentId: 'payment-001',
     label: 'Pedido com credito usado',
     orderCode: '#S-1042',
     status: 'revisao_humana',
@@ -43,6 +45,8 @@ export const financeEntriesMock: FinanceEntry[] = [
   },
   {
     id: 'fin-002',
+    orderId: 'pedido-001',
+    paymentId: 'payment-002',
     label: 'Pedido pago e impresso',
     orderCode: '#S-1041',
     status: 'pago',
@@ -57,6 +61,8 @@ export const financeEntriesMock: FinanceEntry[] = [
   },
   {
     id: 'fin-003',
+    orderId: 'pedido-003',
+    paymentId: null,
     label: 'Diferenca pendente',
     orderCode: '#S-1040',
     status: 'pendente',

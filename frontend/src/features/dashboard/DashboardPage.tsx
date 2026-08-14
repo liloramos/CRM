@@ -94,6 +94,7 @@ const ORDER_STATUS_TONES: Record<OrderStatus, BadgeTone> = {
 }
 
 const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  anulado: 'Anulado',
   pendente: 'Pendente',
   parcial: 'Parcial',
   pago: 'Confirmado',
@@ -102,6 +103,7 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
 }
 
 const PAYMENT_STATUS_TONES: Record<PaymentStatus, BadgeTone> = {
+  anulado: 'neutral',
   pendente: 'warning',
   parcial: 'warning',
   pago: 'success',

@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppAudioNormalizer;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
 use App\Services\WhatsApp\WhatsAppService;
@@ -615,7 +616,7 @@ class WhatsAppProviderTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.automationMode', Conversation::AUTOMATION_MODE_MANUAL)
             ->assertJsonPath('data.mode', 'manual')
-            ->assertJsonPath('data.operationalStatus.code', 'ATTENTION');
+            ->assertJsonPath('data.operationalStatus.code', 'IDLE');
 
         $this->assertDatabaseHas('messages', [
             'conversation_id' => $conversation->id,
@@ -626,6 +627,68 @@ class WhatsAppProviderTest extends TestCase
             'id' => $conversation->id,
             'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
         ]);
+    }
+
+    public function test_manual_conversation_with_pending_payment_uses_awaiting_payment_status(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente Pagamento Manual']);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'human_review_required' => true,
+            'started_at' => now(),
+        ]);
+        $this->createActiveOrder($company, $customer, $conversation, totalCents: 800);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.operationalStatus.code', 'AWAITING_PAYMENT')
+            ->assertJsonPath('data.conversations.0.operationalStatus.tone', 'yellow');
+    }
+
+    public function test_manual_order_for_the_same_customer_is_resolved_as_the_conversation_active_order(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente do pedido manual']);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'started_at' => now(),
+        ]);
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'payer_customer_id' => $customer->id,
+            'origin_channel' => Order::CHANNEL_MANUAL,
+        ]);
+        app(OrderWorkflowService::class)->transitionTo($order, Order::STATUS_AWAITING_PAYMENT);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.linkedOrderId', (string) $order->id)
+            ->assertJsonPath('data.conversations.0.operationalStatus.code', 'AWAITING_PAYMENT')
+            ->assertJsonPath('data.conversations.0.operationalStatus.tone', 'yellow');
+
+        $order->forceFill(['status' => Order::STATUS_CANCELLED])->save();
+
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.linkedOrderId', null)
+            ->assertJsonPath('data.conversations.0.operationalStatus.code', 'IDLE');
     }
 
     public function test_creating_an_order_from_a_conversation_reuses_its_customer_and_sets_the_active_order(): void
@@ -1594,12 +1657,17 @@ class WhatsAppProviderTest extends TestCase
                 'notes' => 'Comprovante aprovado no teste.',
             ])
             ->assertOk()
-            ->assertJsonPath('data.paymentReview', null);
+            ->assertJsonPath('data.paymentReview', null)
+            ->assertJsonPath('data.operationalStatus.code', 'PREPARING');
 
         $this->assertDatabaseHas('payments', [
             'id' => $payment->id,
             'status' => Payment::STATUS_CONFIRMED,
             'confirmed_by_user_id' => $user->id,
+        ]);
+        $this->assertDatabaseHas('orders', [
+            'id' => $order->id,
+            'status' => Order::STATUS_READY_TO_PRINT,
         ]);
         $this->assertDatabaseHas('payment_proofs', [
             'id' => $proof->id,

@@ -121,6 +121,7 @@ class OperationalCrmPresenter
             'customer' => $this->orderCustomer($order),
             'status' => $this->mapOrderStatus((string) $order->status),
             'paymentStatus' => $this->mapPaymentStatus((string) $order->payment_status),
+            'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'fulfillmentType' => $this->mapFulfillmentType((string) ($order->fulfillment_type ?: Order::FULFILLMENT_PICKUP)),
             'printStatus' => $this->mapPrintStatus((string) $order->print_status),
             'channel' => $this->mapChannel((string) $order->origin_channel),
@@ -346,11 +347,19 @@ class OperationalCrmPresenter
      */
     private function financeEntry(Order $order): array
     {
+        $latestPayment = $order->payments
+            ->sortByDesc('id')
+            ->first();
+
         return [
             'id' => (string) $order->id,
+            'orderId' => (string) $order->id,
+            'paymentId' => $latestPayment?->id ? (string) $latestPayment->id : null,
             'label' => 'Pedido '.$order->code,
             'orderCode' => $order->code,
-            'status' => $this->mapPaymentStatus((string) $order->payment_status),
+            'status' => $latestPayment?->voided_at
+                ? 'anulado'
+                : $this->mapPaymentStatus((string) $order->payment_status),
             'amount' => $this->cents((int) $order->total_cents),
             'receivedAmount' => $this->cents((int) $order->amount_paid_cents),
             'pendingAmount' => $this->cents((int) $order->amount_due_cents),
@@ -358,7 +367,9 @@ class OperationalCrmPresenter
             'method' => $this->paymentMethodLabel((string) ($order->payment_method ?: 'a_confirmar')),
             'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'createdLabel' => $order->created_at?->format('d/m H:i') ?? '',
-            'description' => $order->payment_confirmed_at ? 'Pagamento confirmado por atendente.' : 'Aguardando conferencia humana.',
+            'description' => $latestPayment?->voided_at
+                ? 'Confirmação anulada no CRM: '.$latestPayment->void_reason
+                : ($order->payment_confirmed_at ? 'Pagamento confirmado por atendente.' : 'Aguardando conferencia humana.'),
         ];
     }
 

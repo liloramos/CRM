@@ -221,6 +221,54 @@ class PaymentWorkflowService
         });
     }
 
+    public function voidLatestConfirmedPayment(Order $order, User $user, string $reason): Payment
+    {
+        return DB::transaction(function () use ($order, $user, $reason): Payment {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $payment = $order->payments()
+                ->where('status', Payment::STATUS_CONFIRMED)
+                ->latest('id')
+                ->lockForUpdate()
+                ->first();
+
+            if (! $payment instanceof Payment) {
+                $alreadyVoided = $order->payments()
+                    ->where('status', Payment::STATUS_CANCELLED)
+                    ->whereNotNull('voided_at')
+                    ->latest('id')
+                    ->first();
+
+                if ($alreadyVoided instanceof Payment) {
+                    return $alreadyVoided;
+                }
+
+                throw new DomainException('Nao existe pagamento confirmado para anular neste pedido.');
+            }
+
+            $payment->forceFill([
+                'status' => Payment::STATUS_CANCELLED,
+                'voided_by_user_id' => $user->id,
+                'voided_at' => now(),
+                'void_reason' => $reason,
+            ])->save();
+
+            $order = $this->recalculateOrderPaymentSummary($order);
+
+            if (! in_array($order->status, [Order::STATUS_FINISHED, Order::STATUS_CANCELLED], true)) {
+                $this->orders->transitionTo(
+                    $order,
+                    Order::STATUS_AWAITING_PAYMENT,
+                    $user,
+                    'payment_confirmation_voided',
+                    $reason,
+                    ['payment_id' => $payment->id],
+                );
+            }
+
+            return $payment->refresh();
+        });
+    }
+
     public function rejectPayment(Payment $payment, ?User $user = null, ?string $reason = null, ?string $notes = null): Payment
     {
         return DB::transaction(function () use ($payment, $user, $reason, $notes): Payment {

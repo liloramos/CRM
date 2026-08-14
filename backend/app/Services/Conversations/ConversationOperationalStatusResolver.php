@@ -18,7 +18,11 @@ class ConversationOperationalStatusResolver
             ->filter(fn (ConversationAlert $alert): bool => $alert->status !== ConversationAlert::STATUS_RESOLVED
                 && $alert->type !== ConversationAlert::TYPE_UNREAD_MESSAGE);
 
-        if ((bool) $conversation->human_review_required || $activeAlerts->contains(
+        $reviewRequiredForOperationalReason = (bool) $conversation->human_review_required
+            && ! ($conversation->automation_mode === Conversation::AUTOMATION_MODE_MANUAL
+                && $conversation->automation_status === Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER);
+
+        if ($reviewRequiredForOperationalReason || $activeAlerts->contains(
             fn (ConversationAlert $alert): bool => $alert->severity === ConversationAlert::SEVERITY_CRITICAL
                 || $alert->type === ConversationAlert::TYPE_MESSAGE_SEND_FAILED
                 || $alert->type === ConversationAlert::TYPE_PAYMENT_REJECTED,
@@ -43,7 +47,15 @@ class ConversationOperationalStatusResolver
         }
 
         if ($this->isAwaitingDelivery($order)) {
-            return $this->status('AWAITING_DELIVERY', 'Aguardando entrega/retirada', 'purple', 'Pedido pronto aguardando saída ou retirada.', 60);
+            $isPickup = $order->fulfillment_type !== Order::FULFILLMENT_DELIVERY;
+
+            return $this->status(
+                'AWAITING_DELIVERY',
+                $isPickup ? 'Aguardando retirada' : 'Aguardando entrega',
+                'purple',
+                $isPickup ? 'Pedido pronto aguardando retirada.' : 'Pedido pronto aguardando saída para entrega.',
+                60,
+            );
         }
 
         if ($this->isPreparing($order)) {

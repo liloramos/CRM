@@ -73,7 +73,8 @@ class AiAutomationService
             if ($mode === Conversation::AUTOMATION_MODE_MANUAL) {
                 $attributes = array_merge($attributes, [
                     'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
-                    'human_review_required' => true,
+                    // Manual takeover pauses automation; it is not itself an operational incident.
+                    'human_review_required' => false,
                     'manual_takeover_reason' => $reason,
                     'manual_takeover_at' => now(),
                     'manual_takeover_by_user_id' => $user?->id,

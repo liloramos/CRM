@@ -11,7 +11,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Modal } from '../../components/ui/Modal'
 import { EmptyState } from '../../components/ui/States'
 import { CustomerEditor } from '../clientes/CustomerEditor'
-import { getConversationQuickReplies, getConversationStickerFavorites, toggleConversationStickerFavorite, type ConversationMediaSendOptions, type UpdateCustomerPayload } from '../../services/crm.service'
+import { getConversationQuickReplies, getConversationStickerFavorites, toggleConversationStickerFavorite, type ConversationMediaSendOptions, type FulfillmentAction, type UpdateCustomerPayload } from '../../services/crm.service'
 import type {
   Conversation,
   ConversationAlert,
@@ -64,6 +64,7 @@ type ConversationsPageProps = {
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
   onCreateOrder: (conversationId: string) => Promise<void>
+  onAdvanceOrder: (orderId: string, action: FulfillmentAction) => Promise<void>
   onOpenOrders: () => void
   onOpenOrder: (orderId: string) => void
   onPreviewTicket: (orderId: string) => void
@@ -90,6 +91,7 @@ export function ConversationsPage({
   onApprovePayment,
   onChangeMode,
   onCreateOrder,
+  onAdvanceOrder,
   onOpenOrders,
   onOpenOrder,
   onPreviewTicket,
@@ -1707,6 +1709,26 @@ export function ConversationsPage({
                       <Button icon="printer" onClick={() => onPreviewTicket(linkedOrder.id)} variant="secondary">
                         Visualizar comanda
                       </Button>
+                      {linkedOrder.backendStatus === 'in_preparation' ? (
+                        <Button disabled={isActionBusy} onClick={() => void onAdvanceOrder(linkedOrder.id, 'ready')}>
+                          Marcar como pronto
+                        </Button>
+                      ) : null}
+                      {linkedOrder.backendStatus === 'ready_for_pickup' && linkedOrder.fulfillmentType === 'entrega' ? (
+                        <Button disabled={isActionBusy} onClick={() => void onAdvanceOrder(linkedOrder.id, 'start-delivery')}>
+                          Iniciar entrega
+                        </Button>
+                      ) : null}
+                      {linkedOrder.backendStatus === 'ready_for_pickup' && linkedOrder.fulfillmentType === 'retirada' ? (
+                        <Button disabled={isActionBusy} onClick={() => void onAdvanceOrder(linkedOrder.id, 'picked-up')}>
+                          Marcar como retirado
+                        </Button>
+                      ) : null}
+                      {linkedOrder.backendStatus === 'out_for_delivery' ? (
+                        <Button disabled={isActionBusy} onClick={() => void onAdvanceOrder(linkedOrder.id, 'delivered')}>
+                          Marcar como entregue
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 ) : (

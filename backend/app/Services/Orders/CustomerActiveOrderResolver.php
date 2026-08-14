@@ -22,9 +22,26 @@ class CustomerActiveOrderResolver
             ? $conversation->orders
             : $conversation->orders()->latest('id')->get();
 
-        return $orders
+        $conversationOrder = $orders
             ->filter(fn (Order $order): bool => $this->isActive($order))
             ->sortByDesc('id')
+            ->first();
+
+        if ($conversationOrder instanceof Order) {
+            return $conversationOrder;
+        }
+
+        // Manual orders are created from the Orders workspace and do not have a
+        // conversation id. The customer is the stable operational link here.
+        if (! $conversation->customer_id) {
+            return null;
+        }
+
+        return Order::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('payer_customer_id', $conversation->customer_id)
+            ->whereNotIn('status', self::INACTIVE_STATUSES)
+            ->latest('id')
             ->first();
     }
 

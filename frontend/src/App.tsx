@@ -18,6 +18,7 @@ import { OrdersPage } from './features/pedidos/OrdersPage'
 import { ReportsPage } from './features/relatorios/ReportsPage'
 import {
   addOrderItem,
+  advanceOrderFulfillment,
   cancelOrder,
   cleanupTestOrders,
   confirmOrderPayment,
@@ -48,6 +49,7 @@ import {
   setConversationAutomationMode,
   updateCustomer,
   updateOrderStatus,
+  voidOrderPayment,
   ApiError,
 } from './services/crm.service'
 import type {
@@ -155,6 +157,7 @@ function App() {
   const [paymentMethod, setPaymentMethod] = useState<'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other'>('pix')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
+  const [paymentVoidReason, setPaymentVoidReason] = useState('')
   const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const [bulkDeleteOrderIds, setBulkDeleteOrderIds] = useState<string[]>([])
   const [blockedOrderDeletions, setBlockedOrderDeletions] = useState<BlockedOrderDeletion[]>([])
@@ -481,6 +484,11 @@ function App() {
 
     if (activeModal === 'cancel-order') {
       await handleCancelOrder()
+      return
+    }
+
+    if (activeModal === 'void-payment') {
+      await handleVoidPayment()
       return
     }
 
@@ -925,6 +933,52 @@ function App() {
     }
   }
 
+  async function handleVoidPayment() {
+    if (!selectedOrder || !isPersistedBackendId(selectedOrder.id)) {
+      setActionError('O pedido não possui um ID válido.')
+      return
+    }
+
+    if (!paymentVoidReason.trim()) {
+      setActionError('Informe o motivo da anulação.')
+      return
+    }
+
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      const response = await voidOrderPayment(selectedOrder.id, paymentVoidReason.trim())
+      applyUpdatedOrder(response.data, false)
+      setActiveModal(null)
+      setPaymentVoidReason('')
+      await loadSnapshot()
+      await loadConversations(true)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Não foi possível anular a confirmação do pagamento.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleAdvanceOrderFulfillment(orderId: string, action: import('./services/crm.service').FulfillmentAction) {
+    if (isActionBusy) return
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      const response = await advanceOrderFulfillment(orderId, action)
+      applyUpdatedOrder(response.data)
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o preparo do pedido.')
+      await loadSnapshot()
+      throw error
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
   async function handleConversationModeChange(conversationId: string, mode: 'assisted' | 'automatic' | 'manual') {
     setIsActionBusy(true)
     setConversationError(null)
@@ -1152,10 +1206,20 @@ function App() {
       setPaymentAmount(selectedOrder && selectedOrder.amountDue > 0 ? formatDecimalInput(selectedOrder.amountDue) : '')
       setPaymentNotes('')
     }
+    if (modal === 'void-payment') {
+      setPaymentVoidReason('')
+    }
     if (modal === 'toggle-ai') {
       setAutomationMode(selectedConversation?.mode === 'manual' ? 'manual' : 'assisted')
     }
     setActiveModal(modal)
+  }
+
+  function handleOpenVoidPayment(orderId: string) {
+    setSelectedOrderId(orderId)
+    setPaymentVoidReason('')
+    setActionError(null)
+    setActiveModal('void-payment')
   }
 
   function openNewOrderModal() {
@@ -1315,6 +1379,7 @@ function App() {
             onApprovePayment={handleApproveConversationPayment}
             onChangeMode={handleConversationModeChange}
             onCreateOrder={handleCreateConversationOrder}
+            onAdvanceOrder={handleAdvanceOrderFulfillment}
             onOpenOrders={() => setActiveRoute('pedidos')}
             onOpenOrder={(orderId) => { setSelectedOrderId(orderId); setActiveRoute('pedidos') }}
             onPreviewTicket={handleTicketPreview}
@@ -1338,6 +1403,7 @@ function App() {
             canPermanentlyDeleteOrders={canPermanentlyDeleteOrders}
             canRunDestructiveTestCleanup={canRunDestructiveTestCleanup}
             isLoading={isLoadingSnapshot}
+            onAdvanceOrder={handleAdvanceOrderFulfillment}
             onNewOrder={handleNewOrder}
             onOpenModal={openModal}
             onPreviewTicket={handleTicketPreview}
@@ -1383,6 +1449,7 @@ function App() {
             expenses={snapshot.expenses}
             mode="pagamentos"
             onOpenModal={openModal}
+            onOpenVoidPayment={handleOpenVoidPayment}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
           />
@@ -1394,6 +1461,7 @@ function App() {
             expenses={snapshot.expenses}
             mode="financeiro"
             onOpenModal={openModal}
+            onOpenVoidPayment={handleOpenVoidPayment}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
           />
@@ -1458,6 +1526,7 @@ function App() {
         closeDisabled={isActionBusy}
         danger={
           activeModal === 'cancel-order'
+          || activeModal === 'void-payment'
           || activeModal === 'delete-draft'
           || activeModal === 'delete-order-permanent'
           || activeModal === 'delete-orders-bulk'
@@ -1474,6 +1543,7 @@ function App() {
           || (activeModal === 'toggle-ai' && !selectedConversation)
           || (activeModal === 'add-product' && !addItemContext)
           || (activeModal === 'delete-draft' && (!selectedOrder || !getOrderOperationalState(selectedOrder).canDeleteDraft))
+          || (activeModal === 'void-payment' && !paymentVoidReason.trim())
           || ((activeModal === 'delete-order-permanent' || activeModal === 'delete-orders-bulk' || activeModal === 'cleanup-test-orders') && deleteConfirmation !== 'EXCLUIR')
         }
         primaryLabel={primaryLabelForModal(activeModal)}
@@ -1525,6 +1595,7 @@ function App() {
           onPaymentAmountChange={setPaymentAmount}
           onPaymentMethodChange={setPaymentMethod}
           onPaymentNotesChange={setPaymentNotes}
+          onPaymentVoidReasonChange={setPaymentVoidReason}
           onProductChange={handleProductChange}
           onSelectNewOrderCustomer={setSelectedNewOrderCustomer}
           onSelectedOptionsChange={setSelectedOptionIds}
@@ -1535,6 +1606,7 @@ function App() {
           paymentAmount={paymentAmount}
           paymentMethod={paymentMethod}
           paymentNotes={paymentNotes}
+          paymentVoidReason={paymentVoidReason}
           printPreview={printPreview}
           products={snapshot.products}
           selectedConversation={selectedConversation}
@@ -1797,6 +1869,8 @@ function primaryLabelForModal(modal: AppModal): string {
       return 'Limpar pedidos de teste'
     case 'confirm-payment':
       return 'Confirmar pagamento'
+    case 'void-payment':
+      return 'Anular confirmação'
     case 'change-status':
       return 'Alterar status'
     case 'cancel-order':

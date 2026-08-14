@@ -10,6 +10,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductOption;
+use App\Services\Delivery\DeliveryWorkflowService;
 use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\OrderCleanupService;
 use App\Services\Orders\OrderItemSelectionValidator;
@@ -245,6 +246,12 @@ class OrderOperationsController extends Controller
             'notes' => ['nullable', 'string', 'max:1000'],
         ]);
 
+        if ($order->payments()->where('status', Payment::STATUS_CONFIRMED)->exists()) {
+            return response()->json([
+                'message' => 'Anule a confirmacao do pagamento antes de cancelar este pedido.',
+            ], 422);
+        }
+
         try {
             $orders->transitionTo(
                 $order,
@@ -257,6 +264,30 @@ class OrderOperationsController extends Controller
             return response()->json([
                 'message' => $exception->getMessage(),
             ], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
+        ]);
+    }
+
+    public function voidPayment(
+        Request $request,
+        Order $order,
+        PaymentWorkflowService $payments,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        try {
+            $payments->voidLatestConfirmedPayment($order, $request->user(), $validated['reason']);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
         }
 
         return response()->json([
@@ -454,6 +485,26 @@ class OrderOperationsController extends Controller
         return response()->json([
             'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
         ]);
+    }
+
+    public function advanceFulfillment(Request $request, Order $order, string $action, DeliveryWorkflowService $delivery, OperationalCrmPresenter $presenter): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        try {
+            $updated = match ($action) {
+                'ready' => $delivery->markReady($order, $request->user()),
+                'start-delivery' => $delivery->startDelivery($order, $request->user()),
+                'delivered' => $delivery->markDelivered($order, $request->user()),
+                'picked-up' => $delivery->markPickedUp($order, $request->user()),
+                default => throw new DomainException('Acao operacional nao suportada.'),
+            };
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $presenter->order($updated->refresh()->load($this->orderRelations()))]);
     }
 
     public function previewTicket(

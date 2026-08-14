@@ -81,6 +81,7 @@ type OperationalModalContentProps = {
   onPaymentAmountChange: (value: string) => void
   onPaymentMethodChange: (value: PaymentMethodSelection) => void
   onPaymentNotesChange: (value: string) => void
+  onPaymentVoidReasonChange: (value: string) => void
   onProductChange: (productId: string) => void
   onSelectNewOrderCustomer: (customer: CustomerSummary | null) => void
   onSelectedOptionsChange: (optionIds: string[]) => void
@@ -90,6 +91,7 @@ type OperationalModalContentProps = {
   paymentAmount: string
   paymentMethod: PaymentMethodSelection
   paymentNotes: string
+  paymentVoidReason: string
   printPreview: PrintPreviewResult | null
   products: Product[]
   selectedConversation?: Conversation
@@ -148,6 +150,7 @@ export function OperationalModalContent({
   onPaymentAmountChange,
   onPaymentMethodChange,
   onPaymentNotesChange,
+  onPaymentVoidReasonChange,
   onProductChange,
   onSelectNewOrderCustomer,
   onSelectedOptionsChange,
@@ -157,6 +160,7 @@ export function OperationalModalContent({
   paymentAmount,
   paymentMethod,
   paymentNotes,
+  paymentVoidReason,
   printPreview,
   products,
   selectedConversation,
@@ -478,6 +482,32 @@ export function OperationalModalContent({
     )
   }
 
+  if (modal === 'void-payment') {
+    return (
+      <div className="modal-fields">
+        <p>
+          Pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> · Valor{' '}
+          <strong>{formatCurrency(selectedOrder?.total ?? 0)}</strong>
+          <br />
+          Forma de pagamento: <strong>{selectedOrder?.paymentMethod ?? 'Não informada'}</strong>
+          <br />
+          Status atual: <strong>{selectedOrder?.paymentStatus ?? 'Não informado'}</strong>
+        </p>
+        <p>A anulação corrige o pagamento no CRM e mantém toda a auditoria. Ela não realiza reembolso.</p>
+        <label>
+          Motivo da anulação
+          <textarea
+            autoFocus
+            onChange={(event) => onPaymentVoidReasonChange(event.target.value)}
+            placeholder="Ex.: comprovante aprovado por engano"
+            value={paymentVoidReason}
+          />
+        </label>
+        {actionError ? <p className="form-error">{actionError}</p> : null}
+      </div>
+    )
+  }
+
   if (modal === 'cancel-order') {
     return (
       <div className="modal-fields">
@@ -715,7 +745,7 @@ function deletionReasonLabel(reason: string): string {
     case 'payment_confirmed':
       return 'pagamento confirmado'
     case 'payment_record_exists':
-      return 'registro de pagamento existente'
+      return 'Este pedido possui histórico financeiro e não pode ser excluído permanentemente. Cancele o pedido para removê-lo da operação.'
     case 'financial_movement':
       return 'movimentacao financeira'
     case 'print_confirmed':

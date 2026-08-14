@@ -25,10 +25,12 @@ type FinancePageProps = {
   summary: DailyFinancialSummary
   mode: 'pagamentos' | 'financeiro'
   onOpenModal: (modal: AppModal) => void
+  onOpenVoidPayment: (orderId: string) => void
 }
 
 const statusLabels: Record<FinanceEntry['status'], string> = {
   credito: 'Credito',
+  anulado: 'Anulado',
   pago: 'Pago',
   parcial: 'Parcial',
   pendente: 'Pendente',
@@ -37,6 +39,7 @@ const statusLabels: Record<FinanceEntry['status'], string> = {
 
 function financeStatusTone(status: FinanceEntry['status']): BadgeTone {
   if (status === 'pago') return 'success'
+  if (status === 'anulado') return 'neutral'
   if (status === 'pendente' || status === 'parcial') return 'warning'
   if (status === 'revisao_humana') return 'manual'
   return 'info'
@@ -67,7 +70,23 @@ const columns: DataTableColumn<FinanceEntry>[] = [
   { key: 'amount', header: 'Total', align: 'right', render: (entry) => formatCurrency(entry.amount) },
 ]
 
-export function FinancePage({ entries, expenses, mode, onOpenModal, paymentMethods, summary }: FinancePageProps) {
+function financeColumns(onOpenVoidPayment: (orderId: string) => void, allowVoid: boolean): DataTableColumn<FinanceEntry>[] {
+  return [
+    ...columns,
+    {
+      key: 'actions',
+      header: 'Ações',
+      align: 'right',
+      render: (entry) => allowVoid && entry.status === 'pago' && entry.orderId ? (
+        <Button onClick={() => onOpenVoidPayment(entry.orderId)} variant="ghost">
+          Anular confirmação
+        </Button>
+      ) : null,
+    },
+  ]
+}
+
+export function FinancePage({ entries, expenses, mode, onOpenModal, onOpenVoidPayment, paymentMethods, summary }: FinancePageProps) {
   const title = mode === 'pagamentos' ? 'Pagamentos / Pix' : 'Financeiro'
   const description =
     mode === 'pagamentos'
@@ -91,7 +110,7 @@ export function FinancePage({ entries, expenses, mode, onOpenModal, paymentMetho
       <div className="finance-dashboard-grid">
         <Card className="finance-table-card">
           <SectionTitle title="Movimentos recentes" />
-          <DataTable columns={columns} data={entries} getRowKey={(entry) => entry.id} />
+          <DataTable columns={financeColumns(onOpenVoidPayment, mode === 'pagamentos')} data={entries} getRowKey={(entry) => entry.id} />
         </Card>
 
         <div className="finance-side-stack">

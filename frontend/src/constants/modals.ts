@@ -14,6 +14,8 @@ export function modalTitle(modal: AppModal): string {
       return 'Limpar pedidos de teste'
     case 'confirm-payment':
       return 'Confirmar pagamento'
+    case 'void-payment':
+      return 'Anular confirmação do pagamento'
     case 'cancel-order':
       return 'Cancelar pedido'
     case 'change-status':
@@ -45,6 +47,8 @@ export function modalDescription(modal: AppModal): string {
       return 'Selecione um cliente cadastrado, digite um cliente avulso ou cadastre um novo.'
     case 'confirm-payment':
       return 'Comprovantes e credito precisam de conferencia humana antes de liberar o pedido.'
+    case 'void-payment':
+      return 'Esta ação corrige apenas o estado interno do CRM. Ela não realiza reembolso.'
     case 'cancel-order':
       return 'Esta acao altera o fluxo operacional e deve registrar motivo.'
     case 'delete-draft':

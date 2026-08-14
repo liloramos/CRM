@@ -158,6 +158,33 @@ class PaymentWorkflowTest extends TestCase
         $this->assertSame(0, $customer->refresh()->credit_balance_cents);
     }
 
+    public function test_confirmed_payment_can_be_voided_with_auditable_reason_before_cancelling_order(): void
+    {
+        [$company, $customer, $order] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $payments = app(PaymentWorkflowService::class);
+
+        $payment = $payments->confirmOrderPayment($order, $user, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 1300,
+        ]);
+
+        $voided = $payments->voidLatestConfirmedPayment($order, $user, 'Conferência corrigida pela gerente.');
+
+        $this->assertSame($payment->id, $voided->id);
+        $this->assertSame(Payment::STATUS_CANCELLED, $voided->status);
+        $this->assertSame($user->id, $voided->voided_by_user_id);
+        $this->assertNotNull($voided->voided_at);
+        $this->assertSame('Conferência corrigida pela gerente.', $voided->void_reason);
+        $this->assertSame(Payment::ORDER_STATUS_UNPAID, $order->refresh()->payment_status);
+        $this->assertSame(0, $order->amount_paid_cents);
+        $this->assertSame(Order::STATUS_AWAITING_PAYMENT, $order->status);
+
+        $again = $payments->voidLatestConfirmedPayment($order, $user, 'Não deve duplicar a auditoria.');
+        $this->assertSame($voided->id, $again->id);
+        $this->assertSame(1, $order->payments()->whereNotNull('voided_at')->count());
+    }
+
     /**
      * @return array{0: Company, 1: Customer, 2: Order}
      */

@@ -85,6 +85,7 @@ class Payment extends Model
         'created_by_user_id',
         'confirmed_by_user_id',
         'rejected_by_user_id',
+        'voided_by_user_id',
         'method',
         'provider',
         'status',
@@ -98,6 +99,8 @@ class Payment extends Model
         'confirmed_at',
         'rejected_at',
         'rejection_reason',
+        'voided_at',
+        'void_reason',
         'notes',
         'metadata',
     ];
@@ -111,6 +114,7 @@ class Payment extends Model
             'paid_at' => 'datetime',
             'confirmed_at' => 'datetime',
             'rejected_at' => 'datetime',
+            'voided_at' => 'datetime',
             'metadata' => 'array',
         ];
     }
@@ -143,6 +147,11 @@ class Payment extends Model
     public function rejectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rejected_by_user_id');
+    }
+
+    public function voidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by_user_id');
     }
 
     public function proofs(): HasMany

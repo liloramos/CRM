@@ -529,6 +529,21 @@ export async function setConversationAutomationMode(conversationId: string, payl
   return response.data
 }
 
+export async function voidOrderPayment(orderId: string, reason: string) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/payments/void`, {
+    body: JSON.stringify({ reason }),
+    method: 'POST',
+  })
+}
+
+export type FulfillmentAction = 'ready' | 'start-delivery' | 'delivered' | 'picked-up'
+
+export async function advanceOrderFulfillment(orderId: string, action: FulfillmentAction) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/fulfillment/${action}`, {
+    method: 'POST',
+  })
+}
+
 export async function createOrderFromConversation(conversationId: string) {
   return requestJson<ApiEnvelope<{ order: OperationalSnapshot['orders'][number]; conversation: Conversation }>>(
     `/api/app/conversations/${conversationId}/orders`,

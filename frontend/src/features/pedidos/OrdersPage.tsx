@@ -13,12 +13,14 @@ import {
   orderMatchesQueueFilter,
   type OrderQueueFilter,
 } from './orderOperationalState'
+import type { FulfillmentAction } from '../../services/crm.service'
 
 type OrdersPageProps = {
   isLoading: boolean
   orders: Order[]
   selectedOrder?: Order
   onNewOrder: () => void
+  onAdvanceOrder: (orderId: string, action: FulfillmentAction) => Promise<void>
   onOpenModal: (modal: AppModal) => void
   onPreviewTicket: (orderId: string) => void
   onPrintTicket: (orderId: string) => void
@@ -42,6 +44,7 @@ export function OrdersPage({
   canManageOrders,
   isLoading,
   onNewOrder,
+  onAdvanceOrder,
   onOpenModal,
   onPreviewTicket,
   onPrintTicket,
@@ -299,9 +302,18 @@ export function OrdersPage({
         <Card className="order-side-panel">
           <SectionTitle title="Acoes criticas" />
           <div className="side-actions">
+            {selectedOrder?.backendStatus === 'in_preparation' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'ready')}>Marcar como pronto</Button> : null}
+            {selectedOrder?.backendStatus === 'ready_for_pickup' && selectedOrder.fulfillmentType === 'entrega' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'start-delivery')}>Iniciar entrega</Button> : null}
+            {selectedOrder?.backendStatus === 'ready_for_pickup' && selectedOrder.fulfillmentType === 'retirada' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'picked-up')}>Marcar como retirado</Button> : null}
+            {selectedOrder?.backendStatus === 'out_for_delivery' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'delivered')}>Marcar como entregue</Button> : null}
             <Button disabled={!selectedOrderState?.canConfirmPayment} icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
               Confirmar pagamento
             </Button>
+            {selectedOrder?.paymentStatus === 'pago' ? (
+              <Button disabled={isLoading} icon="alert" onClick={() => onOpenModal('void-payment')} variant="secondary">
+                Anular confirmação
+              </Button>
+            ) : null}
             <Button disabled={!selectedOrderState?.canChangeStatus} icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
               Alterar status
             </Button>

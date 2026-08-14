@@ -169,6 +169,94 @@ class DeliveryWorkflowService
         });
     }
 
+    public function markReady(Order $order, ?User $user = null): Order
+    {
+        return DB::transaction(function () use ($order, $user): Order {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($order->status === Order::STATUS_READY_FOR_PICKUP) {
+                return $order;
+            }
+
+            if ($order->status !== Order::STATUS_IN_PREPARATION) {
+                throw new DomainException('Somente pedidos em preparo podem ser marcados como prontos.');
+            }
+
+            $order->forceFill([
+                'pickup_status' => $order->fulfillment_type === Order::FULFILLMENT_DELIVERY ? null : Order::PICKUP_STATUS_READY,
+                'fulfillment_status' => $order->fulfillment_type === Order::FULFILLMENT_DELIVERY
+                    ? Order::FULFILLMENT_STATUS_DELIVERY_QUOTED
+                    : Order::FULFILLMENT_STATUS_READY_FOR_PICKUP,
+            ])->save();
+
+            return $this->orders->transitionTo($order, Order::STATUS_READY_FOR_PICKUP, $user, 'preparation_ready');
+        });
+    }
+
+    public function startDelivery(Order $order, ?User $user = null): Order
+    {
+        if ($order->fulfillment_type !== Order::FULFILLMENT_DELIVERY) {
+            throw new DomainException('Somente pedidos de entrega podem sair para entrega.');
+        }
+
+        if ($order->status === Order::STATUS_OUT_FOR_DELIVERY) {
+            return $order->refresh();
+        }
+
+        if ($order->status !== Order::STATUS_READY_FOR_PICKUP) {
+            throw new DomainException('O pedido precisa estar pronto antes de sair para entrega.');
+        }
+
+        if (empty($order->delivery_address_snapshot) && $order->delivery_address_id === null) {
+            throw new DomainException('Informe o endereco de entrega antes de despachar o pedido.');
+        }
+
+        return $this->updateDeliveryStatus($order, Order::DELIVERY_STATUS_OUT_FOR_DELIVERY, $user, 'Entrega iniciada manualmente.');
+    }
+
+    public function markDelivered(Order $order, ?User $user = null): Order
+    {
+        if ($order->fulfillment_type !== Order::FULFILLMENT_DELIVERY) {
+            throw new DomainException('Use a confirmacao de retirada para este pedido.');
+        }
+
+        if ($order->status === Order::STATUS_FINISHED) {
+            return $order->refresh();
+        }
+
+        if ($order->status !== Order::STATUS_OUT_FOR_DELIVERY) {
+            throw new DomainException('O pedido precisa estar em entrega para ser concluido.');
+        }
+
+        return $this->updateDeliveryStatus($order, Order::DELIVERY_STATUS_DELIVERED, $user, 'Entrega confirmada manualmente.');
+    }
+
+    public function markPickedUp(Order $order, ?User $user = null): Order
+    {
+        return DB::transaction(function () use ($order, $user): Order {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($order->fulfillment_type === Order::FULFILLMENT_DELIVERY) {
+                throw new DomainException('Pedidos de entrega devem ser concluidos como entregues.');
+            }
+
+            if ($order->status === Order::STATUS_FINISHED) {
+                return $order;
+            }
+
+            if ($order->status !== Order::STATUS_READY_FOR_PICKUP) {
+                throw new DomainException('O pedido precisa estar pronto para retirada antes da conclusao.');
+            }
+
+            $order->forceFill([
+                'pickup_status' => Order::PICKUP_STATUS_PICKED_UP,
+                'fulfillment_status' => Order::FULFILLMENT_STATUS_PICKED_UP,
+            ])->save();
+
+            return $this->orders->transitionTo($order, Order::STATUS_FINISHED, $user, 'pickup_completed');
+        });
+    }
+
     /**
      * @return array{base_fee_cents: int, surcharge_cents: int, delivery_fee_cents: int}
      */

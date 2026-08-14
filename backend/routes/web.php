@@ -111,7 +111,13 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('orders/{order}/items', [OrderOperationsController::class, 'addItem'])->name('orders.items.store');
         Route::post('orders/{order}/cancel', [OrderOperationsController::class, 'cancel'])->name('orders.cancel');
         Route::post('orders/{order}/payments/confirm', [OrderOperationsController::class, 'confirmPayment'])->name('orders.payments.confirm');
+        Route::post('orders/{order}/payments/void', [OrderOperationsController::class, 'voidPayment'])
+            ->middleware('permission:orders.manage')
+            ->name('orders.payments.void');
         Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
+        Route::post('orders/{order}/fulfillment/{action}', [OrderOperationsController::class, 'advanceFulfillment'])
+            ->whereIn('action', ['ready', 'start-delivery', 'delivered', 'picked-up'])
+            ->name('orders.fulfillment.advance');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
         Route::get('conversation-quick-replies', [ConversationConfigurationController::class, 'quickReplies'])
             ->middleware('permission:whatsapp.view')

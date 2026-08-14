@@ -39,7 +39,7 @@ export type OrderStatus =
   | 'cancelado'
   | 'manual'
 
-export type PaymentStatus = 'pendente' | 'parcial' | 'pago' | 'credito' | 'revisao_humana'
+export type PaymentStatus = 'pendente' | 'parcial' | 'pago' | 'credito' | 'revisao_humana' | 'anulado'
 export type FulfillmentType = 'retirada' | 'entrega' | 'balcao'
 export type AutomationMode = 'ia' | 'manual' | 'atencao'
 export type PrintStatus = 'aguardando' | 'imprimindo' | 'impresso' | 'reimpressao' | 'erro'
@@ -120,6 +120,7 @@ export type Order = {
   customer: CustomerSummary
   status: OrderStatus
   paymentStatus: PaymentStatus
+  paymentMethod?: PaymentMethod
   fulfillmentType: FulfillmentType
   printStatus: PrintStatus
   channel: 'WhatsApp' | 'Manual' | 'Balcao'
@@ -639,6 +640,8 @@ export type DeliveryTask = {
 
 export type FinanceEntry = {
   id: string
+  orderId: string
+  paymentId: string | null
   label: string
   orderCode: string
   status: PaymentStatus
@@ -746,6 +749,7 @@ export type AppModal =
   | 'delete-orders-bulk'
   | 'cleanup-test-orders'
   | 'confirm-payment'
+  | 'void-payment'
   | 'cancel-order'
   | 'change-status'
   | 'edit-item'

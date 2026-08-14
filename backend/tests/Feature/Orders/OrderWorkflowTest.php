@@ -17,6 +17,7 @@ use App\Models\ProductOptionGroup;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\Payments\PaymentWorkflowService;
 use App\Services\Printing\PrintWorkflowService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\CompanySeeder;
@@ -780,6 +781,19 @@ class OrderWorkflowTest extends TestCase
         $this->assertSame(Order::STATUS_PAYMENT_CONFIRMED, $order->status);
         $this->assertSame(Payment::ORDER_STATUS_PAID, $order->payment_status);
         $this->assertSame(800, $order->amount_paid_cents);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/cancel", [
+                'reason' => 'cliente_desistiu',
+                'notes' => 'Cancelado pela interface operacional.',
+            ])
+            ->assertStatus(422);
+
+        app(PaymentWorkflowService::class)->voidLatestConfirmedPayment(
+            $order,
+            $user,
+            'Pagamento confirmado por engano.',
+        );
 
         $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/cancel", [

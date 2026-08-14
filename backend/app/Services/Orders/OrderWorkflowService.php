@@ -321,19 +321,23 @@ class OrderWorkflowService
                 Order::STATUS_CANCELLED,
             ],
             Order::STATUS_PAYMENT_CONFIRMED => [
+                Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_READY_TO_PRINT,
                 Order::STATUS_CANCELLED,
             ],
             Order::STATUS_READY_TO_PRINT => [
+                Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_PRINTED,
                 Order::STATUS_IN_PREPARATION,
                 Order::STATUS_CANCELLED,
             ],
             Order::STATUS_PRINTED => [
+                Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_IN_PREPARATION,
                 Order::STATUS_CANCELLED,
             ],
             Order::STATUS_IN_PREPARATION => [
+                Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_READY_FOR_PICKUP,
                 Order::STATUS_OUT_FOR_DELIVERY,
                 Order::STATUS_FINISHED,
@@ -341,6 +345,7 @@ class OrderWorkflowService
             ],
             Order::STATUS_READY_FOR_PICKUP,
             Order::STATUS_OUT_FOR_DELIVERY => [
+                Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_FINISHED,
                 Order::STATUS_CANCELLED,
             ],
