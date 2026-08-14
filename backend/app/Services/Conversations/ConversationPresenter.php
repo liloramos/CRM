@@ -10,6 +10,7 @@ use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppMediaFile;
 use App\Services\Operational\OperationalCrmPresenter;
+use App\Services\Orders\CustomerActiveOrderResolver;
 use Illuminate\Support\Collection;
 
 class ConversationPresenter
@@ -17,6 +18,7 @@ class ConversationPresenter
     public function __construct(
         private readonly OperationalCrmPresenter $operational,
         private readonly ConversationOperationalStatusResolver $operationalStatus,
+        private readonly CustomerActiveOrderResolver $activeOrders,
     ) {}
 
     /**
@@ -55,7 +57,7 @@ class ConversationPresenter
             ->map(fn (ConversationAlert $alert): array => $this->alert($alert))
             ->values();
 
-        $activeOrder = $conversation->activeOrder ?: $conversation->orders()->latest('id')->first();
+        $activeOrder = $this->activeOrders->forConversation($conversation);
         $operationalStatus = $this->operationalStatus->resolve($conversation, $activeOrder);
 
         return [

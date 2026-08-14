@@ -10,12 +10,15 @@ use App\Models\Conversation;
 use App\Models\ConversationAlert;
 use App\Models\Customer;
 use App\Models\Message;
+use App\Models\Order;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppStickerFavorite;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\ConversationWorkflowService;
+use App\Services\Operational\OperationalCrmPresenter;
+use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppMediaFilename;
 use App\Services\WhatsApp\WhatsAppService;
 use DomainException;
@@ -141,6 +144,38 @@ class ConversationOperationsController extends Controller
         ])->save();
 
         return response()->json(['data' => $presenter->conversation($conversation->load($this->conversationRelations()))]);
+    }
+
+    public function createOrder(
+        Request $request,
+        Conversation $conversation,
+        OrderWorkflowService $orders,
+        OperationalCrmPresenter $operational,
+        ConversationPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertConversationBelongsToCompany($conversation, $company->id);
+        abort_unless($conversation->customer instanceof Customer, 422, 'A conversa precisa de um cliente vinculado.');
+
+        $order = $orders->createDraft($company, [
+            'payer_customer_id' => $conversation->customer_id,
+            'conversation_id' => $conversation->id,
+            'created_by_user_id' => $request->user()?->id,
+            'origin_channel' => Order::CHANNEL_WHATSAPP,
+            'entry_mode' => Order::CHANNEL_MANUAL,
+            'fulfillment_type' => Order::FULFILLMENT_PICKUP,
+            'is_manual' => true,
+            'human_review_required' => false,
+            'customer_confirmation_required' => true,
+            'status_notes' => 'Rascunho criado a partir da conversa.',
+        ]);
+
+        $conversation->forceFill(['active_order_id' => $order->id])->save();
+
+        return response()->json(['data' => [
+            'order' => $operational->order($order->load(['payerCustomer', 'items.options', 'payments.proofs'])),
+            'conversation' => $presenter->conversation($conversation->fresh($this->conversationRelations())),
+        ]], 201);
     }
 
     public function stickerFavorites(Request $request): JsonResponse
@@ -529,7 +564,9 @@ class ConversationOperationsController extends Controller
             'messages.pinnedBy',
             'alerts.payment',
             'alerts.paymentProof',
-            'orders' => fn ($query) => $query->latest('id')->limit(1),
+            'orders' => fn ($query) => $query
+                ->whereNotIn('status', [Order::STATUS_FINISHED, Order::STATUS_CANCELLED])
+                ->latest('id'),
         ];
     }
 

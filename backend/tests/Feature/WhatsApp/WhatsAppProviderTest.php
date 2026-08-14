@@ -627,6 +627,40 @@ class WhatsAppProviderTest extends TestCase
         ]);
     }
 
+    public function test_creating_an_order_from_a_conversation_reuses_its_customer_and_sets_the_active_order(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente da conversa',
+            'phone' => '15550100001',
+            'whatsapp_id' => '15550100001',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'whatsapp_identifier' => '15550100001',
+            'started_at' => now(),
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/orders")
+            ->assertCreated()
+            ->assertJsonPath('data.order.customer.id', (string) $customer->id)
+            ->assertJsonPath('data.conversation.activeOrder.customer.id', (string) $customer->id);
+
+        $order = Order::query()->firstOrFail();
+        $this->assertSame($conversation->id, $order->conversation_id);
+        $this->assertSame($order->id, $conversation->refresh()->active_order_id);
+    }
+
     public function test_opening_conversation_marks_only_inbound_messages_read_idempotently(): void
     {
         $company = $this->prepareWhatsApp(withRoles: true);

@@ -529,6 +529,13 @@ export async function setConversationAutomationMode(conversationId: string, payl
   return response.data
 }
 
+export async function createOrderFromConversation(conversationId: string) {
+  return requestJson<ApiEnvelope<{ order: OperationalSnapshot['orders'][number]; conversation: Conversation }>>(
+    `/api/app/conversations/${conversationId}/orders`,
+    { method: 'POST' },
+  )
+}
+
 export async function updateCustomer(customerId: string, payload: UpdateCustomerPayload): Promise<CustomerSummary> {
   const response = await requestJson<ApiEnvelope<CustomerSummary>>(`/api/app/customers/${customerId}`, {
     body: JSON.stringify(payload),

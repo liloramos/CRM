@@ -23,6 +23,7 @@ import {
   confirmOrderPayment,
   createCustomer,
   createDraftOrder,
+  createOrderFromConversation,
   deleteDraftOrder,
   deleteOrdersPermanently,
   deleteOrderPermanently,
@@ -945,6 +946,22 @@ function App() {
     }
   }
 
+  async function handleCreateConversationOrder(conversationId: string) {
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      const response = await createOrderFromConversation(conversationId)
+      setSelectedOrderId(response.data.order.id)
+      setActiveRoute('pedidos')
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Não foi possível criar o pedido da conversa.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
   async function handleConversationSendMessage(
     conversationId: string,
     body: string,
@@ -1297,7 +1314,9 @@ function App() {
             onAcknowledgeAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'acknowledge')}
             onApprovePayment={handleApproveConversationPayment}
             onChangeMode={handleConversationModeChange}
+            onCreateOrder={handleCreateConversationOrder}
             onOpenOrders={() => setActiveRoute('pedidos')}
+            onOpenOrder={(orderId) => { setSelectedOrderId(orderId); setActiveRoute('pedidos') }}
             onPreviewTicket={handleTicketPreview}
             onRejectPayment={handleRejectConversationPayment}
             onResolveAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'resolve')}

@@ -63,7 +63,9 @@ type ConversationsPageProps = {
   onAcknowledgeAlert: (conversationId: string, alertId: string) => void
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
+  onCreateOrder: (conversationId: string) => Promise<void>
   onOpenOrders: () => void
+  onOpenOrder: (orderId: string) => void
   onPreviewTicket: (orderId: string) => void
   onRejectPayment: (conversationId: string, proofId: string, reason: string) => Promise<void>
   onResolveAlert: (conversationId: string, alertId: string) => void
@@ -87,7 +89,9 @@ export function ConversationsPage({
   onAcknowledgeAlert,
   onApprovePayment,
   onChangeMode,
+  onCreateOrder,
   onOpenOrders,
+  onOpenOrder,
   onPreviewTicket,
   onRejectPayment,
   onResolveAlert,
@@ -1697,7 +1701,7 @@ export function ConversationsPage({
                       <span>Comanda: {linkedOrder.printStatus}</span>
                     </div>
                     <div className="conversation-context-actions">
-                      <Button onClick={onOpenOrders} variant="secondary">
+                      <Button onClick={() => onOpenOrder(linkedOrder.id)} variant="secondary">
                         Abrir pedido
                       </Button>
                       <Button icon="printer" onClick={() => onPreviewTicket(linkedOrder.id)} variant="secondary">
@@ -1706,7 +1710,12 @@ export function ConversationsPage({
                     </div>
                   </div>
                 ) : (
-                  <EmptyState description="Conversa sem pedido vinculado." title="Nenhum pedido ativo" />
+                  <div className="conversation-context-empty-order">
+                    <EmptyState description="Crie um pedido para este cliente sem cadastrá-lo novamente." title="Nenhum pedido ativo" />
+                    <Button disabled={isActionBusy} onClick={() => void onCreateOrder(selectedConversation.id)}>
+                      Criar pedido
+                    </Button>
+                  </div>
                 )}
               </div>
 

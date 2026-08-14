@@ -142,6 +142,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('conversations/{conversation}/pin', [ConversationOperationsController::class, 'toggleConversationPin'])
             ->middleware('permission:whatsapp.manage')
             ->name('conversations.pin');
+        Route::post('conversations/{conversation}/orders', [ConversationOperationsController::class, 'createOrder'])
+            ->middleware('permission:orders.manage')
+            ->name('conversations.orders.store');
         Route::post('conversations/sticker-favorites/toggle', [ConversationOperationsController::class, 'toggleStickerFavorite'])
             ->middleware('permission:whatsapp.manage')->name('conversations.sticker-favorites.toggle');
         Route::post('conversations/{conversation}/messages', [ConversationOperationsController::class, 'sendMessage'])
