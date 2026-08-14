@@ -34,6 +34,7 @@ import {
   approveConversationPaymentProof,
   getConversations,
   getOrderTicketPreviewUrl,
+  analyzeConversationCopilot,
   getOperationalSnapshot,
   markConversationAsRead as markConversationAsReadRequest,
   toggleConversationMessagePin,
@@ -1016,6 +1017,11 @@ function App() {
     }
   }
 
+  async function handleConversationCopilotAnalyze(conversationId: string) {
+    const response = await analyzeConversationCopilot(conversationId)
+    return response.data
+  }
+
   async function handleConversationSendMessage(
     conversationId: string,
     body: string,
@@ -1375,6 +1381,7 @@ function App() {
             isActionBusy={isActionBusy}
             isLoading={isLoadingConversations}
             linkedOrder={linkedOrder}
+            onAnalyzeCopilot={handleConversationCopilotAnalyze}
             onAcknowledgeAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'acknowledge')}
             onApprovePayment={handleApproveConversationPayment}
             onChangeMode={handleConversationModeChange}

@@ -14,6 +14,7 @@ use App\Models\Order;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppStickerFavorite;
+use App\Services\Ai\ConversationCopilotService;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\ConversationWorkflowService;
@@ -32,6 +33,15 @@ use Illuminate\Validation\Rule;
 class ConversationOperationsController extends Controller
 {
     use ResolvesOperationalCompany;
+
+    public function analyzeCopilot(Request $request, Conversation $conversation, ConversationCopilotService $copilot): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+
+        abort_unless((int) $conversation->company_id === (int) $company->id, 404);
+
+        return response()->json(['data' => $copilot->analyze($conversation)]);
+    }
 
     public function index(Request $request, ConversationPresenter $presenter): JsonResponse
     {

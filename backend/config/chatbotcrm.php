@@ -54,6 +54,15 @@ return [
         'provider' => env('AI_PROVIDER', 'fake'),
         'automation_enabled' => env('AI_AUTOMATION_ENABLED', true),
         'allow_auto_send' => env('AI_ALLOW_AUTO_SEND', false),
+        'copilot' => [
+            'provider' => env('AI_COPILOT_PROVIDER', 'fake'),
+            'message_window' => env('AI_COPILOT_MESSAGE_WINDOW', 12),
+        ],
+        'openai' => [
+            'api_key' => env('OPENAI_API_KEY'),
+            'model' => env('OPENAI_MODEL'),
+            'reasoning_effort' => env('OPENAI_REASONING_EFFORT', 'medium'),
+        ],
 
         'n8n' => [
             'webhook_path' => env('N8N_AI_WEBHOOK_PATH'),

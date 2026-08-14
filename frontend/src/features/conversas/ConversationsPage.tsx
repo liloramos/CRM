@@ -11,7 +11,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Modal } from '../../components/ui/Modal'
 import { EmptyState } from '../../components/ui/States'
 import { CustomerEditor } from '../clientes/CustomerEditor'
-import { getConversationQuickReplies, getConversationStickerFavorites, toggleConversationStickerFavorite, type ConversationMediaSendOptions, type FulfillmentAction, type UpdateCustomerPayload } from '../../services/crm.service'
+import { getConversationQuickReplies, getConversationStickerFavorites, toggleConversationStickerFavorite, type ConversationMediaSendOptions, type CopilotAnalysis, type FulfillmentAction, type UpdateCustomerPayload } from '../../services/crm.service'
 import type {
   Conversation,
   ConversationAlert,
@@ -61,6 +61,7 @@ type ConversationsPageProps = {
   linkedOrder?: Order | null
   selectedConversation?: Conversation
   onAcknowledgeAlert: (conversationId: string, alertId: string) => void
+  onAnalyzeCopilot: (conversationId: string) => Promise<CopilotAnalysis>
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
   onCreateOrder: (conversationId: string) => Promise<void>
@@ -88,6 +89,7 @@ export function ConversationsPage({
   isLoading,
   linkedOrder,
   onAcknowledgeAlert,
+  onAnalyzeCopilot,
   onApprovePayment,
   onChangeMode,
   onCreateOrder,
@@ -132,6 +134,8 @@ export function ConversationsPage({
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentRejectReason, setPaymentRejectReason] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+  const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
+  const [isAnalyzingCopilot, setIsAnalyzingCopilot] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null)
   const [customerError, setCustomerError] = useState<string | null>(null)
   const [isSavingCustomer, setIsSavingCustomer] = useState(false)
@@ -1088,6 +1092,25 @@ export function ConversationsPage({
       || normalize(reply.body).includes(needle)
   })
 
+  async function handleAnalyzeCopilot() {
+    if (!selectedConversation || isAnalyzingCopilot) return
+    setIsAnalyzingCopilot(true)
+    setLocalError(null)
+    try {
+      setCopilotAnalysis(await onAnalyzeCopilot(selectedConversation.id))
+    } catch {
+      setLocalError('Nao foi possivel analisar a conversa agora.')
+    } finally {
+      setIsAnalyzingCopilot(false)
+    }
+  }
+
+  function handleUseCopilotReply() {
+    if (!copilotAnalysis?.suggested_reply) return
+    if (composerBody.trim() && !window.confirm('Substituir o texto atual pela resposta sugerida?')) return
+    setComposerBody(copilotAnalysis.suggested_reply)
+  }
+
   return (
     <PageContainer density="wide">
       <div className="conversation-page">
@@ -1791,6 +1814,27 @@ export function ConversationsPage({
                   </Button>
                 </div>
               ) : null}
+
+              <div className="conversation-context-block">
+                <h3>Copiloto IA</h3>
+                {!copilotAnalysis ? (
+                  <>
+                    <p>Analise a conversa para identificar intencao, pedido e informacoes pendentes.</p>
+                    <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="secondary">
+                      {isAnalyzingCopilot ? 'Analisando...' : 'Analisar conversa'}
+                    </Button>
+                  </>
+                ) : (
+                  <div className="conversation-copilot-result">
+                    <strong>{copilotAnalysis.intent}</strong>
+                    {copilotAnalysis.draft_order.items.map((item, index) => <p key={`${item.menu_item_slug}-${index}`}>{item.quantity}x {item.menu_item_slug}{item.removed_components.length ? ` - Retirar: ${item.removed_components.join(', ')}` : ''}{item.item_notes ? ` - Obs: ${item.item_notes}` : ''}</p>)}
+                    {copilotAnalysis.missing_information.map((missing) => <small key={missing.code}>Falta: {missing.label}</small>)}
+                    {copilotAnalysis.warnings.map((warning) => <small key={`${warning.code}-${warning.message}`}>{warning.message}</small>)}
+                    {copilotAnalysis.suggested_reply ? <><p>{copilotAnalysis.suggested_reply}</p><Button onClick={handleUseCopilotReply} variant="secondary">Usar resposta</Button></> : null}
+                    <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="ghost">Analisar novamente</Button>
+                  </div>
+                )}
+              </div>
 
               <div className="conversation-context-block">
                 <h3>Alertas</h3>

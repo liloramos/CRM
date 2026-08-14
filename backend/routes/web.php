@@ -142,6 +142,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('conversations/{conversation}', [ConversationOperationsController::class, 'show'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.show');
+        Route::post('conversations/{conversation}/copilot/analyze', [ConversationOperationsController::class, 'analyzeCopilot'])
+            ->middleware('permission:whatsapp.view')
+            ->name('conversations.copilot.analyze');
         Route::post('conversations/{conversation}/read', [ConversationOperationsController::class, 'markRead'])
             ->middleware('permission:whatsapp.view')
             ->name('conversations.read');

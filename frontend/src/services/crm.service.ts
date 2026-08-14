@@ -529,6 +529,22 @@ export async function setConversationAutomationMode(conversationId: string, payl
   return response.data
 }
 
+export type CopilotAnalysis = {
+  schema_version: number
+  intent: string
+  confidence: number
+  summary: string
+  draft_order: { items: Array<{ menu_item_id: number | null; menu_item_slug: string; quantity: number; removed_components: string[]; item_notes: string; valid?: boolean }>; fulfillment: 'delivery' | 'pickup' | null; address: string; payment_method: string }
+  missing_information: Array<{ code: string; label: string }>
+  warnings: Array<{ code: string; message: string }>
+  suggested_reply: string
+  requires_human_review: boolean
+}
+
+export async function analyzeConversationCopilot(conversationId: string) {
+  return requestJson<ApiEnvelope<CopilotAnalysis>>(`/api/app/conversations/${conversationId}/copilot/analyze`, { method: 'POST' })
+}
+
 export async function voidOrderPayment(orderId: string, reason: string) {
   return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/payments/void`, {
     body: JSON.stringify({ reason }),
