@@ -11,8 +11,11 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\Role;
+use App\Models\User;
 use App\Services\Ai\ConversationCopilotService;
 use App\Services\Ai\Providers\FakeConversationCopilotProvider;
+use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -39,5 +42,26 @@ class ConversationCopilotTest extends TestCase
         $this->assertContains('INVALID_REMOVAL', array_column($analysis['warnings'], 'code'));
         $this->assertTrue($analysis['requires_human_review']);
         $this->assertSame($before, ['orders' => Order::count(), 'messages' => Message::count(), 'payments' => Payment::count()]);
+    }
+
+    public function test_company_cannot_analyze_another_company_conversation(): void
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $company = Company::query()->create(['name' => 'Empresa A', 'slug' => 'empresa-a']);
+        $other = Company::query()->create(['name' => 'Empresa B', 'slug' => 'empresa-b']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+        $customer = Customer::query()->create(['company_id' => $other->id, 'name' => 'Outra empresa']);
+        $conversation = Conversation::query()->create([
+            'company_id' => $other->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'started_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/copilot/analyze")
+            ->assertNotFound();
     }
 }

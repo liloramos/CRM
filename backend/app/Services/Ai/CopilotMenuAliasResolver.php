@@ -27,6 +27,12 @@ class CopilotMenuAliasResolver
             'coca600' => 'coca-cola-600ml',
             'cocacola600' => 'coca-cola-600ml',
             'cocade600' => 'coca-cola-600ml',
+            'guaranalata' => 'guarana-lata',
+            'cocacolazerolata' => 'coca-cola-zero-lata',
+            'spritezero' => 'sprite-zero',
+            'mineiro600' => 'mineiro-600ml',
+            'mineiro600ml' => 'mineiro-600ml',
+            'cocacola2l' => 'coca-cola-2l',
         ];
         $slug = $aliases[$needle] ?? $identifier;
 
