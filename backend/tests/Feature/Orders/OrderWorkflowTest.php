@@ -377,6 +377,66 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_house_marmitas_allow_configured_salad_removals_without_changing_the_price(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $n5 = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $n8 = Product::query()->where('company_id', $company->id)->where('slug', 'n8-casa')->firstOrFail();
+        $mandioca = $this->menuComponentId($company, 'mandioca');
+
+        $scenarios = [
+            [$n5, ['removed_group_codes' => ['salada_casa']], ['carne' => ['porco']], 8],
+            [$n5, ['removed_component_ids' => [$mandioca]], ['salada_casa' => ['beterraba'], 'carne' => ['frango-ao-molho']], 8],
+            [$n5, ['removed_group_codes' => ['salada_casa'], 'removed_component_ids' => [$mandioca]], ['carne' => ['porco']], 8],
+            [$n8, ['removed_group_codes' => ['salada']], ['carne' => ['frango-ao-molho']], 13],
+        ];
+
+        foreach ($scenarios as [$product, $composition, $choices, $price]) {
+            $order = $orders->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+            $item = $this->actingAs($user)
+                ->postJson("/api/app/orders/{$order->id}/items", [
+                    'product_id' => $product->id,
+                    'quantity' => 1,
+                    ...$composition,
+                    'structured_options' => $this->componentChoiceRows($product, $choices),
+                ])
+                ->assertOk()
+                ->json('data.items.0');
+
+            $this->assertSame($price, $item['unitPrice']);
+            if (array_key_exists('removed_group_codes', $composition)) {
+                $this->assertContains('Sem Salada', $item['removals']);
+            }
+        }
+    }
+
+    public function test_structured_order_item_rejects_removal_of_a_group_that_is_not_configured_as_removable(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'removed_group_codes' => ['carne'],
+                'structured_options' => $this->componentChoiceRows($product, [
+                    'salada_casa' => ['beterraba'],
+                    'carne' => ['porco'],
+                ]),
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['removed_group_codes']);
+    }
+
     public function test_structured_order_item_rejects_removal_outside_default_composition(): void
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);

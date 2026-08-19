@@ -82,6 +82,7 @@ type OrderItemOptionPayload =
       }>
       included_component_ids?: number[]
       removed_component_ids?: number[]
+      removed_group_codes?: string[]
       meat_mode?: 'traditional' | 'beef_only'
       traditional_meat_component_ids?: number[]
       additions?: Array<{
@@ -1661,6 +1662,9 @@ function buildOrderItemOptions(
     .map((token) => Number(token.replace('remove-component:', '')))
     .filter((value) => Number.isFinite(value))
   const removedComponentSet = new Set(removedComponentIds)
+  const removedGroupCodes = selectedOptionIds
+    .filter(isRemovedGroupToken)
+    .map((token) => token.replace('remove-group:', ''))
   const includedComponentIds = groups
     .filter((group) => group.selection_mode === 'fixed')
     .flatMap((group) => group.component_options)
@@ -1683,6 +1687,10 @@ function buildOrderItemOptions(
     }
 
     if (group.selection_mode === 'fixed') {
+      continue
+    }
+
+    if (removedGroupCodes.includes(group.code)) {
       continue
     }
 
@@ -1726,6 +1734,7 @@ function buildOrderItemOptions(
       structured_options: structuredOptions,
       included_component_ids: includedComponentIds,
       removed_component_ids: removedComponentIds,
+      removed_group_codes: removedGroupCodes,
     }
   }
 
@@ -1738,6 +1747,7 @@ function buildOrderItemOptions(
       structured_options: structuredOptions,
       included_component_ids: includedComponentIds,
       removed_component_ids: removedComponentIds,
+      removed_group_codes: removedGroupCodes,
       meat_mode: 'beef_only',
       traditional_meat_component_ids: [],
       additions: [],
@@ -1759,6 +1769,7 @@ function buildOrderItemOptions(
     structured_options: structuredOptions,
     included_component_ids: includedComponentIds,
     removed_component_ids: removedComponentIds,
+    removed_group_codes: removedGroupCodes,
     meat_mode: 'traditional',
     traditional_meat_component_ids: dailyMeatIds,
     additions: extraBeefSelected ? [{ code: 'extra_beef', quantity: 1 }] : [],
@@ -1799,6 +1810,10 @@ function isDailyMeatToken(token: string): boolean {
 
 function isRemovedComponentToken(token: string): boolean {
   return token.startsWith('remove-component:')
+}
+
+function isRemovedGroupToken(token: string): boolean {
+  return token.startsWith('remove-group:')
 }
 
 function parseCurrencyInputToCents(value: string): number {

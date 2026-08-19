@@ -218,8 +218,8 @@ class PrintWorkflowTest extends TestCase
             'product_id' => $product->id,
             'quantity' => 1,
             'removed_component_ids' => [$feijao],
+            'removed_group_codes' => ['salada_casa'],
             'structured_options' => $this->componentChoiceRows($product, [
-                'salada_casa' => ['beterraba'],
                 'carne' => ['porco'],
             ]),
         ])
@@ -227,7 +227,8 @@ class PrintWorkflowTest extends TestCase
 
         $html = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $user)->html_content;
 
-        $this->assertStringContainsString('Sem ', $html);
+        $this->assertStringContainsString('RETIRAR:', $html);
+        $this->assertStringContainsString('Sem Salada', $html);
     }
 
     public function test_ticket_preview_route_keeps_company_isolation(): void

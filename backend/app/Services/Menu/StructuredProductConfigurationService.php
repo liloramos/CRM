@@ -64,6 +64,7 @@ class StructuredProductConfigurationService
             'menu_rule_code' => $product->menu_rule_code,
             'uses_weekly_menu' => $this->usesWeeklyMenu($product),
             'fixed_components_removable' => (bool) data_get($product->composition_rules, 'fixed_components_removable', true),
+            'removable_group_codes' => $this->removableGroupCodes($product),
             'allows_item_notes' => (bool) $product->allows_item_notes,
             'notes_hint' => $product->notes_hint,
             'configuration_pending' => $this->hasPendingConfiguration($product),
@@ -100,6 +101,23 @@ class StructuredProductConfigurationService
             'comboItems.includedProduct.category',
             'comboItems.includedProduct.serviceDays',
         ];
+    }
+
+    /** @return list<string> */
+    private function removableGroupCodes(Product $product): array
+    {
+        $codes = data_get($product->composition_rules, 'removable_group_codes', []);
+
+        if (! is_array($codes)) {
+            return [];
+        }
+
+        return collect($codes)
+            ->filter(fn (mixed $code): bool => is_string($code) && trim($code) !== '')
+            ->map(fn (string $code): string => trim($code))
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**

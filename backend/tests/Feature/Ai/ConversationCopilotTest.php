@@ -39,7 +39,7 @@ class ConversationCopilotTest extends TestCase
         $this->assertSame(1, $analysis['schema_version']);
         $this->assertSame($product->id, $analysis['draft_order']['items'][0]['menu_item_id']);
         $this->assertSame([], $analysis['draft_order']['items'][0]['removed_components']);
-        $this->assertContains('INVALID_REMOVAL', array_column($analysis['warnings'], 'code'));
+        $this->assertContains('UNGROUNDED_REMOVAL', array_column($analysis['warnings'], 'code'));
         $this->assertTrue($analysis['requires_human_review']);
         $this->assertSame($before, ['orders' => Order::count(), 'messages' => Message::count(), 'payments' => Payment::count()]);
     }

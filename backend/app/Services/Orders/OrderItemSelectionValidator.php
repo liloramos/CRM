@@ -2,6 +2,7 @@
 
 namespace App\Services\Orders;
 
+use App\Enums\ProductSelectionActor;
 use App\Enums\ProductSelectionMode;
 use App\Models\Company;
 use App\Models\Product;
@@ -68,7 +69,7 @@ class OrderItemSelectionValidator
             ->keyBy(fn (array $row): int => (int) $row['product_link_id']);
 
         $this->assertRowsBelongToProduct($product, $componentRows, $productRows);
-        $this->assertDefaultCompositionBelongsToProduct($product, $compositionSelection);
+        $this->assertCompositionBelongsToProduct($product, $compositionSelection, $componentRows, $productRows);
 
         if ($this->hasTraditionalBeefRules($product)) {
             return $this->validateTraditionalMarmita(
@@ -238,8 +239,12 @@ class OrderItemSelectionValidator
     /**
      * @param  array<string, mixed>  $compositionSelection
      */
-    private function assertDefaultCompositionBelongsToProduct(Product $product, array $compositionSelection): void
-    {
+    private function assertCompositionBelongsToProduct(
+        Product $product,
+        array $compositionSelection,
+        Collection $componentRows,
+        Collection $productRows,
+    ): void {
         $defaultComponentIds = $product->optionGroups
             ->filter(fn (ProductOptionGroup $group): bool => $group->selection_mode === ProductSelectionMode::Fixed)
             ->flatMap(fn (ProductOptionGroup $group) => $group->componentOptions)
@@ -251,9 +256,17 @@ class OrderItemSelectionValidator
 
         $includedComponentIds = $this->integerList($compositionSelection['included_component_ids'] ?? []);
         $removedComponentIds = $this->integerList($compositionSelection['removed_component_ids'] ?? []);
+        $removedGroupCodes = $this->stringList($compositionSelection['removed_group_codes'] ?? []);
+        $allowedRemovedGroupCodes = $this->removableGroupCodes($product);
+        $productGroupCodes = $product->optionGroups
+            ->pluck('code')
+            ->filter(fn (mixed $code): bool => is_string($code) && $code !== '')
+            ->values()
+            ->all();
         $invalidIncluded = array_values(array_diff($includedComponentIds, $defaultComponentIds));
         $invalidRemoved = array_values(array_diff($removedComponentIds, $defaultComponentIds));
         $conflicting = array_values(array_intersect($includedComponentIds, $removedComponentIds));
+        $invalidRemovedGroups = array_values(array_diff($removedGroupCodes, $productGroupCodes, $allowedRemovedGroupCodes));
 
         if ($removedComponentIds !== [] && data_get($product->composition_rules, 'fixed_components_removable', true) === false) {
             throw ValidationException::withMessages([
@@ -277,6 +290,30 @@ class OrderItemSelectionValidator
             throw ValidationException::withMessages([
                 'removed_component_ids' => ['O mesmo ingrediente nao pode ser mantido e retirado ao mesmo tempo.'],
             ]);
+        }
+
+        if ($invalidRemovedGroups !== []) {
+            throw ValidationException::withMessages([
+                'removed_group_codes' => ['Somente grupos configurados como removiveis podem ser retirados.'],
+            ]);
+        }
+
+        foreach ($removedGroupCodes as $groupCode) {
+            $group = $product->optionGroups->firstWhere('code', $groupCode);
+            if (! $group instanceof ProductOptionGroup) {
+                continue;
+            }
+
+            $hasComponentChoice = $group->componentOptions
+                ->contains(fn (ProductGroupComponent $link): bool => $componentRows->has((int) $link->id));
+            $hasProductChoice = $group->productOptions
+                ->contains(fn (ProductGroupProduct $link): bool => $productRows->has((int) $link->id));
+
+            if ($hasComponentChoice || $hasProductChoice) {
+                throw ValidationException::withMessages([
+                    'removed_group_codes' => ['Um grupo retirado nao pode receber uma escolha ao mesmo tempo.'],
+                ]);
+            }
         }
     }
 
@@ -494,6 +531,13 @@ class OrderItemSelectionValidator
         array &$selectedComponents,
         array &$removedIngredients,
     ): array {
+        $removedGroupCodes = $this->stringList($compositionSelection['removed_group_codes'] ?? []);
+        if (in_array($group->code, $removedGroupCodes, true)) {
+            $removedIngredients[] = 'Sem '.$this->removableGroupLabel($group);
+
+            return [];
+        }
+
         if ($group->selection_mode === ProductSelectionMode::Fixed) {
             $removedComponentIds = $this->integerList($compositionSelection['removed_component_ids'] ?? []);
 
@@ -536,6 +580,9 @@ class OrderItemSelectionValidator
             ->values();
 
         $choiceCount = $selectedComponentLinks->count() + $selectedProductLinks->count();
+        if ($choiceCount === 0 && $group->selection_actor === ProductSelectionActor::House) {
+            return [];
+        }
         $minChoices = (int) ($group->min_choices ?? ($group->is_required ? 1 : 0));
         $maxChoices = $group->max_choices !== null ? (int) $group->max_choices : null;
 
@@ -695,6 +742,26 @@ class OrderItemSelectionValidator
         return (string) ($link->component?->display_name ?: $link->component?->name ?: 'Ingrediente');
     }
 
+    /** @return list<string> */
+    private function removableGroupCodes(Product $product): array
+    {
+        $codes = data_get($product->composition_rules, 'removable_group_codes', []);
+
+        if (! is_array($codes)) {
+            return [];
+        }
+
+        return $this->stringList($codes);
+    }
+
+    private function removableGroupLabel(ProductOptionGroup $group): string
+    {
+        return match ($group->code) {
+            'salada', 'salada_casa' => 'Salada',
+            default => $group->label,
+        };
+    }
+
     /**
      * @return array<int, int>
      */
@@ -707,6 +774,21 @@ class OrderItemSelectionValidator
         return collect($value)
             ->filter(fn (mixed $item): bool => is_numeric($item))
             ->map(fn (mixed $item): int => (int) $item)
+            ->values()
+            ->all();
+    }
+
+    /** @return list<string> */
+    private function stringList(mixed $value): array
+    {
+        if (! is_array($value)) {
+            return [];
+        }
+
+        return collect($value)
+            ->filter(fn (mixed $item): bool => is_string($item) && trim($item) !== '')
+            ->map(fn (string $item): string => trim($item))
+            ->unique()
             ->values()
             ->all();
     }

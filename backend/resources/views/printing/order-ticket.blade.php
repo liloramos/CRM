@@ -239,6 +239,7 @@
                     @endif
                     @if (! empty($item['removed_ingredients']))
                         <ul class="details details--removals">
+                            <li><strong>RETIRAR:</strong></li>
                             @foreach ($item['removed_ingredients'] as $detail)
                                 <li><strong>{{ $detail }}</strong></li>
                             @endforeach

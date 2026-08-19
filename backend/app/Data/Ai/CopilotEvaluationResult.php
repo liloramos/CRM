@@ -4,7 +4,7 @@ namespace App\Data\Ai;
 
 final class CopilotEvaluationResult
 {
-    public const DATASET_VERSION = 1;
+    public const DATASET_VERSION = 2;
 
     /** @var array<string, array{correct:int,total:int}> */
     private array $metrics = [];
@@ -33,6 +33,13 @@ final class CopilotEvaluationResult
         return collect(array_keys($this->metrics))
             ->mapWithKeys(fn (string $metric): array => [$metric => $this->score($metric)])
             ->all();
+    }
+
+    public function safetyPass(): bool
+    {
+        $metric = $this->metrics['safety'] ?? null;
+
+        return $metric !== null && $metric['total'] > 0 && $metric['correct'] === $metric['total'];
     }
 
     /** @param array<string, float> $thresholds */

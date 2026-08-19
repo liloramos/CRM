@@ -3,23 +3,46 @@
 namespace App\Services\Ai;
 
 use App\Data\Ai\CopilotAnalysis;
+use App\Enums\ProductSelectionActor;
+use App\Enums\ProductSelectionMode;
 use App\Models\Company;
+use App\Models\Product;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Str;
 
 class CopilotOrderDraftValidator
 {
-    public function __construct(private readonly CopilotMenuAliasResolver $aliases, private readonly CopilotOrderItemSelectionAdapter $selections) {}
+    public function __construct(
+        private readonly CopilotMenuAliasResolver $aliases,
+        private readonly CopilotOrderItemSelectionAdapter $selections,
+        private readonly CopilotCanonicalIdentity $identity,
+        private readonly CopilotQuantityGroundingGuard $quantities,
+        private readonly CopilotItemNoteGroundingGuard $notes,
+        private readonly CopilotPreparationNoteRecovery $preparationNotes,
+        private readonly CopilotProductGroundingGuard $products,
+        private readonly CopilotIntentGroundingGuard $intents,
+    ) {}
 
-    public function validate(Company $company, CopilotAnalysis $analysis): CopilotAnalysis
+    /** @param array<string,mixed> $context */
+    public function validate(Company $company, CopilotAnalysis $analysis, ?CarbonInterface $date = null, array $context = []): CopilotAnalysis
     {
+        $date ??= CarbonImmutable::today();
         $warnings = $analysis->warnings;
-        $items = collect($analysis->draftOrder['items'] ?? [])->map(function (array $item, int $index) use ($company, &$warnings): array {
+        $invalidQuantityDiscarded = false;
+        $ungroundedProductDiscarded = false;
+        $proposedItems = $analysis->draftOrder['items'] ?? [];
+        if ($proposedItems === []) {
+            $recovered = $this->products->recoverN8Traditional($company, data_get($context, 'messages', []));
+            $proposedItems = $recovered ? [$recovered] : [];
+        }
+        $items = collect($proposedItems)->map(function (array $item, int $index) use ($company, $date, $context, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded): ?array {
             $quantity = filter_var($item['quantity'] ?? null, FILTER_VALIDATE_INT);
             if ($quantity === false || $quantity < 1 || $quantity > 50) {
                 $warnings[] = ['code' => 'INVALID_QUANTITY', 'message' => 'A quantidade sugerida nao e valida.', 'item_index' => $index];
+                $invalidQuantityDiscarded = true;
 
-                return [...$item, 'valid' => false];
+                return null;
             }
             $product = $this->aliases->resolve($company, $item['menu_item_id'] ?? null, (string) ($item['menu_item_slug'] ?? ''));
             if (! $product || ! $product->is_active || ! $product->is_available_by_default) {
@@ -27,24 +50,196 @@ class CopilotOrderDraftValidator
 
                 return [...$item, 'valid' => false];
             }
-            $result = $this->selections->validate($company, $product, CarbonImmutable::today(), [
+            if (! $this->products->isGrounded($product, data_get($context, 'messages', []))) {
+                $warnings[] = ['code' => 'UNGROUNDED_PRODUCT', 'message' => 'O produto sugerido nao possui evidencia suficiente na mensagem do cliente.', 'item_index' => $index];
+                $ungroundedProductDiscarded = true;
+
+                return null;
+            }
+            $item = $this->products->enrichN8Traditional($product, $item, data_get($context, 'messages', []));
+            $result = $this->selections->validate($company, $product, $date, [
                 ...$item,
                 'menu_item_id' => $product->id,
                 'menu_item_slug' => $product->slug,
                 'quantity' => $quantity,
                 'item_notes' => Str::limit((string) ($item['item_notes'] ?? ''), 500, ''),
-            ]);
+            ], data_get($context, 'messages', []));
             foreach ($result['warnings'] as $warning) {
                 $warnings[] = [...$warning, 'item_index' => $index];
             }
 
             return $result['item'];
-        })->all();
-        $missing = $analysis->missingInformation;
+        })->filter()->values()->all();
+        $grounded = $this->quantities->ground($company, $items, data_get($context, 'messages', []));
+        $items = $grounded['items'];
+        $warnings = [...$warnings, ...$grounded['warnings']];
+        $items = $this->preparationNotes->recover($items, data_get($context, 'messages', []));
+        $groundedNotes = $this->notes->ground($items, data_get($context, 'messages', []));
+        $items = $groundedNotes['items'];
+        $warnings = [...$warnings, ...$groundedNotes['warnings']];
+        $missing = $this->cleanupDependentMissing($company, [
+            ...$this->recognizedProviderMissing($analysis->missingInformation),
+            ...($ungroundedProductDiscarded && ! $this->products->hasGroundedProductReference($company, data_get($context, 'messages', [])) ? [['code' => 'PRODUCT', 'label' => 'Produto']] : []),
+            ...($invalidQuantityDiscarded ? [['code' => 'VALID_QUANTITY', 'label' => 'Quantidade valida']] : []),
+            ...$grounded['missing'],
+            ...(collect($warnings)->contains(fn (array $warning): bool => ($warning['code'] ?? null) === 'INVALID_EXTRA_BEEF') ? [['code' => 'EXTRA_BEEF_QUANTITY', 'label' => 'Quantidade de bife adicional']] : []),
+            ...collect($items)->flatMap(fn (array $item, int $index): array => $this->missingCustomerSelectionsForResolvedItem($company, $item, $index))->all(),
+        ], $items);
         if (($analysis->draftOrder['fulfillment'] ?? null) === 'delivery' && blank($analysis->draftOrder['address'] ?? null)) {
             $missing[] = ['code' => 'ADDRESS', 'label' => 'Endereco'];
         }
+        $missing = $this->intents->refineMissing($missing, $items, $context);
 
-        return new CopilotAnalysis($analysis->intent, $analysis->confidence, $analysis->summary, [...$analysis->draftOrder, 'items' => $items], collect($missing)->unique('code')->values()->all(), $warnings, $analysis->suggestedReply, true, [...$analysis->metadata, 'validation_warning_count' => count($warnings)]);
+        return new CopilotAnalysis(
+            $this->intents->finalize($analysis->intent, $items, $missing, $this->dedupeWarnings($warnings), $context),
+            $analysis->confidence,
+            $analysis->summary,
+            [...$analysis->draftOrder, 'items' => $items],
+            $this->identity->missing($missing, $this->hasResolvedN8Variant($items)),
+            $this->dedupeWarnings($warnings),
+            $analysis->suggestedReply,
+            true,
+            [...$analysis->metadata, 'validation_warning_count' => count($warnings)],
+        );
+    }
+
+    /** @param array<string,mixed> $item @return list<array{code:string,label:string}> */
+    private function missingCustomerSelections(Product $product, array $item): array
+    {
+        $product->loadMissing('optionGroups');
+        $selections = is_array($item['selections'] ?? null) ? $item['selections'] : [];
+        $removed = collect($item['removed_components'] ?? [])
+            ->filter(fn (mixed $value): bool => is_string($value))
+            ->map(fn (string $value): string => $this->key($value))
+            ->all();
+
+        $missing = $product->optionGroups
+            ->filter(fn ($group): bool => $group->is_required && $group->selection_actor === ProductSelectionActor::Customer)
+            ->reject(function ($group) use ($removed): bool {
+                $groupKey = $this->key((string) $group->code);
+                $labelKey = $this->key((string) $group->label);
+
+                return in_array($groupKey, $removed, true)
+                    || in_array($labelKey, $removed, true)
+                    || in_array('sem'.$groupKey, $removed, true)
+                    || in_array('sem'.$labelKey, $removed, true)
+                    || ($groupKey === 'salada' && in_array('salada', $removed, true));
+            })
+            ->filter(function ($group) use ($selections): bool {
+                $value = $selections[$group->code] ?? null;
+                if ($group->code === 'carne') {
+                    $single = $selections['meat'] ?? null;
+                    $multiple = $selections['meats'] ?? [];
+                    $value = $group->selection_mode === ProductSelectionMode::Multiple
+                        ? $multiple
+                        : $single;
+                }
+
+                return $value === null || $value === '' || $value === [];
+            })
+            ->map(fn ($group): array => ['code' => strtoupper((string) $group->code), 'label' => (string) $group->label])
+            ->values()
+            ->all();
+
+        if (in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)
+            && ($selections['meat_mode'] ?? 'traditional') !== 'beef_only'
+            && count(array_filter($selections['meats'] ?? [], fn (mixed $meat): bool => is_string($meat) && $meat !== '')) < 2) {
+            $missing[] = ['code' => 'CARNE', 'label' => 'Carnes'];
+        }
+
+        return $missing;
+    }
+
+    /** @param array<string,mixed> $item @return list<array{code:string,label:string}> */
+    private function missingCustomerSelectionsForResolvedItem(Company $company, array $item, int $index): array
+    {
+        if ((int) ($item['quantity'] ?? 0) < 1) {
+            return [];
+        }
+
+        $product = $this->aliases->resolve($company, $item['menu_item_id'] ?? null, (string) ($item['menu_item_slug'] ?? ''));
+
+        return $product ? $this->missingCustomerSelections($product, $item) : [];
+    }
+
+    private function key(string $value): string
+    {
+        return Str::of($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', '')->toString();
+    }
+
+    /** @param list<array{code:string,label:string}> $missing @return list<array{code:string,label:string}> */
+    private function recognizedProviderMissing(array $missing): array
+    {
+        $allowed = ['PRODUCT', 'MENU_ITEM', 'PREVIOUS_ORDER_REFERENCE', 'VALID_QUANTITY', 'CARNE', 'SALADA', 'ADDRESS', 'N8_VARIANT', 'EXTRA_BEEF_QUANTITY'];
+
+        return array_values(array_filter($missing, fn (array $item): bool => in_array(strtoupper((string) ($item['code'] ?? '')), $allowed, true)));
+    }
+
+    /** @param list<array{code:string,label:string}> $missing @param list<array<string,mixed>> $items @return list<array{code:string,label:string}> */
+    private function cleanupDependentMissing(Company $company, array $missing, array $items): array
+    {
+        $dependent = ['CARNE', 'SALADA', 'EXTRA_BEEF_QUANTITY', 'N8_VARIANT', 'SABOR', 'ACOMPANHAMENTO'];
+        if ($items === []) {
+            $hasUnresolvedProduct = collect($missing)->contains(fn (array $item): bool => in_array(strtoupper((string) ($item['code'] ?? '')), ['PRODUCT', 'MENU_ITEM'], true));
+
+            return array_values(array_filter($missing, function (array $item) use ($dependent, $hasUnresolvedProduct): bool {
+                $code = strtoupper((string) ($item['code'] ?? ''));
+
+                return ! in_array($code, $dependent, true)
+                    || ($code === 'CARNE' && $hasUnresolvedProduct);
+            }));
+        }
+
+        $products = Product::query()
+            ->where('company_id', $company->id)
+            ->whereIn('id', collect($items)->pluck('menu_item_id')->filter()->unique()->all())
+            ->with('optionGroups')
+            ->get()
+            ->keyBy('id');
+
+        return array_values(array_filter($missing, function (array $item) use ($dependent, $items, $products): bool {
+            $code = strtoupper((string) ($item['code'] ?? ''));
+            if (! in_array($code, $dependent, true)) {
+                return true;
+            }
+
+            return collect($items)->contains(function (array $safeItem) use ($products, $code): bool {
+                $product = $products->get($safeItem['menu_item_id'] ?? null);
+                if (! $product) {
+                    return false;
+                }
+
+                return match ($code) {
+                    'CARNE' => $product->optionGroups->contains(fn ($group): bool => strtoupper((string) $group->code) === 'CARNE')
+                        || in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true),
+                    'SALADA' => $product->optionGroups->contains(fn ($group): bool => strtoupper((string) $group->code) === 'SALADA'),
+                    'N8_VARIANT' => in_array($product->menu_rule_code, ['n8_casa', 'n8_tradicional'], true),
+                    default => true,
+                };
+            });
+        }));
+    }
+
+    /** @param list<array<string,mixed>> $warnings @return list<array<string,mixed>> */
+    private function dedupeWarnings(array $warnings): array
+    {
+        return collect($warnings)
+            ->unique(function (array $warning): string {
+                $code = strtoupper((string) ($warning['code'] ?? ''));
+
+                return $code === 'INVALID_QUANTITY'
+                    ? $code
+                    : $code.'|'.Str::of((string) ($warning['message'] ?? ''))->ascii()->lower()->squish()->toString();
+            })
+            ->values()
+            ->all();
+    }
+
+    /** @param list<array<string,mixed>> $items */
+    private function hasResolvedN8Variant(array $items): bool
+    {
+        return collect($items)
+            ->pluck('menu_item_slug')
+            ->contains(fn (mixed $slug): bool => in_array($slug, ['n8-casa', 'n8-tradicional'], true));
     }
 }

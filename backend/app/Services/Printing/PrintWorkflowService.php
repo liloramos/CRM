@@ -514,8 +514,11 @@ class PrintWorkflowService
                 $lines[] = $line;
             }
 
-            foreach ($item['removed_ingredients'] as $detail) {
-                $lines[] = '- '.$detail;
+            if ($item['removed_ingredients'] !== []) {
+                $lines[] = 'RETIRAR:';
+                foreach ($item['removed_ingredients'] as $detail) {
+                    $lines[] = '- '.$detail;
+                }
             }
 
             if (empty($item['options'])) {

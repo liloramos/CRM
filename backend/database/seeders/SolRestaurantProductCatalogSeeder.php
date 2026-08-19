@@ -70,6 +70,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'composition_rules' => [
                     'capacity_ml' => 500,
                     'fixed_components_removable' => true,
+                    'removable_group_codes' => ['salada_casa'],
                     'allows_substitutions' => false,
                 ],
                 'display_order' => 10,
@@ -85,6 +86,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'composition_rules' => [
                     'capacity_ml' => 750,
                     'fixed_components_removable' => true,
+                    'removable_group_codes' => ['salada'],
                     'allows_substitutions' => false,
                 ],
                 'display_order' => 20,

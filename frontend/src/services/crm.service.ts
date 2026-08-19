@@ -97,6 +97,7 @@ type AddItemPayload = {
   }>
   included_component_ids?: number[]
   removed_component_ids?: number[]
+  removed_group_codes?: string[]
   meat_mode?: 'traditional' | 'beef_only'
   traditional_meat_component_ids?: number[]
   additions?: Array<{
@@ -1075,6 +1076,7 @@ function mapStructuredProduct(
     comboItems: product.combo_items,
     usesWeeklyMenu: product.uses_weekly_menu,
     fixedComponentsRemovable: product.fixed_components_removable,
+    removableGroupCodes: product.removable_group_codes,
     configurationPending: product.configuration_pending,
     serviceDays: product.service_days,
   }

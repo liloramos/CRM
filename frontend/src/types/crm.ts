@@ -305,6 +305,7 @@ export type Product = {
   comboItems?: StructuredComboItem[]
   usesWeeklyMenu?: boolean
   fixedComponentsRemovable?: boolean
+  removableGroupCodes?: string[]
   configurationPending?: boolean
   serviceDays?: ProductServiceDayKey[]
 }
@@ -484,6 +485,7 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
   menu_rule_code: string | null
   uses_weekly_menu: boolean
   fixed_components_removable: boolean
+  removable_group_codes: string[]
   allows_item_notes: boolean
   notes_hint: string | null
   configuration_pending: boolean

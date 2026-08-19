@@ -316,6 +316,7 @@ export function OperationalModalContent({
         {selectedProduct && visibleStructuredGroups.length > 0 ? (
           <StructuredOptionPicker
             fixedComponentsRemovable={selectedProduct.fixedComponentsRemovable ?? true}
+            removableGroupCodes={selectedProduct.removableGroupCodes ?? []}
             groups={visibleStructuredGroups}
             onSelectedOptionsChange={onSelectedOptionsChange}
             selectedOptionIds={selectedOptionIds}
@@ -1052,11 +1053,13 @@ function BeefChoicePicker({
 
 function StructuredOptionPicker({
   fixedComponentsRemovable,
+  removableGroupCodes,
   groups,
   onSelectedOptionsChange,
   selectedOptionIds,
 }: {
   fixedComponentsRemovable: boolean
+  removableGroupCodes: string[]
   groups: StructuredProductOptionGroup[]
   onSelectedOptionsChange: (optionIds: string[]) => void
   selectedOptionIds: string[]
@@ -1072,6 +1075,9 @@ function StructuredOptionPicker({
         const productTokens = group.product_options.map((option) => productOptionToken(option.id))
         const groupTokens = [...componentTokens, ...productTokens]
         const isSingle = group.max_choices === 1 || ['single', 'included_choice', 'variation'].includes(group.selection_mode)
+        const removableAsPreference = removableGroupCodes.includes(group.code)
+        const removeGroupToken = removedGroupToken(group.code)
+        const groupRemoved = selectedOptionIds.includes(removeGroupToken)
 
         if (group.selection_mode === 'fixed') {
           return (
@@ -1119,16 +1125,36 @@ function StructuredOptionPicker({
         }
 
         return (
-          <div className="option-picker__group" key={group.id}>
-            <div className="option-picker__heading">
-              <span>{group.label}</span>
-              <small>{groupHelperText(group)}</small>
-            </div>
-            <div className="option-picker__grid">
+            <div className="option-picker__group" key={group.id}>
+              <div className="option-picker__heading">
+                <span>{group.label}</span>
+                <small>{groupHelperText(group)}</small>
+              </div>
+              {removableAsPreference ? (
+                <label className={optionChoiceClassName(groupRemoved, false)}>
+                  <input
+                    checked={groupRemoved}
+                    onChange={() => {
+                      onSelectedOptionsChange(
+                        groupRemoved
+                          ? selectedOptionIds.filter((optionId) => optionId !== removeGroupToken)
+                          : [...selectedOptionIds.filter((optionId) => !groupTokens.includes(optionId)), removeGroupToken],
+                      )
+                    }}
+                    type="checkbox"
+                  />
+                  <span className="option-choice__box" aria-hidden="true" />
+                  <span className="option-choice__content">
+                    <strong>Retirar {removableGroupLabel(group.code)}</strong>
+                    <small>IncluÃ­da por padrÃ£o, sem alterar o preÃ§o.</small>
+                  </span>
+                </label>
+              ) : null}
+              <div className="option-picker__grid">
               {group.component_options.map((option) => {
                 const token = componentOptionToken(option.id)
                 const checked = selectedOptionIds.includes(token)
-                const disabled = !option.link_active || option.requires_confirmation || !option.available
+                const disabled = groupRemoved || !option.link_active || option.requires_confirmation || !option.available
 
                 return (
                   <label className={optionChoiceClassName(checked, disabled)} key={token}>
@@ -1150,7 +1176,7 @@ function StructuredOptionPicker({
               {group.product_options.map((option) => {
                 const token = productOptionToken(option.id)
                 const checked = selectedOptionIds.includes(token)
-                const disabled = !option.link_active || option.requires_confirmation || !option.available
+                const disabled = groupRemoved || !option.link_active || option.requires_confirmation || !option.available
 
                 return (
                   <label className={optionChoiceClassName(checked, disabled)} key={token}>
@@ -1495,6 +1521,14 @@ function dailyMeatToken(id: number): string {
 
 function removedComponentToken(id: number): string {
   return `remove-component:${id}`
+}
+
+function removedGroupToken(code: string): string {
+  return `remove-group:${code}`
+}
+
+function removableGroupLabel(code: string): string {
+  return code === 'salada' || code === 'salada_casa' ? 'salada' : 'grupo'
 }
 
 function isDailyMeatToken(token: string): boolean {
