@@ -71,6 +71,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                     'capacity_ml' => 500,
                     'fixed_components_removable' => true,
                     'removable_group_codes' => ['salada_casa'],
+                    'allow_no_meat_group_codes' => ['carne'],
                     'allows_substitutions' => false,
                 ],
                 'display_order' => 10,
@@ -87,6 +88,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                     'capacity_ml' => 750,
                     'fixed_components_removable' => true,
                     'removable_group_codes' => ['salada'],
+                    'allow_no_meat_group_codes' => ['carne'],
                     'allows_substitutions' => false,
                 ],
                 'display_order' => 20,
@@ -102,6 +104,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'composition_rules' => [
                     'capacity_ml' => 750,
                     'uses_daily_menu' => true,
+                    'traditional_meat_selection' => ['min_types' => 1, 'max_types' => 2, 'allow_none' => true],
                 ],
                 'metadata' => [
                     'legacy_name' => 'N8 Tradicional',
@@ -119,6 +122,7 @@ class SolRestaurantProductCatalogSeeder extends Seeder
                 'composition_rules' => [
                     'capacity_ml' => 1100,
                     'uses_daily_menu' => true,
+                    'traditional_meat_selection' => ['min_types' => 1, 'max_types' => 2, 'allow_none' => true],
                 ],
                 'metadata' => [
                     'legacy_name' => 'N9 Tradicional',

@@ -37,6 +37,7 @@ class StructuredProductConfigurationService
                 'selection_mode' => $group->selection_mode->value,
                 'selection_actor' => $group->selection_actor->value,
                 'required' => (bool) $group->is_required,
+                'allow_no_meat' => $group->code === 'carne' && in_array($group->code, $this->noMeatGroupCodes($product), true),
                 'min_choices' => $group->min_choices,
                 'max_choices' => $group->max_choices,
                 'min_quantity' => $group->min_quantity,
@@ -107,6 +108,23 @@ class StructuredProductConfigurationService
     private function removableGroupCodes(Product $product): array
     {
         $codes = data_get($product->composition_rules, 'removable_group_codes', []);
+
+        if (! is_array($codes)) {
+            return [];
+        }
+
+        return collect($codes)
+            ->filter(fn (mixed $code): bool => is_string($code) && trim($code) !== '')
+            ->map(fn (string $code): string => trim($code))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /** @return list<string> */
+    private function noMeatGroupCodes(Product $product): array
+    {
+        $codes = data_get($product->composition_rules, 'allow_no_meat_group_codes', []);
 
         if (! is_array($codes)) {
             return [];
@@ -325,10 +343,11 @@ class StructuredProductConfigurationService
                 'enabled' => true,
                 'base_price_cents' => $product->base_price_cents,
                 'selection_rules' => [
-                    'min' => 2,
-                    'max' => 2,
+                    'min' => (int) data_get($product->composition_rules, 'traditional_meat_selection.min_types', 1),
+                    'max' => (int) data_get($product->composition_rules, 'traditional_meat_selection.max_types', 2),
                     'same_component_only' => false,
                 ],
+                'allow_no_meat' => (bool) data_get($product->composition_rules, 'traditional_meat_selection.allow_none', false),
             ],
             'beef_only' => [
                 'enabled' => $this->componentOptionIsConfigured($beefOnly),

@@ -21,6 +21,7 @@ import { PaymentMethodBreakdown } from './PaymentMethodBreakdown'
 type FinancePageProps = {
   entries: FinanceEntry[]
   expenses: ExpenseEntry[]
+  canConfirmPayment: boolean
   paymentMethods: PaymentMethodSummary[]
   summary: DailyFinancialSummary
   mode: 'pagamentos' | 'financeiro'
@@ -31,6 +32,7 @@ type FinancePageProps = {
 const statusLabels: Record<FinanceEntry['status'], string> = {
   credito: 'Credito',
   anulado: 'Anulado',
+  cancelado: 'Cancelado',
   pago: 'Pago',
   parcial: 'Parcial',
   pendente: 'Pendente',
@@ -40,6 +42,7 @@ const statusLabels: Record<FinanceEntry['status'], string> = {
 function financeStatusTone(status: FinanceEntry['status']): BadgeTone {
   if (status === 'pago') return 'success'
   if (status === 'anulado') return 'neutral'
+  if (status === 'cancelado') return 'neutral'
   if (status === 'pendente' || status === 'parcial') return 'warning'
   if (status === 'revisao_humana') return 'manual'
   return 'info'
@@ -86,7 +89,7 @@ function financeColumns(onOpenVoidPayment: (orderId: string) => void, allowVoid:
   ]
 }
 
-export function FinancePage({ entries, expenses, mode, onOpenModal, onOpenVoidPayment, paymentMethods, summary }: FinancePageProps) {
+export function FinancePage({ canConfirmPayment, entries, expenses, mode, onOpenModal, onOpenVoidPayment, paymentMethods, summary }: FinancePageProps) {
   const title = mode === 'pagamentos' ? 'Pagamentos / Pix' : 'Financeiro'
   const description =
     mode === 'pagamentos'
@@ -97,7 +100,7 @@ export function FinancePage({ entries, expenses, mode, onOpenModal, onOpenVoidPa
     <PageContainer>
       <PageHeader
         actions={
-          <Button icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
+          <Button disabled={!canConfirmPayment} icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
             Confirmar comprovante
           </Button>
         }

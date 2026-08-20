@@ -153,7 +153,7 @@ class OrderOperationsController extends Controller
             'removed_component_ids.*' => ['integer'],
             'removed_group_codes' => ['sometimes', 'array'],
             'removed_group_codes.*' => ['string', 'max:80'],
-            'meat_mode' => ['nullable', 'string', 'in:traditional,beef_only'],
+            'meat_mode' => ['nullable', 'string', 'in:traditional,beef_only,none'],
             'traditional_meat_component_ids' => ['sometimes', 'array'],
             'traditional_meat_component_ids.*' => ['integer'],
             'additions' => ['sometimes', 'array'],

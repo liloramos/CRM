@@ -101,6 +101,7 @@ class OrderItemSelectionValidator
                     $compositionSelection,
                     $selectedComponents,
                     $removedIngredients,
+                    $meatSelection,
                 ),
             ];
         }
@@ -150,7 +151,7 @@ class OrderItemSelectionValidator
                 continue;
             }
 
-            if ($mode === 'beef_only' && $this->groupContainsTraditionalMeat($group)) {
+            if (in_array($mode, ['beef_only', 'none'], true) && $this->groupContainsTraditionalMeat($group)) {
                 continue;
             }
 
@@ -179,6 +180,15 @@ class OrderItemSelectionValidator
                     ...$validated,
                     $this->beefOnlyRow($beefOnly, $quote),
                 ],
+                'unit_price_cents' => (int) $quote['total_cents'],
+                'selected_components' => $selectedComponents,
+                'removed_ingredients' => $removedIngredients,
+            ];
+        }
+
+        if ($mode === 'none') {
+            return [
+                'options' => [...$validated, $this->withoutMeatRow()],
                 'unit_price_cents' => (int) $quote['total_cents'],
                 'selected_components' => $selectedComponents,
                 'removed_ingredients' => $removedIngredients,
@@ -530,12 +540,31 @@ class OrderItemSelectionValidator
         array $compositionSelection,
         array &$selectedComponents,
         array &$removedIngredients,
+        array $meatSelection = [],
     ): array {
         $removedGroupCodes = $this->stringList($compositionSelection['removed_group_codes'] ?? []);
         if (in_array($group->code, $removedGroupCodes, true)) {
             $removedIngredients[] = 'Sem '.$this->removableGroupLabel($group);
 
             return [];
+        }
+
+        if ($group->code === 'carne' && ($meatSelection['meat_mode'] ?? 'traditional') === 'none') {
+            if (! $this->allowsNoMeat($product, $group)) {
+                throw ValidationException::withMessages([
+                    'meat_mode' => ['Este produto nao permite a escolha sem carne.'],
+                ]);
+            }
+
+            $hasSelection = $group->componentOptions->contains(fn (ProductGroupComponent $link): bool => $componentRows->has((int) $link->id))
+                || $group->productOptions->contains(fn (ProductGroupProduct $link): bool => $productRows->has((int) $link->id));
+            if ($hasSelection) {
+                throw ValidationException::withMessages([
+                    'meat_mode' => ['Sem carne nao pode ser combinado com carnes selecionadas.'],
+                ]);
+            }
+
+            return [$this->withoutMeatRow()];
         }
 
         if ($group->selection_mode === ProductSelectionMode::Fixed) {
@@ -618,6 +647,34 @@ class OrderItemSelectionValidator
         $this->assertQuantityLimits($group, $choiceCount, $quantityTotal);
 
         return $validatedRows;
+    }
+
+    private function allowsNoMeat(Product $product, ProductOptionGroup $group): bool
+    {
+        return in_array(
+            $group->code,
+            $this->stringList(data_get($product->composition_rules, 'allow_no_meat_group_codes', [])),
+            true,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function withoutMeatRow(): array
+    {
+        return [
+            'product_option_id' => null,
+            'name' => 'Sem carne',
+            'option_type' => ProductSelectionMode::IncludedChoice->value,
+            'group_code' => 'carne',
+            'quantity' => 1,
+            'price_delta_cents' => 0,
+            'total_price_cents' => 0,
+            'metadata' => [
+                'source' => 'explicit_no_meat',
+                'meat_mode' => 'none',
+                'included_in_unit_price' => true,
+            ],
+        ];
     }
 
     /**

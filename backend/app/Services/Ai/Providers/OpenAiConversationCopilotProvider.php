@@ -192,7 +192,7 @@ class OpenAiConversationCopilotProvider implements ConversationCopilotProviderIn
         $selectionProperties = [
             'meat' => ['type' => ['string', 'null']],
             'meats' => ['type' => 'array', 'items' => ['type' => 'string']],
-            'meat_mode' => ['type' => ['string', 'null'], 'enum' => ['traditional', 'beef_only', null]],
+            'meat_mode' => ['type' => ['string', 'null'], 'enum' => ['traditional', 'beef_only', 'none', null]],
             'beef_variant' => ['type' => ['string', 'null']],
             'extra_beef' => ['type' => 'integer'],
             'salada_casa' => ['type' => ['string', 'null']],

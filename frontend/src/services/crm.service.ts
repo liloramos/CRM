@@ -98,7 +98,7 @@ type AddItemPayload = {
   included_component_ids?: number[]
   removed_component_ids?: number[]
   removed_group_codes?: string[]
-  meat_mode?: 'traditional' | 'beef_only'
+  meat_mode?: 'traditional' | 'beef_only' | 'none'
   traditional_meat_component_ids?: number[]
   additions?: Array<{
     code: string
@@ -535,11 +535,34 @@ export type CopilotAnalysis = {
   intent: string
   confidence: number
   summary: string
-  draft_order: { items: Array<{ menu_item_id: number | null; menu_item_slug: string; quantity: number; removed_components: string[]; item_notes: string; valid?: boolean }>; fulfillment: 'delivery' | 'pickup' | null; address: string; payment_method: string }
-  missing_information: Array<{ code: string; label: string }>
+  draft_order: { items: Array<{ menu_item_id: number | null; menu_item_slug: string; quantity: number; selections?: Record<string, unknown>; removed_components: string[]; item_notes: string; valid?: boolean }>; fulfillment: 'delivery' | 'pickup' | null; address: string; payment_method: string }
+  missing_information: Array<{ code: string; label: string; message?: string }>
   warnings: Array<{ code: string; message: string }>
   suggested_reply: string
+  clarification?: { type: 'PRODUCT'; prompt: string; options: Array<{ menu_item_id: number; menu_item_slug: string; display_name: string }>; source: 'MENU'; grounded: true } | null
   requires_human_review: boolean
+  proposal?: CopilotOrderProposal
+}
+
+export type CopilotOrderProposal = {
+  source: 'safe_result'
+  intent: string
+  applyability: 'READY' | 'PARTIAL' | 'BLOCKED'
+  can_apply: boolean
+  blocking_reasons: string[]
+  items: Array<{
+    menu_item_id: number
+    menu_item_slug: string
+    product_name: string
+    quantity: number
+    selections: Record<string, unknown>
+    removed_components: string[]
+    item_notes: string
+  }>
+  fulfillment: 'delivery' | 'pickup' | null
+  missing_information: Array<{ code: string; label: string; message?: string }>
+  warnings: Array<{ code: string; message: string }>
+  requires_human_review: true
 }
 
 export async function analyzeConversationCopilot(conversationId: string) {

@@ -103,7 +103,7 @@ class OperationalCrmPresenter
             'financeEntries' => $orders->map(fn (Order $order): array => $this->financeEntry($order))->values(),
             'financialSummary' => $this->financialSummary($orders),
             'expenses' => [],
-            'paymentMethods' => $this->paymentMethods($orders),
+            'paymentMethods' => $this->paymentMethods($this->financiallyRelevantOrders($orders)),
             'integrations' => $this->integrations(),
             'capabilities' => $this->orderCleanup->capabilities($user),
         ];
@@ -350,6 +350,7 @@ class OperationalCrmPresenter
         $latestPayment = $order->payments
             ->sortByDesc('id')
             ->first();
+        $cancelledWithoutConfirmedPayment = $this->isCancelledWithoutConfirmedPayment($order);
 
         return [
             'id' => (string) $order->id,
@@ -357,19 +358,25 @@ class OperationalCrmPresenter
             'paymentId' => $latestPayment?->id ? (string) $latestPayment->id : null,
             'label' => 'Pedido '.$order->code,
             'orderCode' => $order->code,
-            'status' => $latestPayment?->voided_at
+            'status' => $cancelledWithoutConfirmedPayment
+                ? 'cancelado'
+                : ($latestPayment?->voided_at
                 ? 'anulado'
-                : $this->mapPaymentStatus((string) $order->payment_status),
+                : $this->mapPaymentStatus((string) $order->payment_status)),
             'amount' => $this->cents((int) $order->total_cents),
             'receivedAmount' => $this->cents((int) $order->amount_paid_cents),
-            'pendingAmount' => $this->cents((int) $order->amount_due_cents),
+            'pendingAmount' => $this->cents($cancelledWithoutConfirmedPayment ? 0 : (int) $order->amount_due_cents),
             'creditApplied' => $this->cents((int) $order->credit_used_cents),
-            'method' => $this->paymentMethodLabel((string) ($order->payment_method ?: 'a_confirmar')),
+            'method' => $cancelledWithoutConfirmedPayment
+                ? 'Sem cobranca'
+                : $this->paymentMethodLabel((string) ($order->payment_method ?: 'a_confirmar')),
             'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'createdLabel' => $order->created_at?->format('d/m H:i') ?? '',
-            'description' => $latestPayment?->voided_at
+            'description' => $cancelledWithoutConfirmedPayment
+                ? 'Pedido cancelado sem pagamento confirmado.'
+                : ($latestPayment?->voided_at
                 ? 'Confirmação anulada no CRM: '.$latestPayment->void_reason
-                : ($order->payment_confirmed_at ? 'Pagamento confirmado por atendente.' : 'Aguardando conferencia humana.'),
+                : ($order->payment_confirmed_at ? 'Pagamento confirmado por atendente.' : 'Aguardando conferencia humana.')),
         ];
     }
 
@@ -379,17 +386,18 @@ class OperationalCrmPresenter
      */
     private function financialSummary(Collection $orders): array
     {
-        $gross = (int) $orders->sum('total_cents');
-        $confirmed = (int) $orders->where('payment_status', Payment::ORDER_STATUS_PAID)->sum('amount_paid_cents');
-        $pending = (int) $orders->sum('amount_due_cents');
-        $pix = (int) $orders->where('payment_method', Payment::METHOD_PIX)->sum('amount_paid_cents');
-        $credit = (int) $orders->sum('credit_used_cents');
+        $financialOrders = $this->financiallyRelevantOrders($orders);
+        $gross = (int) $financialOrders->sum('total_cents');
+        $confirmed = (int) $financialOrders->where('payment_status', Payment::ORDER_STATUS_PAID)->sum('amount_paid_cents');
+        $pending = (int) $financialOrders->sum('amount_due_cents');
+        $pix = (int) $financialOrders->where('payment_method', Payment::METHOD_PIX)->sum('amount_paid_cents');
+        $credit = (int) $financialOrders->sum('credit_used_cents');
 
         return [
             'dateLabel' => now()->format('d/m/Y'),
-            'ordersCount' => $orders->count(),
-            'paidOrders' => $orders->where('payment_status', Payment::ORDER_STATUS_PAID)->count(),
-            'pendingOrders' => $orders->where('amount_due_cents', '>', 0)->count(),
+            'ordersCount' => $financialOrders->count(),
+            'paidOrders' => $financialOrders->where('payment_status', Payment::ORDER_STATUS_PAID)->count(),
+            'pendingOrders' => $financialOrders->where('amount_due_cents', '>', 0)->count(),
             'grossRevenue' => $this->cents($gross),
             'confirmedRevenue' => $this->cents($confirmed),
             'pendingAmount' => $this->cents($pending),
@@ -398,8 +406,22 @@ class OperationalCrmPresenter
             'pixAmount' => $this->cents($pix),
             'creditUsed' => $this->cents($credit),
             'customerCreditBalance' => 0,
-            'averageTicket' => $orders->count() > 0 ? $this->cents((int) round($gross / $orders->count())) : 0,
+            'averageTicket' => $financialOrders->count() > 0 ? $this->cents((int) round($gross / $financialOrders->count())) : 0,
         ];
+    }
+
+    /** @param Collection<int, Order> $orders @return Collection<int, Order> */
+    private function financiallyRelevantOrders(Collection $orders): Collection
+    {
+        return $orders
+            ->reject(fn (Order $order): bool => $this->isCancelledWithoutConfirmedPayment($order))
+            ->values();
+    }
+
+    private function isCancelledWithoutConfirmedPayment(Order $order): bool
+    {
+        return $order->status === Order::STATUS_CANCELLED
+            && ! $order->payments->contains(fn (Payment $payment): bool => $payment->status === Payment::STATUS_CONFIRMED);
     }
 
     /**

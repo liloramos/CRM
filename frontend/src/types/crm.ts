@@ -39,7 +39,7 @@ export type OrderStatus =
   | 'cancelado'
   | 'manual'
 
-export type PaymentStatus = 'pendente' | 'parcial' | 'pago' | 'credito' | 'revisao_humana' | 'anulado'
+export type PaymentStatus = 'pendente' | 'parcial' | 'pago' | 'credito' | 'revisao_humana' | 'anulado' | 'cancelado'
 export type FulfillmentType = 'retirada' | 'entrega' | 'balcao'
 export type AutomationMode = 'ia' | 'manual' | 'atencao'
 export type PrintStatus = 'aguardando' | 'imprimindo' | 'impresso' | 'reimpressao' | 'erro'
@@ -71,6 +71,7 @@ export type MenuOption = {
   groupLabel: string
   priceDelta: number
   required: boolean
+  allow_no_meat?: boolean
   availableToday: boolean
   dailyReason?: string | null
 }
@@ -426,6 +427,7 @@ export type StructuredProductOptionGroup = {
   selection_mode: ProductSelectionMode
   selection_actor: ProductSelectionActor
   required: boolean
+  allow_no_meat?: boolean
   min_choices: number | null
   max_choices: number | null
   min_quantity: number | null
@@ -456,6 +458,7 @@ export type StructuredMeatConfiguration = {
       max: number | null
       same_component_only: boolean
     }
+    allow_no_meat: boolean
   }
   beef_only: {
     enabled: boolean

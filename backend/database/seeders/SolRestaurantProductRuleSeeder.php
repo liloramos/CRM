@@ -23,6 +23,7 @@ class SolRestaurantProductRuleSeeder extends Seeder
 
         $this->seedN5CasaRules($company);
         $this->seedN8CasaRules($company);
+        $this->configureExplicitNoMeatRules($company);
         $this->seedSucoRules($company);
         $this->seedComboLatinhaRules($company);
         $this->seedBifeVariationRules($company);
@@ -126,6 +127,27 @@ class SolRestaurantProductRuleSeeder extends Seeder
         ]);
 
         $this->syncComponentLinks($meat, ['almondega', 'porco', 'frango-ao-molho', 'bife-de-figado']);
+    }
+
+    private function configureExplicitNoMeatRules(Company $company): void
+    {
+        foreach (['n5-casa', 'n8-casa'] as $slug) {
+            $product = $this->product($company, $slug);
+            $product->forceFill([
+                'composition_rules' => [...($product->composition_rules ?? []), 'allow_no_meat_group_codes' => ['carne']],
+            ])->save();
+        }
+
+        foreach (['n8-tradicional', 'n9-tradicional'] as $slug) {
+            $product = $this->product($company, $slug);
+            $product->forceFill([
+                'composition_rules' => [...($product->composition_rules ?? []), 'traditional_meat_selection' => [
+                    'min_types' => 1,
+                    'max_types' => 2,
+                    'allow_none' => true,
+                ]],
+            ])->save();
+        }
     }
 
     private function seedSucoRules(Company $company): void

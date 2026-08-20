@@ -47,6 +47,7 @@ import {
   sendConversationMessage,
   sendConversationMedia,
   type ConversationMediaSendOptions,
+  type CopilotOrderProposal,
   setConversationAutomationMode,
   updateCustomer,
   updateOrderStatus,
@@ -83,7 +84,7 @@ type OrderItemOptionPayload =
       included_component_ids?: number[]
       removed_component_ids?: number[]
       removed_group_codes?: string[]
-      meat_mode?: 'traditional' | 'beef_only'
+      meat_mode?: 'traditional' | 'beef_only' | 'none'
       traditional_meat_component_ids?: number[]
       additions?: Array<{
         code: string
@@ -110,7 +111,12 @@ type BlockedOrderDeletion = {
   reasons: string[]
 }
 
-type MeatModeSelection = 'traditional' | 'beef_only'
+type MeatModeSelection = 'traditional' | 'beef_only' | 'none'
+
+type PendingCopilotDraft = {
+  conversationId: string
+  proposal: CopilotOrderProposal
+}
 
 function App() {
   const { logout, status: authStatus, user } = useAuth()
@@ -138,6 +144,7 @@ function App() {
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
   const [itemMeatMode, setItemMeatMode] = useState<MeatModeSelection>('traditional')
   const [itemExtraBeef, setItemExtraBeef] = useState(false)
+  const [pendingCopilotDraft, setPendingCopilotDraft] = useState<PendingCopilotDraft | null>(null)
   const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
   const [automationMode, setAutomationMode] = useState<AutomationModeSelection>('assisted')
   const [addItemContext, setAddItemContext] = useState<AddItemContext | null>(null)
@@ -463,7 +470,30 @@ function App() {
 
       setSelectedOrderId(response.data.id)
       setActiveRoute('pedidos')
-      setActiveModal(null)
+      const copilotItem = pendingCopilotDraft?.proposal.items[0]
+      const copilotProduct = copilotItem
+        ? snapshot?.products.find((product) => product.id === String(copilotItem.menu_item_id))
+        : undefined
+
+      if (pendingCopilotDraft && copilotItem && copilotProduct && isPersistedBackendId(copilotProduct.id)) {
+        setSelectedProductId(copilotProduct.id)
+        setItemQuantity(copilotItem.quantity)
+        setItemNotes(copilotItem.item_notes)
+        setSelectedOptionIds(copilotProposalOptionTokens(copilotProduct, copilotItem))
+        setItemMeatMode(copilotItem.selections.meat_mode === 'beef_only' || copilotItem.selections.meat_mode === 'none' ? copilotItem.selections.meat_mode : 'traditional')
+        setItemExtraBeef(Number(copilotItem.selections.extra_beef ?? 0) > 0)
+        setAddItemContext({
+          orderId: response.data.id,
+          orderCode: response.data.code,
+          defaultBeneficiaryName: '',
+          product: copilotProduct,
+          source: 'api',
+        })
+        setActiveModal('add-product')
+      } else {
+        setPendingCopilotDraft(null)
+        setActiveModal(null)
+      }
       resetNewOrderForm()
       await loadSnapshot()
     } catch (error) {
@@ -581,6 +611,7 @@ function App() {
       setSelectedOptionIds([])
       setItemMeatMode('traditional')
       setItemExtraBeef(false)
+      setPendingCopilotDraft(null)
       await loadSnapshot()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
@@ -614,7 +645,7 @@ function App() {
     setItemMeatMode(mode)
     setSelectedOptionIds((current) => current.filter((token) => !isDailyMeatToken(token)))
 
-    if (mode === 'beef_only') {
+    if (mode === 'beef_only' || mode === 'none') {
       setItemExtraBeef(false)
     }
   }
@@ -847,6 +878,11 @@ function App() {
       return
     }
 
+    if (selectedOrder.status === 'cancelado') {
+      setActionError('Nao e possivel confirmar pagamento em pedido cancelado.')
+      return
+    }
+
     const amountCents = paymentAmount.trim() ? parseCurrencyInputToCents(paymentAmount) : undefined
 
     if (amountCents !== undefined && amountCents <= 0) {
@@ -1021,6 +1057,30 @@ function App() {
   async function handleConversationCopilotAnalyze(conversationId: string) {
     const response = await analyzeConversationCopilot(conversationId)
     return response.data
+  }
+
+  function handleApplyCopilotProposal(conversation: Conversation, proposal: CopilotOrderProposal): boolean {
+    const item = proposal.items[0]
+    const product = item ? snapshot?.products.find((candidate) => candidate.id === String(item.menu_item_id)) : undefined
+
+    if (!proposal.can_apply || proposal.items.length !== 1 || conversation.activeOrder || !product || !isPersistedBackendId(product.id)) {
+      return false
+    }
+
+    resetNewOrderForm()
+    setActionError(null)
+    setSelectedNewOrderCustomer(isPersistedBackendId(conversation.customer.id) ? conversation.customer : null)
+    setNewOrderCustomerQuery(conversation.customer.name)
+    setNewOrderFulfillmentType(proposal.fulfillment ?? 'pickup')
+    setSelectedProductId(product.id)
+    setItemQuantity(item.quantity)
+    setItemNotes(item.item_notes)
+    setSelectedOptionIds(copilotProposalOptionTokens(product, item))
+    setItemMeatMode(item.selections.meat_mode === 'beef_only' || item.selections.meat_mode === 'none' ? item.selections.meat_mode : 'traditional')
+    setItemExtraBeef(Number(item.selections.extra_beef ?? 0) > 0)
+    setPendingCopilotDraft({ conversationId: conversation.id, proposal })
+    setActiveModal('new-order')
+    return true
   }
 
   async function handleConversationSendMessage(
@@ -1230,6 +1290,7 @@ function App() {
   }
 
   function openNewOrderModal() {
+    setPendingCopilotDraft(null)
     resetNewOrderForm()
     setActiveModal('new-order')
   }
@@ -1281,6 +1342,7 @@ function App() {
   function closeModal() {
     if (activeModal === 'add-product') {
       setAddItemContext(null)
+      setPendingCopilotDraft(null)
       setItemHasDifferentBeneficiary(false)
       setBeneficiaryName('')
       setSelectedOptionIds([])
@@ -1289,6 +1351,7 @@ function App() {
     }
 
     if (activeModal === 'new-order') {
+      setPendingCopilotDraft(null)
       resetNewOrderForm()
     }
 
@@ -1383,6 +1446,7 @@ function App() {
             isLoading={isLoadingConversations}
             linkedOrder={linkedOrder}
             onAnalyzeCopilot={handleConversationCopilotAnalyze}
+            onApplyCopilotProposal={handleApplyCopilotProposal}
             onAcknowledgeAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'acknowledge')}
             onApprovePayment={handleApproveConversationPayment}
             onChangeMode={handleConversationModeChange}
@@ -1453,6 +1517,7 @@ function App() {
       case 'pagamentos':
         return (
           <FinancePage
+            canConfirmPayment={selectedOrder !== undefined && selectedOrder.status !== 'cancelado' && selectedOrder.amountDue > 0}
             entries={snapshot.financeEntries}
             expenses={snapshot.expenses}
             mode="pagamentos"
@@ -1465,6 +1530,7 @@ function App() {
       case 'financeiro':
         return (
           <FinancePage
+            canConfirmPayment={selectedOrder !== undefined && selectedOrder.status !== 'cancelado' && selectedOrder.amountDue > 0}
             entries={snapshot.financeEntries}
             expenses={snapshot.expenses}
             mode="financeiro"
@@ -1615,6 +1681,7 @@ function App() {
           paymentMethod={paymentMethod}
           paymentNotes={paymentNotes}
           paymentVoidReason={paymentVoidReason}
+          copilotProposal={pendingCopilotDraft?.proposal ?? null}
           printPreview={printPreview}
           products={snapshot.products}
           selectedConversation={selectedConversation}
@@ -1637,6 +1704,73 @@ function selectedProductForAddItem(products: Product[], selectedProductId: strin
     products.find((product) => product.available && isPersistedBackendId(product.id)) ??
     products.find((product) => isPersistedBackendId(product.id))
   )
+}
+
+function copilotProposalOptionTokens(
+  product: Product,
+  item: CopilotOrderProposal['items'][number],
+): string[] {
+  const tokens = new Set<string>()
+  const selections = item.selections ?? {}
+  const selectedValues = new Set(
+    Object.entries(selections)
+      .filter(([key]) => !['meat_mode', 'extra_beef'].includes(key))
+      .flatMap(([, value]) => Array.isArray(value) ? value : [value])
+      .filter((value): value is string => typeof value === 'string')
+      .map(copilotSelectionKey),
+  )
+
+  if (selections.meat_mode !== 'beef_only' && selections.meat_mode !== 'none') {
+    for (const dailyMeat of product.dailyMeatOptions ?? []) {
+      if (copilotComponentMatches(dailyMeat.component, selectedValues)) {
+        tokens.add(`daily-meat:${dailyMeat.component.id}`)
+      }
+    }
+  }
+
+  for (const group of product.structuredGroups ?? []) {
+    for (const option of group.component_options) {
+      if (group.selection_mode !== 'fixed' && selections.meat_mode !== 'none' && copilotComponentMatches(option, selectedValues)) {
+        tokens.add(componentOptionToken(option.id))
+      }
+    }
+    for (const option of group.product_options) {
+      if (group.selection_mode !== 'fixed' && selections.meat_mode !== 'none' && selectedValues.has(copilotSelectionKey(option.selectable_product.name))) {
+        tokens.add(productOptionToken(option.id))
+      }
+    }
+  }
+
+  const removedValues = new Set(item.removed_components.map(copilotSelectionKey))
+  for (const group of product.structuredGroups ?? []) {
+    for (const option of group.component_options) {
+      if (group.selection_mode === 'fixed' && copilotComponentMatches(option, removedValues)) {
+        tokens.add(`remove-component:${option.component_id}`)
+      }
+    }
+    if (removedValues.has(copilotSelectionKey(group.code)) || removedValues.has(copilotSelectionKey(group.label))) {
+      tokens.add(`remove-group:${group.code}`)
+    }
+  }
+
+  return [...tokens]
+}
+
+function copilotComponentMatches(
+  component: Pick<StructuredComponentOption, 'slug' | 'name' | 'display_name' | 'search_aliases'>,
+  values: Set<string>,
+): boolean {
+  return [component.slug, component.name, component.display_name, ...component.search_aliases]
+    .map(copilotSelectionKey)
+    .some((candidate) => values.has(candidate))
+}
+
+function copilotSelectionKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '')
 }
 
 function buildOrderItemOptions(
@@ -1680,6 +1814,7 @@ function buildOrderItemOptions(
     quantity?: number
   }> = []
   const hasBeefRules = product.meatConfiguration !== null && product.meatConfiguration !== undefined
+  const genericNoMeatGroups = groups.filter((group) => selectedTokens.has(`no-meat:${group.code}`)).map((group) => group.code)
 
   for (const group of groups) {
     if (hasBeefRules && ['variacao_bife', 'bife_adicional'].includes(group.code)) {
@@ -1699,6 +1834,10 @@ function buildOrderItemOptions(
     const choiceCount = componentSelections.length + productSelections.length
     const minChoices = group.min_choices ?? (group.required ? 1 : 0)
     const maxChoices = group.max_choices
+
+    if (genericNoMeatGroups.includes(group.code) && group.allow_no_meat) {
+      continue
+    }
 
     if (choiceCount < minChoices) {
       throw new Error(`Escolha obrigatoria ausente em ${group.label}.`)
@@ -1729,6 +1868,18 @@ function buildOrderItemOptions(
     }
   }
 
+  if (!hasBeefRules && genericNoMeatGroups.includes('carne')) {
+    return {
+      structured_options: structuredOptions,
+      included_component_ids: includedComponentIds,
+      removed_component_ids: removedComponentIds,
+      removed_group_codes: removedGroupCodes,
+      meat_mode: 'none',
+      traditional_meat_component_ids: [],
+      additions: [],
+    }
+  }
+
   if (!hasBeefRules) {
     return {
       structured_options: structuredOptions,
@@ -1749,6 +1900,22 @@ function buildOrderItemOptions(
       removed_component_ids: removedComponentIds,
       removed_group_codes: removedGroupCodes,
       meat_mode: 'beef_only',
+      traditional_meat_component_ids: [],
+      additions: [],
+    }
+  }
+
+  if (meatMode === 'none' || genericNoMeatGroups.includes('carne')) {
+    if (dailyMeatIds.length > 0 || extraBeefSelected) {
+      throw new Error('Sem carne nao pode ser combinado com carnes ou bife adicional.')
+    }
+
+    return {
+      structured_options: structuredOptions,
+      included_component_ids: includedComponentIds,
+      removed_component_ids: removedComponentIds,
+      removed_group_codes: removedGroupCodes,
+      meat_mode: 'none',
       traditional_meat_component_ids: [],
       additions: [],
     }

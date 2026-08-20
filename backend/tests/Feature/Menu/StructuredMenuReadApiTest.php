@@ -188,8 +188,9 @@ class StructuredMenuReadApiTest extends TestCase
         $this->assertFalse($n8Tradicional['configuration_pending']);
         $this->assertSame(['variacao_bife', 'bife_adicional'], array_column($n8Tradicional['groups'], 'code'));
         $this->assertSame(1600, $n8Tradicional['meat_configuration']['traditional']['base_price_cents']);
-        $this->assertSame(2, $n8Tradicional['meat_configuration']['traditional']['selection_rules']['min']);
+        $this->assertSame(1, $n8Tradicional['meat_configuration']['traditional']['selection_rules']['min']);
         $this->assertSame(2, $n8Tradicional['meat_configuration']['traditional']['selection_rules']['max']);
+        $this->assertTrue($n8Tradicional['meat_configuration']['traditional']['allow_no_meat']);
         $this->assertSame(2000, $n8Tradicional['meat_configuration']['beef_only']['final_price_cents']);
         $this->assertSame('extra_beef', $n8Tradicional['additions'][0]['code']);
         $this->assertSame(700, $n8Tradicional['additions'][0]['price_cents']);

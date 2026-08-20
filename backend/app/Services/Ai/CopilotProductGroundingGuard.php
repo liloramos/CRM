@@ -59,6 +59,9 @@ final class CopilotProductGroundingGuard
         }
 
         $selections = is_array($item['selections'] ?? null) ? $item['selections'] : [];
+        if (str_contains($text, 'sem carne') || preg_match('/\bnao\s+(?:quero|quero)\s+carne\b/', $text) === 1) {
+            return [...$item, 'selections' => [...$selections, 'meat_mode' => 'none', 'meat' => null, 'meats' => [], 'extra_beef' => 0]];
+        }
         $meats = is_array($selections['meats'] ?? null) ? $selections['meats'] : [];
         foreach ($this->explicitN8Meats($text) as $meat) {
             if (! in_array($meat, $meats, true)) {

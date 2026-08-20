@@ -36,7 +36,7 @@ class CopilotOrderDraftValidator
             $recovered = $this->products->recoverN8Traditional($company, data_get($context, 'messages', []));
             $proposedItems = $recovered ? [$recovered] : [];
         }
-        $items = collect($proposedItems)->map(function (array $item, int $index) use ($company, $date, $context, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded): ?array {
+        $validateItem = function (array $item, int $index) use ($company, $date, $context, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded): ?array {
             $quantity = filter_var($item['quantity'] ?? null, FILTER_VALIDATE_INT);
             if ($quantity === false || $quantity < 1 || $quantity > 50) {
                 $warnings[] = ['code' => 'INVALID_QUANTITY', 'message' => 'A quantidade sugerida nao e valida.', 'item_index' => $index];
@@ -57,6 +57,10 @@ class CopilotOrderDraftValidator
                 return null;
             }
             $item = $this->products->enrichN8Traditional($product, $item, data_get($context, 'messages', []));
+            if (in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)
+                && $this->hasExplicitWithoutMeat(data_get($context, 'messages', []))) {
+                $item['selections'] = [...(is_array($item['selections'] ?? null) ? $item['selections'] : []), 'meat_mode' => 'none', 'meat' => null, 'meats' => [], 'extra_beef' => 0];
+            }
             $result = $this->selections->validate($company, $product, $date, [
                 ...$item,
                 'menu_item_id' => $product->id,
@@ -69,7 +73,19 @@ class CopilotOrderDraftValidator
             }
 
             return $result['item'];
-        })->filter()->values()->all();
+        };
+        $items = collect($proposedItems)->map($validateItem)->filter()->values()->all();
+
+        // A provider can name N8 Casa even when the customer explicitly requested only N8.
+        // After that invalid variant is discarded, recover the canonical N8 Livre from the current turn.
+        if ($items === [] && $ungroundedProductDiscarded) {
+            $recovered = $this->products->recoverN8Traditional($company, data_get($context, 'messages', []));
+            if ($recovered !== null) {
+                $items = collect([$recovered])->map($validateItem)->filter()->values()->all();
+                $ungroundedProductDiscarded = false;
+                $warnings = array_values(array_filter($warnings, fn (array $warning): bool => ($warning['code'] ?? null) !== 'UNGROUNDED_PRODUCT'));
+            }
+        }
         $grounded = $this->quantities->ground($company, $items, data_get($context, 'messages', []));
         $items = $grounded['items'];
         $warnings = [...$warnings, ...$grounded['warnings']];
@@ -142,8 +158,11 @@ class CopilotOrderDraftValidator
             ->all();
 
         if (in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)
-            && ($selections['meat_mode'] ?? 'traditional') !== 'beef_only'
-            && count(array_filter($selections['meats'] ?? [], fn (mixed $meat): bool => is_string($meat) && $meat !== '')) < 2) {
+            && ! in_array($selections['meat_mode'] ?? 'traditional', ['beef_only', 'none'], true)
+            && (
+                count(array_filter($selections['meats'] ?? [], fn (mixed $meat): bool => is_string($meat) && $meat !== '')) < 1
+                || (bool) ($selections['meat_selection_pending'] ?? false)
+            )) {
             $missing[] = ['code' => 'CARNE', 'label' => 'Carnes'];
         }
 
@@ -165,6 +184,15 @@ class CopilotOrderDraftValidator
     private function key(string $value): string
     {
         return Str::of($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', '')->toString();
+    }
+
+    /** @param list<array<string,mixed>> $messages */
+    private function hasExplicitWithoutMeat(array $messages): bool
+    {
+        return collect($messages)
+            ->filter(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text')
+            ->contains(fn (array $message): bool => str_contains(Str::of((string) ($message['body'] ?? ''))->ascii()->lower()->toString(), 'sem carne')
+                || preg_match('/\bnao\s+(?:quero|quero)\s+carne\b/i', (string) ($message['body'] ?? '')) === 1);
     }
 
     /** @param list<array{code:string,label:string}> $missing @return list<array{code:string,label:string}> */

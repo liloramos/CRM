@@ -24,6 +24,7 @@ class PaymentWorkflowService
     {
         return DB::transaction(function () use ($order, $attributes): Payment {
             $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $this->assertOrderAcceptsFinancialAction($order, 'registrar pagamento');
             $method = (string) ($attributes['method'] ?? Payment::METHOD_PIX);
             $status = (string) ($attributes['status'] ?? $this->defaultStatusFor($method));
 
@@ -70,6 +71,7 @@ class PaymentWorkflowService
         return DB::transaction(function () use ($payment, $attributes): PaymentProof {
             $payment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
             $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
+            $this->assertOrderAcceptsFinancialAction($order, 'anexar comprovante');
 
             $proof = PaymentProof::query()->create([
                 'payment_id' => $payment->id,
@@ -111,6 +113,8 @@ class PaymentWorkflowService
     {
         return DB::transaction(function () use ($payment, $user, $attributes): Payment {
             $payment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
+            $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
+            $this->assertOrderAcceptsFinancialAction($order, 'confirmar pagamento');
 
             if (in_array($payment->status, [Payment::STATUS_REJECTED, Payment::STATUS_CANCELLED], true)) {
                 throw new DomainException('Rejected or cancelled payments cannot be confirmed.');
@@ -136,7 +140,7 @@ class PaymentWorkflowService
                 'notes' => $attributes['notes'] ?? $payment->notes,
             ])->save();
 
-            $order = $this->recalculateOrderPaymentSummary($payment->order()->firstOrFail());
+            $order = $this->recalculateOrderPaymentSummary($order);
             $this->handleOverpayment($order, $payment, $user, $overpaymentAction, $attributes['credit_notes'] ?? null);
             $order = $this->recalculateOrderPaymentSummary($order);
 
@@ -161,6 +165,7 @@ class PaymentWorkflowService
                 ->whereKey($order->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            $this->assertOrderAcceptsFinancialAction($order, 'confirmar pagamento');
 
             $order = $this->recalculateOrderPaymentSummary($order);
 
@@ -304,6 +309,7 @@ class PaymentWorkflowService
     {
         return DB::transaction(function () use ($order, $customer, $amountCents, $user, $notes): Payment {
             $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $this->assertOrderAcceptsFinancialAction($order, 'aplicar credito');
             $this->assertPositiveAmount($amountCents);
             $this->assertSameCompany($order, $customer);
 
@@ -636,6 +642,13 @@ class PaymentWorkflowService
     {
         if ($amountCents <= 0) {
             throw new DomainException('Payment amounts must be greater than zero.');
+        }
+    }
+
+    private function assertOrderAcceptsFinancialAction(Order $order, string $action): void
+    {
+        if ($order->status === Order::STATUS_CANCELLED) {
+            throw new DomainException("Nao e possivel {$action} em pedido cancelado.");
         }
     }
 

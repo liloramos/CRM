@@ -122,7 +122,7 @@ class ConversationCopilotEvaluationTest extends TestCase
             }
         }
 
-        $this->assertSame(63, $result->totalCases);
+        $this->assertSame(66, $result->totalCases);
         $this->assertTrue($result->meets($scorer->thresholds()), json_encode($result->scores()));
         $this->assertSame($before, [
             'orders' => Order::count(),

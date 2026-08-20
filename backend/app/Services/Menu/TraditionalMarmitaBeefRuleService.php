@@ -29,9 +29,10 @@ class TraditionalMarmitaBeefRuleService
 
         return match ($mode) {
             'beef_only' => $this->quoteBeefOnly($product, $traditionalMeatIds, $extraBeefQuantity),
+            'none' => $this->quoteWithoutMeat($product, $traditionalMeatIds, $extraBeefQuantity),
             'traditional' => $this->quoteTraditional($product, $traditionalMeatIds, $extraBeefQuantity),
             default => throw ValidationException::withMessages([
-                'meat_mode' => ['Escolha tradicional ou somente bife.'],
+                'meat_mode' => ['Escolha carnes tradicionais, somente bife ou sem carne.'],
             ]),
         };
     }
@@ -109,14 +110,49 @@ class TraditionalMarmitaBeefRuleService
         ];
     }
 
+    /** @param array<int, int> $traditionalMeatIds */
+    private function quoteWithoutMeat(Product $product, array $traditionalMeatIds, int $extraBeefQuantity): array
+    {
+        if (! (bool) data_get($product->composition_rules, 'traditional_meat_selection.allow_none', false)) {
+            throw ValidationException::withMessages([
+                'meat_mode' => ['Este produto nao permite a escolha sem carne.'],
+            ]);
+        }
+
+        if ($traditionalMeatIds !== []) {
+            throw ValidationException::withMessages([
+                'traditional_meat_component_ids' => ['Sem carne nao pode ser combinado com carnes tradicionais.'],
+            ]);
+        }
+
+        if ($extraBeefQuantity > 0) {
+            throw ValidationException::withMessages([
+                'extra_beef_quantity' => ['Sem carne nao pode ser combinado com bife adicional.'],
+            ]);
+        }
+
+        return [
+            'meat_mode' => 'none',
+            'base_price_cents' => (int) $product->base_price_cents,
+            'total_cents' => (int) $product->base_price_cents,
+            'traditional_meat_component_ids' => [],
+            'extra_beef_quantity' => 0,
+            'extra_beef_total_cents' => 0,
+        ];
+    }
+
     /**
      * @param  array<int, int>  $traditionalMeatIds
      */
     private function validateTraditionalMeats(Product $product, array $traditionalMeatIds): void
     {
-        if (count($traditionalMeatIds) !== 2) {
+        $rules = data_get($product->composition_rules, 'traditional_meat_selection', []);
+        $minTypes = (int) data_get($rules, 'min_types', 1);
+        $maxTypes = (int) data_get($rules, 'max_types', 2);
+
+        if (count($traditionalMeatIds) < $minTypes || count($traditionalMeatIds) > $maxTypes) {
             throw ValidationException::withMessages([
-                'traditional_meat_component_ids' => ['Escolha exatamente duas carnes tradicionais.'],
+                'traditional_meat_component_ids' => ["Escolha de {$minTypes} ate {$maxTypes} carnes tradicionais."],
             ]);
         }
 

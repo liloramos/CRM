@@ -49,7 +49,7 @@ class CopilotOrderItemSelectionAdapter
                 continue;
             }
 
-            $rows[] = ['component_link_id' => $link->id, 'quantity' => 1];
+            $rows[] = ['component_link_id' => $link->id, 'quantity' => $this->selectionQuantity($product, $link)];
         }
 
         $removedComponentIds = [];
@@ -117,12 +117,15 @@ class CopilotOrderItemSelectionAdapter
         $extraBeef = $this->extraBeefQuantity($product, $selections, $warnings);
         $selections['extra_beef'] = $extraBeef;
         $safeSelections = $this->safeMeatSelections($product, $selections, $meatMode, $resolvedMeats);
+        if ($resolvedMeats === [] && collect($warnings)->contains(fn (array $warning): bool => in_array($warning['code'] ?? null, ['AMBIGUOUS_MEAT', 'UNRESOLVED_MEAT'], true))) {
+            $safeSelections['meat_selection_pending'] = true;
+        }
         $quantity = (int) ($item['quantity'] ?? 1);
 
-        if ($meatMode === 'beef_only' && $this->hasTraditionalMeatSelection($selections)) {
+        if (in_array($meatMode, ['beef_only', 'none'], true) && $this->hasTraditionalMeatSelection($selections)) {
             $warnings[] = [
                 'code' => 'DOMAIN_SELECTION_REJECTED',
-                'message' => 'Somente bife nao pode ser combinado com carnes tradicionais.',
+                'message' => $meatMode === 'none' ? 'Sem carne nao pode ser combinado com carnes tradicionais.' : 'Somente bife nao pode ser combinado com carnes tradicionais.',
             ];
 
             return ['item' => [...$item, 'selections' => $safeSelections, 'removed_components' => $safeRemovedComponents, 'valid' => false], 'warnings' => $this->dedupeWarnings($warnings)];
@@ -214,6 +217,20 @@ class CopilotOrderItemSelectionAdapter
             ->values();
 
         return $matches->count() === 1 ? $matches->first() : null;
+    }
+
+    private function selectionQuantity(Product $product, ProductGroupComponent $link): int
+    {
+        $group = $product->optionGroups->firstWhere('id', $link->product_option_group_id);
+        if (! $group) {
+            return 1;
+        }
+
+        if ($group->min_quantity !== null && $group->max_quantity !== null && (int) $group->min_quantity === (int) $group->max_quantity) {
+            return (int) $group->min_quantity;
+        }
+
+        return max(1, (int) ($link->included_quantity ?? 1));
     }
 
     private function resolveRemovableGroup(Product $product, string $value): ?ProductOptionGroup
@@ -383,7 +400,11 @@ class CopilotOrderItemSelectionAdapter
     {
         $value = $this->key((string) ($selections['meat_mode'] ?? $selections['beef_variant'] ?? 'traditional'));
 
-        return in_array($value, ['beefonly', 'somente bife', 'somente bife', 'sobife'], true) ? 'beef_only' : 'traditional';
+        if (in_array($value, ['beefonly', 'somente bife', 'sobife'], true)) {
+            return 'beef_only';
+        }
+
+        return in_array($value, ['none', 'semcarne'], true) ? 'none' : 'traditional';
     }
 
     private function hasTraditionalMeatSelection(array $selections): bool
@@ -408,17 +429,20 @@ class CopilotOrderItemSelectionAdapter
     {
         if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
             $meat = $resolvedMeats[0] ?? null;
+            if ($meatMode === 'none') {
+                $selections['meat_mode'] = 'none';
+            }
             $selections['meat'] = $meat?->display_name ?: $meat?->name;
             $selections['meats'] = [];
 
             return $selections;
         }
 
-        if ($meatMode === 'beef_only') {
-            $selections['meat_mode'] = 'beef_only';
+        if (in_array($meatMode, ['beef_only', 'none'], true)) {
+            $selections['meat_mode'] = $meatMode;
         }
         $selections['meat'] = null;
-        $selections['meats'] = $meatMode === 'beef_only'
+        $selections['meats'] = in_array($meatMode, ['beef_only', 'none'], true)
             ? []
             : array_map(fn (MenuComponent $component): string => (string) ($component->display_name ?: $component->name), $resolvedMeats);
 

@@ -22,12 +22,13 @@ import type {
   StructuredProductOptionGroup,
 } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
+import type { CopilotOrderProposal } from '../../services/crm.service'
 
 export type AutomationModeSelection = 'assisted' | 'manual'
 
 type PaymentMethodSelection = 'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other'
 
-type MeatModeSelection = 'traditional' | 'beef_only'
+type MeatModeSelection = 'traditional' | 'beef_only' | 'none'
 
 type BlockedOrderDeletion = {
   order_id: string
@@ -44,6 +45,7 @@ type OperationalModalContentProps = {
   bulkDeleteCount: number
   cancelNotes: string
   cancelReason: string
+  copilotProposal: CopilotOrderProposal | null
   deleteConfirmation: string
   itemHasDifferentBeneficiary: boolean
   itemExtraBeef: boolean
@@ -113,6 +115,7 @@ export function OperationalModalContent({
   bulkDeleteCount,
   cancelNotes,
   cancelReason,
+  copilotProposal,
   deleteConfirmation,
   itemHasDifferentBeneficiary,
   itemExtraBeef,
@@ -176,6 +179,7 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>Crie um pedido real para cliente cadastrado ou cliente avulso. Destinatario diferente fica apenas no item, quando necessario.</p>
+        {copilotProposal ? <CopilotDraftNotice proposal={copilotProposal} stage="order" /> : null}
 
         {newCustomerMode ? (
           <div className="customer-create-panel">
@@ -276,6 +280,7 @@ export function OperationalModalContent({
 
     return (
       <div className="modal-fields">
+        {copilotProposal ? <CopilotDraftNotice proposal={copilotProposal} stage="item" /> : null}
         {addItemContext ? (
           <p>
             Pedido <strong>{addItemContext.orderCode}</strong>. O item sera adicionado somente a este pedido real.
@@ -913,6 +918,23 @@ function CustomerSearchCombobox({
   )
 }
 
+function CopilotDraftNotice({ proposal, stage }: { proposal: CopilotOrderProposal; stage: 'order' | 'item' }) {
+  const item = proposal.items[0]
+
+  return (
+    <div className="copilot-draft-notice" role="status">
+      <strong>Proposta do Copiloto aplicada ao rascunho local</strong>
+      {item ? <span>{item.quantity}x {item.product_name}{copilotMeatModeLabel(item.selections)}</span> : null}
+      <span>{stage === 'order' ? 'Revise os dados e crie o pedido manualmente.' : 'Revise a composicao antes de adicionar o item.'}</span>
+      {proposal.missing_information.length > 0 ? <span>Falta confirmar: {proposal.missing_information.map((missing) => missing.label).join(', ')}.</span> : null}
+    </div>
+  )
+}
+
+function copilotMeatModeLabel(selections: Record<string, unknown>): string {
+  return selections.meat_mode === 'none' ? ' - Sem carne' : ''
+}
+
 function BeefChoicePicker({
   dailyMeats,
   extraBeef,
@@ -995,6 +1017,21 @@ function BeefChoicePicker({
               <small>O bife substitui todas as carnes tradicionais.</small>
             </span>
           </label>
+          {meatConfiguration.traditional.allow_no_meat ? (
+            <label className={optionChoiceClassName(meatMode === 'none', false)}>
+              <input
+                checked={meatMode === 'none'}
+                name="meat-mode"
+                onChange={() => onMeatModeChange('none')}
+                type="radio"
+              />
+              <span className="option-choice__box" aria-hidden="true" />
+              <span className="option-choice__content">
+                <strong>Sem carne</strong>
+                <small>Escolha explícita, sem alterar o preço.</small>
+              </span>
+            </label>
+          ) : null}
         </div>
       </div>
 
@@ -1003,8 +1040,9 @@ function BeefChoicePicker({
           <div className="option-picker__heading">
             <span>Carnes do dia</span>
             <small>
-              Escolha {minMeats === maxMeats ? minMeats : `de ${minMeats} a ${maxMeats ?? 'varias'}`} carne
-              {minMeats === 1 && maxMeats === 1 ? '' : 's'}.
+              {meatConfiguration.traditional.allow_no_meat
+                ? `Escolha até ${maxMeats ?? 'várias'} carnes ou marque Sem carne.`
+                : `Escolha ${minMeats === maxMeats ? minMeats : `de ${minMeats} a ${maxMeats ?? 'várias'}`} carne${minMeats === 1 && maxMeats === 1 ? '' : 's'}.`}
             </small>
           </div>
           <div className="option-picker__grid">
@@ -1078,6 +1116,8 @@ function StructuredOptionPicker({
         const removableAsPreference = removableGroupCodes.includes(group.code)
         const removeGroupToken = removedGroupToken(group.code)
         const groupRemoved = selectedOptionIds.includes(removeGroupToken)
+        const noMeatToken = `no-meat:${group.code}`
+        const withoutMeat = selectedOptionIds.includes(noMeatToken)
 
         if (group.selection_mode === 'fixed') {
           return (
@@ -1150,11 +1190,29 @@ function StructuredOptionPicker({
                   </span>
                 </label>
               ) : null}
+              {group.allow_no_meat ? (
+                <label className={optionChoiceClassName(withoutMeat, false)}>
+                  <input
+                    checked={withoutMeat}
+                    onChange={() => onSelectedOptionsChange(
+                      withoutMeat
+                        ? selectedOptionIds.filter((optionId) => optionId !== noMeatToken)
+                        : [...selectedOptionIds.filter((optionId) => !groupTokens.includes(optionId)), noMeatToken],
+                    )}
+                    type="checkbox"
+                  />
+                  <span className="option-choice__box" aria-hidden="true" />
+                  <span className="option-choice__content">
+                    <strong>Sem carne</strong>
+                    <small>Escolha explícita, sem alterar o preço.</small>
+                  </span>
+                </label>
+              ) : null}
               <div className="option-picker__grid">
               {group.component_options.map((option) => {
                 const token = componentOptionToken(option.id)
                 const checked = selectedOptionIds.includes(token)
-                const disabled = groupRemoved || !option.link_active || option.requires_confirmation || !option.available
+                const disabled = groupRemoved || withoutMeat || !option.link_active || option.requires_confirmation || !option.available
 
                 return (
                   <label className={optionChoiceClassName(checked, disabled)} key={token}>
@@ -1176,7 +1234,7 @@ function StructuredOptionPicker({
               {group.product_options.map((option) => {
                 const token = productOptionToken(option.id)
                 const checked = selectedOptionIds.includes(token)
-                const disabled = groupRemoved || !option.link_active || option.requires_confirmation || !option.available
+                const disabled = groupRemoved || withoutMeat || !option.link_active || option.requires_confirmation || !option.available
 
                 return (
                   <label className={optionChoiceClassName(checked, disabled)} key={token}>
@@ -1357,7 +1415,9 @@ function buildCompositionSummary(
     }
   }
 
-  if (product.meatConfiguration) {
+  if (meatMode === 'none') {
+    composition.push('Sem carne')
+  } else if (product.meatConfiguration) {
     if (meatMode === 'beef_only') {
       composition.push('Somente bife')
     } else {

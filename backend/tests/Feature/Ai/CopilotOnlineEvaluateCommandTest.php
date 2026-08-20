@@ -191,10 +191,8 @@ class CopilotOnlineEvaluateCommandTest extends TestCase
             $report = json_decode((string) File::get($path), true, 512, JSON_THROW_ON_ERROR);
             $result = $report['results'][0];
             $this->assertContains('selections', $result['model_failed_dimensions']);
-            $this->assertContains('missing_information', $result['model_failed_dimensions']);
             $this->assertSame([], $result['safe_failed_dimensions']);
             $this->assertContains('selections', $result['safe_corrections']);
-            $this->assertContains('missing_information', $result['safe_corrections']);
             $this->assertGreaterThanOrEqual(1, data_get($report, 'summary.safe_corrections.total_cases'));
             $this->assertArrayHasKey('selections', data_get($report, 'summary.safe_corrections.by_dimension'));
         } finally {

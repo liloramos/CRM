@@ -10,11 +10,13 @@ use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\Product;
 use App\Models\User;
+use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\Payments\PaymentWorkflowService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\CompanySeeder;
 use Database\Seeders\MenuSeeder;
+use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -185,6 +187,58 @@ class PaymentWorkflowTest extends TestCase
         $this->assertSame(1, $order->payments()->whereNotNull('voided_at')->count());
     }
 
+    public function test_cancelled_unpaid_orders_are_not_financial_pending_but_paid_history_is_preserved(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente Financeiro']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+
+        $active = $this->withTotal($this->createOrderForExistingCustomer($company, $customer, 'n8-casa'), 2000);
+        $cancelledOne = $this->withTotal($this->createOrderForExistingCustomer($company, $customer, 'n8-casa'), 1600);
+        $cancelledTwo = $this->withTotal($this->createOrderForExistingCustomer($company, $customer, 'n8-casa'), 1300);
+        $orders->transitionTo($cancelledOne, Order::STATUS_CANCELLED, $user, 'cliente_desistiu');
+        $orders->transitionTo($cancelledTwo, Order::STATUS_CANCELLED, $user, 'cliente_desistiu');
+
+        $snapshot = app(OperationalCrmPresenter::class)->snapshot($company, $user);
+        $entries = collect($snapshot['financeEntries'])->keyBy('orderId');
+
+        $this->assertEquals(20, $snapshot['financialSummary']['pendingAmount']);
+        $this->assertSame(1, $snapshot['financialSummary']['pendingOrders']);
+        $this->assertSame('pendente', $entries[(string) $active->id]['status']);
+        $this->assertEquals(20, $entries[(string) $active->id]['pendingAmount']);
+        $this->assertSame('cancelado', $entries[(string) $cancelledOne->id]['status']);
+        $this->assertEquals(0, $entries[(string) $cancelledOne->id]['pendingAmount']);
+        $this->assertSame('Sem cobranca', $entries[(string) $cancelledOne->id]['method']);
+
+        try {
+            $payments->confirmOrderPayment($cancelledOne, $user, ['method' => Payment::METHOD_PIX]);
+            $this->fail('A confirmacao de pagamento deveria ser bloqueada para pedido cancelado.');
+        } catch (DomainException $exception) {
+            $this->assertSame('Nao e possivel confirmar pagamento em pedido cancelado.', $exception->getMessage());
+        }
+
+        $paidThenCancelled = $this->withTotal($this->createOrderForExistingCustomer($company, $customer, 'n8-casa'), 1300);
+        $payment = $payments->confirmOrderPayment($paidThenCancelled, $user, ['method' => Payment::METHOD_PIX, 'amount_cents' => 1300]);
+        $orders->transitionTo($paidThenCancelled->refresh(), Order::STATUS_CANCELLED, $user, 'cancelamento_posterior_ao_pagamento');
+
+        $snapshot = app(OperationalCrmPresenter::class)->snapshot($company, $user);
+        $paidEntry = collect($snapshot['financeEntries'])->keyBy('orderId')[(string) $paidThenCancelled->id];
+        $this->assertSame('pago', $paidEntry['status']);
+        $this->assertEquals(13, $paidEntry['receivedAmount']);
+        $this->assertEquals(0, $paidEntry['pendingAmount']);
+        $this->assertEquals(13, $snapshot['financialSummary']['confirmedRevenue']);
+        $this->assertDatabaseHas('payments', ['id' => $payment->id, 'status' => Payment::STATUS_CONFIRMED]);
+
+        $voided = $payments->voidLatestConfirmedPayment($paidThenCancelled, $user, 'Estorno humano pendente de tratamento.');
+        $this->assertSame(Payment::STATUS_CANCELLED, $voided->status);
+        $this->assertSame(Order::STATUS_CANCELLED, $paidThenCancelled->refresh()->status);
+        $this->assertDatabaseHas('payments', ['id' => $payment->id, 'voided_at' => $voided->voided_at]);
+    }
+
     /**
      * @return array{0: Company, 1: Customer, 2: Order}
      */
@@ -212,6 +266,16 @@ class PaymentWorkflowTest extends TestCase
         ]);
 
         $orders->addItem($order, $product);
+
+        return $order->refresh();
+    }
+
+    private function withTotal(Order $order, int $totalCents): Order
+    {
+        $order->forceFill([
+            'total_cents' => $totalCents,
+            'amount_due_cents' => $totalCents,
+        ])->save();
 
         return $order->refresh();
     }

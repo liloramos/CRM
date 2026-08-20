@@ -11,7 +11,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Modal } from '../../components/ui/Modal'
 import { EmptyState } from '../../components/ui/States'
 import { CustomerEditor } from '../clientes/CustomerEditor'
-import { getConversationQuickReplies, getConversationStickerFavorites, toggleConversationStickerFavorite, type ConversationMediaSendOptions, type CopilotAnalysis, type FulfillmentAction, type UpdateCustomerPayload } from '../../services/crm.service'
+import { getConversationQuickReplies, getConversationStickerFavorites, toggleConversationStickerFavorite, type ConversationMediaSendOptions, type CopilotAnalysis, type CopilotOrderProposal, type FulfillmentAction, type UpdateCustomerPayload } from '../../services/crm.service'
 import type {
   Conversation,
   ConversationAlert,
@@ -62,6 +62,7 @@ type ConversationsPageProps = {
   selectedConversation?: Conversation
   onAcknowledgeAlert: (conversationId: string, alertId: string) => void
   onAnalyzeCopilot: (conversationId: string) => Promise<CopilotAnalysis>
+  onApplyCopilotProposal: (conversation: Conversation, proposal: CopilotOrderProposal) => boolean
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
   onCreateOrder: (conversationId: string) => Promise<void>
@@ -90,6 +91,7 @@ export function ConversationsPage({
   linkedOrder,
   onAcknowledgeAlert,
   onAnalyzeCopilot,
+  onApplyCopilotProposal,
   onApprovePayment,
   onChangeMode,
   onCreateOrder,
@@ -135,6 +137,8 @@ export function ConversationsPage({
   const [paymentRejectReason, setPaymentRejectReason] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
+  const [copilotAnalysisConversationId, setCopilotAnalysisConversationId] = useState<string | null>(null)
+  const [copilotProposalApplied, setCopilotProposalApplied] = useState(false)
   const [isAnalyzingCopilot, setIsAnalyzingCopilot] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null)
   const [customerError, setCustomerError] = useState<string | null>(null)
@@ -1091,6 +1095,7 @@ export function ConversationsPage({
       || normalize(reply.shortcut).includes(needle)
       || normalize(reply.body).includes(needle)
   })
+  const visibleCopilotAnalysis = copilotAnalysisConversationId === selectedConversation?.id ? copilotAnalysis : null
 
   async function handleAnalyzeCopilot() {
     if (!selectedConversation || isAnalyzingCopilot) return
@@ -1098,6 +1103,8 @@ export function ConversationsPage({
     setLocalError(null)
     try {
       setCopilotAnalysis(await onAnalyzeCopilot(selectedConversation.id))
+      setCopilotAnalysisConversationId(selectedConversation.id)
+      setCopilotProposalApplied(false)
     } catch {
       setLocalError('Nao foi possivel analisar a conversa agora.')
     } finally {
@@ -1106,9 +1113,15 @@ export function ConversationsPage({
   }
 
   function handleUseCopilotReply() {
-    if (!copilotAnalysis?.suggested_reply) return
+    if (!visibleCopilotAnalysis?.suggested_reply) return
     if (composerBody.trim() && !window.confirm('Substituir o texto atual pela resposta sugerida?')) return
-    setComposerBody(copilotAnalysis.suggested_reply)
+    setComposerBody(visibleCopilotAnalysis.suggested_reply)
+  }
+
+  function handleApplyCopilotProposal() {
+    if (!selectedConversation || !visibleCopilotAnalysis?.proposal?.can_apply) return
+
+    setCopilotProposalApplied(onApplyCopilotProposal(selectedConversation, visibleCopilotAnalysis.proposal))
   }
 
   return (
@@ -1816,8 +1829,8 @@ export function ConversationsPage({
               ) : null}
 
               <div className="conversation-context-block">
-                <h3>Copiloto IA</h3>
-                {!copilotAnalysis ? (
+                <h3>Proposta do Copiloto</h3>
+                {!visibleCopilotAnalysis ? (
                   <>
                     <p>Analise a conversa para identificar intencao, pedido e informacoes pendentes.</p>
                     <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="secondary">
@@ -1826,11 +1839,17 @@ export function ConversationsPage({
                   </>
                 ) : (
                   <div className="conversation-copilot-result">
-                    <strong>{copilotAnalysis.intent}</strong>
-                    {copilotAnalysis.draft_order.items.map((item, index) => <p key={`${item.menu_item_slug}-${index}`}>{item.quantity}x {item.menu_item_slug}{item.removed_components.length ? ` - Retirar: ${item.removed_components.join(', ')}` : ''}{item.item_notes ? ` - Obs: ${item.item_notes}` : ''}</p>)}
-                    {copilotAnalysis.missing_information.map((missing) => <small key={missing.code}>Falta: {missing.label}</small>)}
-                    {copilotAnalysis.warnings.map((warning) => <small key={`${warning.code}-${warning.message}`}>{warning.message}</small>)}
-                    {copilotAnalysis.suggested_reply ? <><p>{copilotAnalysis.suggested_reply}</p><Button onClick={handleUseCopilotReply} variant="secondary">Usar resposta</Button></> : null}
+                    <strong>{visibleCopilotAnalysis.proposal ? copilotApplyabilityLabel(visibleCopilotAnalysis.proposal.applyability) : visibleCopilotAnalysis.intent}</strong>
+                    {(visibleCopilotAnalysis.proposal?.items ?? visibleCopilotAnalysis.draft_order.items).length ? <div className="conversation-copilot-result__section">
+                      <span>Resumo</span>
+                      {(visibleCopilotAnalysis.proposal?.items ?? visibleCopilotAnalysis.draft_order.items).map((item, index) => <p key={`${item.menu_item_slug}-${index}`}>{item.quantity}x {'product_name' in item ? item.product_name : item.menu_item_slug}{proposalSelectionsLabel(item.selections)}{item.removed_components.length ? ` - Retirar: ${item.removed_components.join(', ')}` : ''}{item.item_notes ? ` - Obs: ${item.item_notes}` : ''}</p>)}
+                    </div> : null}
+                    {(visibleCopilotAnalysis.proposal?.missing_information ?? visibleCopilotAnalysis.missing_information).length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--missing"><span>Pendências</span>{(visibleCopilotAnalysis.proposal?.missing_information ?? visibleCopilotAnalysis.missing_information).map((missing) => <small key={missing.code}>{missing.message ?? `Falta: ${missing.label}`}</small>)}</div> : null}
+                    {(visibleCopilotAnalysis.proposal?.warnings ?? visibleCopilotAnalysis.warnings).length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--warning"><span>Atenção</span>{(visibleCopilotAnalysis.proposal?.warnings ?? visibleCopilotAnalysis.warnings).map((warning) => <small key={`${warning.code}-${warning.message}`}>{warning.message}</small>)}</div> : null}
+                    {visibleCopilotAnalysis.proposal?.blocking_reasons.length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--warning"><span>Revisão necessária</span>{visibleCopilotAnalysis.proposal.blocking_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div> : null}
+                    {visibleCopilotAnalysis.proposal?.can_apply ? <Button disabled={isActionBusy} onClick={handleApplyCopilotProposal} variant="primary">Aplicar ao rascunho</Button> : null}
+                    {copilotProposalApplied ? <small>Proposta aplicada ao rascunho. Revise antes de salvar.</small> : null}
+                    {visibleCopilotAnalysis.suggested_reply ? <div className="conversation-copilot-result__section conversation-copilot-result__section--reply"><span>Resposta sugerida</span><p>{visibleCopilotAnalysis.suggested_reply}</p><Button onClick={handleUseCopilotReply} variant="secondary">Usar resposta</Button></div> : null}
                     <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="ghost">Analisar novamente</Button>
                   </div>
                 )}
@@ -1922,6 +1941,25 @@ export function ConversationsPage({
       </div>
     </PageContainer>
   )
+}
+
+function copilotApplyabilityLabel(applyability: CopilotOrderProposal['applyability']): string {
+  return applyability === 'READY' ? 'Pronta para revisar' : applyability === 'PARTIAL' ? 'Parcial - revisar pendencias' : 'Revisao manual necessaria'
+}
+
+function proposalSelectionsLabel(selections: Record<string, unknown> | undefined): string {
+  if (!selections) return ''
+
+  const values = Object.entries(selections)
+    .filter(([key, value]) => !['meat_mode', 'extra_beef'].includes(key) && value !== null && value !== '' && (!Array.isArray(value) || value.length > 0))
+    .flatMap(([, value]) => Array.isArray(value) ? value : [value])
+    .filter((value): value is string => typeof value === 'string')
+
+  if ((selections.meat_mode ?? '') === 'beef_only') values.push('Somente bife')
+  if ((selections.meat_mode ?? '') === 'none') values.push('Sem carne')
+  if (Number(selections.extra_beef ?? 0) > 0) values.push('Bife adicional')
+
+  return values.length ? ` - ${values.join(', ')}` : ''
 }
 
 function ConversationAlertBanner({

@@ -14,14 +14,54 @@ final class CopilotMeatModeGroundingGuard
      */
     public function ground(Product $product, array $selections, array $messages): array
     {
-        if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
-            return ['selections' => $selections, 'warnings' => []];
+        $text = $this->customerText($messages);
+        $supportsBeefModes = in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true);
+        $supportsWithoutMeat = $supportsBeefModes
+            ? true
+            : in_array('carne', data_get($product->composition_rules, 'allow_no_meat_group_codes', []), true);
+        $withoutMeat = preg_match('/\b(?:sem\s+carne|nao\s+(?:quero|quero)\s+carne|pode\s+vir\s+sem\s+carne)\b/', $text) === 1;
+
+        if (! $supportsBeefModes) {
+            if ($withoutMeat && $supportsWithoutMeat) {
+                return ['selections' => [...$selections, 'meat_mode' => 'none', 'meat' => null, 'meats' => []], 'warnings' => []];
+            }
+
+            return ['selections' => $selections, 'warnings' => $withoutMeat ? [[
+                'code' => 'DOMAIN_SELECTION_REJECTED',
+                'message' => 'Este produto nao permite a escolha sem carne.',
+            ]] : []];
         }
 
-        $text = $this->customerText($messages);
         $negatedOnlyBeef = preg_match('/\bnao\s+(?:quero\s+)?(?:so|somente|apenas)\s+bife(?:s)?\b/', $text) === 1;
         $onlyBeef = preg_match('/\b(?:so|somente|apenas)\s+bife(?:s)?\b/', $text) === 1 && ! $negatedOnlyBeef;
         $extraBeef = preg_match('/\b(?:bife\s+(?:extra|adicional|por\s+fora)|mais\s+um\s+bife)\b/', $text) === 1;
+
+        if ($withoutMeat) {
+            if (! $supportsWithoutMeat) {
+                return [
+                    'selections' => $selections,
+                    'warnings' => [[
+                        'code' => 'DOMAIN_SELECTION_REJECTED',
+                        'message' => 'Este produto nao permite a escolha sem carne.',
+                    ]],
+                ];
+            }
+
+            if ($onlyBeef || $extraBeef || $this->hasExplicitTraditionalMeat($text)) {
+                return [
+                    'selections' => [...$selections, 'meat_mode' => null, 'beef_variant' => null, 'meat' => null, 'meats' => [], 'extra_beef' => 0],
+                    'warnings' => [[
+                        'code' => 'CONFLICTING_MEAT_REQUEST',
+                        'message' => 'Sem carne nao pode ser combinado com outra escolha de carne.',
+                    ]],
+                ];
+            }
+
+            return [
+                'selections' => [...$selections, 'meat_mode' => 'none', 'beef_variant' => null, 'meat' => null, 'meats' => [], 'extra_beef' => 0],
+                'warnings' => [],
+            ];
+        }
 
         if ($negatedOnlyBeef && $this->key((string) ($selections['meat_mode'] ?? '')) === 'beefonly') {
             return [
@@ -86,6 +126,6 @@ final class CopilotMeatModeGroundingGuard
 
     private function hasExplicitTraditionalMeat(string $text): bool
     {
-        return preg_match('/\b(?:porco|frango|almondega|linguica|peixe|carne)\b/', $text) === 1;
+        return preg_match('/\b(?:porco|frango|almondega|linguica|peixe)\b/', $text) === 1;
     }
 }

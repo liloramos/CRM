@@ -2344,6 +2344,48 @@ label textarea {
   background: rgba(248, 113, 113, 0.08);
 }
 
+.conversation-copilot-result {
+  display: grid;
+  gap: 10px;
+}
+
+.conversation-copilot-result__section {
+  display: grid;
+  gap: 5px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(148, 163, 184, 0.38);
+}
+
+.conversation-copilot-result__section > span {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.conversation-copilot-result__section p,
+.conversation-copilot-result__section small {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-copilot-result__section--missing {
+  border-left-color: rgba(245, 158, 11, 0.68);
+}
+
+.conversation-copilot-result__section--warning {
+  border-left-color: rgba(248, 113, 113, 0.68);
+}
+
+.conversation-copilot-result__section--reply {
+  border-left-color: rgba(167, 139, 250, 0.68);
+}
+
+.conversation-copilot-result__section--reply p {
+  white-space: pre-line;
+}
+
 .ai-assist-card,
 .attention-box {
   display: grid;
@@ -3852,6 +3894,20 @@ label textarea {
 
 .customer-result span {
   color: var(--color-text-secondary);
+}
+
+.copilot-draft-notice {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  background: rgba(126, 34, 206, 0.1);
+}
+
+.copilot-draft-notice strong {
+  color: var(--color-text);
 }
 
 .select-field {

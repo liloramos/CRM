@@ -95,7 +95,7 @@ class TraditionalMarmitaBeefRuleServiceTest extends TestCase
 
         $this->assertValidationError(fn () => $service->quote($product, [
             'meat_mode' => 'traditional',
-            'traditional_meat_component_ids' => [$this->menuComponent('porco')->id],
+            'traditional_meat_component_ids' => [],
         ]), 'traditional_meat_component_ids');
 
         $this->assertValidationError(fn () => $service->quote($product, [

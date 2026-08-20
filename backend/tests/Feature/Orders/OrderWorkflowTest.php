@@ -644,6 +644,37 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_house_marmitas_require_an_explicit_no_meat_choice_when_configured(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'structured_options' => [],
+            ])
+            ->assertStatus(422);
+
+        $withoutMeat = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'none',
+                'structured_options' => [],
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+
+        $this->assertSame(8, $withoutMeat['unitPrice']);
+        $this->assertContains('Sem carne', $withoutMeat['composition']);
+    }
+
     public function test_n8_beef_modes_reject_invalid_combinations_and_unavailable_meat(): void
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
@@ -689,8 +720,66 @@ class OrderWorkflowTest extends TestCase
                 'traditional_meat_component_ids' => [$porco],
                 'structured_options' => [],
             ])
+            ->assertOk();
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [],
+                'structured_options' => [],
+            ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Escolha exatamente duas carnes tradicionais.');
+            ->assertJsonPath('message', 'Escolha de 1 ate 2 carnes tradicionais.');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'traditional',
+                'traditional_meat_component_ids' => [$porco, $frango, $porco],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Escolha de 1 ate 2 carnes tradicionais.');
+
+        $withoutMeat = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'none',
+                'structured_options' => [],
+            ])
+            ->assertOk()
+            ->json('data.items.1');
+
+        $this->assertSame(16, $withoutMeat['unitPrice']);
+        $this->assertContains('Sem carne', $withoutMeat['composition']);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'none',
+                'traditional_meat_component_ids' => [$porco],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Sem carne nao pode ser combinado com carnes tradicionais.');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/items", [
+                'product_id' => $product->id,
+                'quantity' => 1,
+                'meat_mode' => 'none',
+                'additions' => [
+                    ['code' => 'extra_beef', 'quantity' => 1],
+                ],
+                'structured_options' => [],
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Sem carne nao pode ser combinado com bife adicional.');
 
         $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
@@ -874,6 +963,16 @@ class OrderWorkflowTest extends TestCase
         $this->assertSame(Order::STATUS_CANCELLED, $order->refresh()->status);
         $this->assertNotNull($order->cancelled_at);
         $this->assertSame(1, $order->items()->count());
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                'method' => Payment::METHOD_PIX,
+                'amount_cents' => 800,
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Nao e possivel confirmar pagamento em pedido cancelado.');
+
+        $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
     }
 
     public function test_order_status_endpoint_rejects_invalid_transition_and_payment_confirmation_is_idempotent(): void

@@ -4,6 +4,7 @@ namespace Tests\Feature\Ai;
 
 use App\Contracts\Ai\ConversationCopilotProviderInterface;
 use App\Models\Company;
+use App\Models\Product;
 use App\Services\Ai\ConversationCopilotContextBuilder;
 use App\Services\Ai\ConversationCopilotPipeline;
 use App\Services\Ai\CopilotEvaluationDataset;
@@ -185,6 +186,36 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->assertNotContains('SALADA', array_column($n8WithoutSalad['missing_information'], 'code'));
     }
 
+    public function test_n8_casa_keeps_the_two_piece_meat_portion_without_a_technical_warning(): void
+    {
+        $company = $this->seedRestaurant();
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8casa',
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco', 'salada' => 'vinagrete'],
+                'removed_components' => [],
+                'notes' => '',
+            ]], 'fulfillment' => null],
+            'missing_information' => [],
+            'warnings' => [],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze(
+            $company,
+            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero N8 Casa de bisteca de porco com vinagrete']], null, $this->evaluationDate()),
+            $this->evaluationDate(),
+        )['safe'];
+
+        $this->assertSame('n8-casa', $safe['draft_order']['items'][0]['menu_item_slug']);
+        $this->assertSame('Porco', $safe['draft_order']['items'][0]['selections']['meat']);
+        $this->assertSame('vinagrete', $safe['draft_order']['items'][0]['selections']['salada']);
+        $this->assertNotContains('DOMAIN_SELECTION_REJECTED', array_column($safe['warnings'], 'code'));
+        $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
+        $this->assertNotContains('SALADA', array_column($safe['missing_information'], 'code'));
+    }
+
     public function test_n8_without_the_casa_qualifier_resolves_to_the_traditional_variant(): void
     {
         $company = $this->seedRestaurant();
@@ -338,7 +369,7 @@ class ConversationCopilotPipelineTest extends TestCase
 
         $this->assertSame(['Porco'], $item['selections']['meats']);
         $this->assertSame(1, $item['selections']['extra_beef']);
-        $this->assertContains('CARNE', array_column($safe['missing_information'], 'code'));
+        $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
         $this->assertSame(1, collect($safe['warnings'])->where('code', 'AMBIGUOUS_MEAT')->count());
         $this->assertFalse($item['valid']);
     }
@@ -362,7 +393,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $safe = app(ConversationCopilotPipeline::class)->analyze($company, $context, $this->evaluationDate())['safe'];
 
         $this->assertSame(['Porco'], data_get($safe, 'draft_order.items.0.selections.meats'));
-        $this->assertContains('CARNE', array_column($safe['missing_information'], 'code'));
+        $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
         $this->assertContains('AMBIGUOUS_MEAT', array_column($safe['warnings'], 'code'));
     }
 
@@ -681,7 +712,76 @@ class ConversationCopilotPipelineTest extends TestCase
 
             $this->assertSame('n8-tradicional', data_get($safe, 'draft_order.items.0.menu_item_slug'));
             $this->assertSame(['Porco'], data_get($safe, 'draft_order.items.0.selections.meats'));
-            $this->assertContains('CARNE', array_column($safe['missing_information'], 'code'));
+            $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
+        }
+    }
+
+    public function test_explicit_without_meat_is_grounded_without_treating_omission_as_without_meat(): void
+    {
+        $company = $this->seedRestaurant();
+        $n8 = Product::query()->where('company_id', $company->id)->where('slug', 'n8-tradicional')->firstOrFail();
+        $n8->forceFill([
+            'composition_rules' => [...($n8->composition_rules ?? []), 'traditional_meat_selection' => [
+                'min_types' => 1,
+                'max_types' => 2,
+                'allow_none' => true,
+            ]],
+        ])->save();
+        $this->assertTrue((bool) data_get($n8->fresh()->composition_rules, 'traditional_meat_selection.allow_none', false));
+
+        foreach ([
+            ['message' => 'quero uma n8 sem carne', 'mode' => 'none', 'has_meat_missing' => false],
+            ['message' => 'quero uma n8', 'mode' => 'traditional', 'has_meat_missing' => true],
+            ['message' => 'quero uma n8 de porco', 'mode' => 'traditional', 'has_meat_missing' => false],
+        ] as $scenario) {
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'draft_order' => ['items' => [[
+                    'product' => 'n8livre',
+                    'quantity' => 1,
+                    'selections' => [],
+                    'removed_components' => [],
+                    'notes' => '',
+                ]], 'fulfillment' => null],
+            ]));
+
+            $safe = app(ConversationCopilotPipeline::class)->analyze(
+                $company,
+                app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => $scenario['message']]], null, $this->evaluationDate()),
+                $this->evaluationDate(),
+            )['safe'];
+
+            $this->assertSame($scenario['mode'], data_get($safe, 'draft_order.items.0.selections.meat_mode') ?? 'traditional');
+            $this->assertSame($scenario['has_meat_missing'], in_array('CARNE', array_column($safe['missing_information'], 'code'), true));
+        }
+    }
+
+    public function test_without_meat_rejects_extra_beef_and_beef_only_combinations(): void
+    {
+        $company = $this->seedRestaurant();
+
+        foreach (['quero uma n8 sem carne com bife adicional', 'quero uma n8 sem carne, somente bife'] as $message) {
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'draft_order' => ['items' => [[
+                    'product' => 'n8livre',
+                    'quantity' => 1,
+                    'selections' => ['meat_mode' => 'none', 'extra_beef' => 1],
+                    'removed_components' => [],
+                    'notes' => '',
+                ]], 'fulfillment' => null],
+            ]));
+
+            $safe = app(ConversationCopilotPipeline::class)->analyze(
+                $company,
+                app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => $message]], null, $this->evaluationDate()),
+                $this->evaluationDate(),
+            )['safe'];
+
+            $selections = data_get($safe, 'draft_order.items.0.selections');
+            $this->assertNull($selections['meat_mode']);
+            $this->assertSame(0, $selections['extra_beef']);
+            $this->assertContains('CONFLICTING_MEAT_REQUEST', array_column($safe['warnings'], 'code'));
         }
     }
 
@@ -848,7 +948,7 @@ class ConversationCopilotPipelineTest extends TestCase
 
         $this->assertSame('ORDER_CHANGE', $safe['intent']);
         $this->assertContains('ADDRESS', array_column($safe['missing_information'], 'code'));
-        $this->assertContains('CARNE', array_column($safe['missing_information'], 'code'));
+        $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
         $this->assertNotContains('PAYMENT_METHOD', array_column($safe['missing_information'], 'code'));
     }
 
@@ -950,7 +1050,7 @@ class ConversationCopilotPipelineTest extends TestCase
         )['safe'];
 
         $this->assertSame(['Porco'], $safeFriday['draft_order']['items'][0]['selections']['meats']);
-        $this->assertContains('CARNE', array_column($safeFriday['missing_information'], 'code'));
+        $this->assertNotContains('CARNE', array_column($safeFriday['missing_information'], 'code'));
     }
 
     /** @return array<string,mixed> */

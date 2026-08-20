@@ -4,24 +4,43 @@ namespace App\Services\Ai;
 
 use App\Models\Company;
 use App\Models\Conversation;
+use App\Models\Order;
 use App\Models\Product;
 use App\Services\Menu\DailyStructuredMenuService;
+use App\Services\Orders\CustomerActiveOrderResolver;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Str;
 
 final class ConversationCopilotContextBuilder
 {
-    public function __construct(private readonly DailyStructuredMenuService $dailyMenu) {}
+    public function __construct(
+        private readonly DailyStructuredMenuService $dailyMenu,
+        private readonly CustomerActiveOrderResolver $activeOrders,
+    ) {}
 
     /** @return array<string,mixed> */
     public function forConversation(Conversation $conversation): array
     {
         $conversation->loadMissing(['company', 'activeOrder']);
         $window = max(3, min(30, (int) config('chatbotcrm.ai.copilot.message_window', 12)));
-        $messages = $conversation->messages()->latest('id')->limit($window)->get()->reverse()->values();
+        $activeOrder = $this->activeOrders->forConversation($conversation);
+        $boundary = $this->latestClosedOrderBoundary($conversation);
+        $messages = $conversation->messages()
+            ->when($boundary !== null, fn ($query) => $query->where('created_at', '>', $boundary['at']))
+            ->latest('id')
+            ->limit($window)
+            ->get()
+            ->reverse()
+            ->values();
 
-        return $this->build($conversation->company, $messages->map(fn ($message): array => ['direction' => $message->direction, 'type' => $message->type, 'body' => (string) $message->content])->all(), $conversation->activeOrder?->only(['code', 'status', 'payment_status', 'fulfillment_type']), CarbonImmutable::today());
+        return $this->build(
+            $conversation->company,
+            $messages->map(fn ($message): array => ['direction' => $message->direction, 'type' => $message->type, 'body' => (string) $message->content])->all(),
+            $activeOrder?->only(['code', 'status', 'payment_status', 'fulfillment_type']),
+            CarbonImmutable::today(),
+            $boundary,
+        );
     }
 
     /** @param list<array<string,mixed>> $messages @param array<string,mixed>|null $activeOrder @return array<string,mixed> */
@@ -31,7 +50,7 @@ final class ConversationCopilotContextBuilder
     }
 
     /** @param list<array<string,mixed>> $messages @param array<string,mixed>|null $activeOrder @return array<string,mixed> */
-    private function build(Company $company, array $messages, ?array $activeOrder, CarbonInterface $date): array
+    private function build(Company $company, array $messages, ?array $activeOrder, CarbonInterface $date, ?array $boundary = null): array
     {
         $messages = array_map(fn (array $message): array => ['direction' => $message['direction'] ?? 'inbound', 'type' => $message['type'] ?? 'text', 'body' => Str::limit((string) ($message['body'] ?? ''), 800, '')], $messages);
 
@@ -39,6 +58,10 @@ final class ConversationCopilotContextBuilder
             'latest_message' => ['body' => (string) data_get($messages, (count($messages) - 1).'.body', '')],
             'messages' => $messages,
             'active_order' => $activeOrder,
+            'cycle_boundary' => [
+                'applied' => $boundary !== null,
+                'source' => $boundary['source'] ?? null,
+            ],
             'previous_order_context' => [
                 'available' => false,
                 'instruction' => 'Nenhum pedido historico foi carregado. Solicite uma referencia explicita antes de repetir um pedido anterior.',
@@ -46,6 +69,38 @@ final class ConversationCopilotContextBuilder
             'evaluation_date' => $date->toDateString(),
             'menu' => $this->menuContext($company),
             'daily_meats' => $this->dailyMeats($company, $date),
+        ];
+    }
+
+    /** @return array{at:CarbonInterface,source:string}|null */
+    private function latestClosedOrderBoundary(Conversation $conversation): ?array
+    {
+        $order = Order::query()
+            ->where('company_id', $conversation->company_id)
+            ->whereIn('status', [Order::STATUS_FINISHED, Order::STATUS_CANCELLED])
+            ->where(function ($query) use ($conversation): void {
+                $query->where('conversation_id', $conversation->id);
+
+                if ($conversation->customer_id) {
+                    $query->orWhere(function ($manualOrders) use ($conversation): void {
+                        $manualOrders
+                            ->whereNull('conversation_id')
+                            ->where('payer_customer_id', $conversation->customer_id);
+                    });
+                }
+            })
+            ->orderByRaw('COALESCE(finished_at, cancelled_at, updated_at, created_at) DESC')
+            ->first();
+
+        if (! $order instanceof Order) {
+            return null;
+        }
+
+        return [
+            'at' => $order->finished_at ?? $order->cancelled_at ?? $order->updated_at ?? $order->created_at,
+            'source' => (int) $order->conversation_id === (int) $conversation->id
+                ? 'closed_conversation_order'
+                : 'closed_customer_order',
         ];
     }
 
@@ -93,6 +148,8 @@ final class ConversationCopilotContextBuilder
                     'slug' => $product->slug,
                     'name' => $product->name,
                     'rule' => $product->menu_rule_code,
+                    'allow_no_meat' => (bool) data_get($product->composition_rules, 'traditional_meat_selection.allow_none', false)
+                        || in_array('carne', data_get($product->composition_rules, 'allow_no_meat_group_codes', []), true),
                     'groups' => $product->optionGroups->map(fn ($group): array => [
                         'code' => $group->code,
                         'label' => $group->label,

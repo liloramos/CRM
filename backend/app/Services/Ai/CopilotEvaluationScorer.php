@@ -107,6 +107,9 @@ final class CopilotEvaluationScorer
             && blank($selections['beef_variant'] ?? null)
             && (int) ($selections['extra_beef'] ?? 0) === 0;
         foreach ($selections as $key => $value) {
+            if ($key === 'meat_selection_pending') {
+                continue;
+            }
             if ($value === null || $value === '' || $value === [] || ($key === 'extra_beef' && (int) $value === 0)) {
                 continue;
             }

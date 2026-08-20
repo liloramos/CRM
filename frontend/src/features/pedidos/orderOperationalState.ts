@@ -129,6 +129,8 @@ function paymentStatusBadge(status: PaymentStatus): BadgeView {
   switch (status) {
     case 'anulado':
       return { label: 'Anulado', tone: 'neutral' }
+    case 'cancelado':
+      return { label: 'Cancelado', tone: 'neutral' }
     case 'pago':
       return { label: 'Pago', tone: 'success' }
     case 'parcial':

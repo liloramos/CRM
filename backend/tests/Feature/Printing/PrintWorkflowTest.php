@@ -174,6 +174,13 @@ class PrintWorkflowTest extends TestCase
         ])->assertOk();
 
         $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $n8->id,
+            'quantity' => 1,
+            'meat_mode' => 'none',
+            'structured_options' => [],
+        ])->assertOk();
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
             'product_id' => $n9->id,
             'quantity' => 1,
             'meat_mode' => 'traditional',
@@ -196,6 +203,7 @@ class PrintWorkflowTest extends TestCase
         $this->assertStringContainsString('1x N9 Livre', $html);
         $this->assertStringContainsString('R$ 22,00', $html);
         $this->assertStringContainsString('R$ 25,00', $html);
+        $this->assertStringContainsString('1x Sem carne', $html);
         $this->assertStringNotContainsString('Almondega', $html);
         $this->assertStringNotContainsString('Para: Nao informado', $html);
     }
