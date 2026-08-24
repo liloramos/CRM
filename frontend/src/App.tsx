@@ -65,6 +65,7 @@ import type {
   BackendOrderStatus,
   Conversation,
   ConversationAlert,
+  ConversationMessage,
   CustomerSummary,
   FulfillmentApiType,
   OperationalSnapshot,
@@ -140,6 +141,10 @@ function App() {
   const [conversationAlerts, setConversationAlerts] = useState<ConversationAlert[]>([])
   const conversationSyncAtRef = useRef<string | null>(null)
   const conversationPollingBusyRef = useRef(false)
+  const conversationRequestVersionRef = useRef(0)
+  const conversationRefreshPendingRef = useRef(false)
+  const [conversationRefreshNonce, setConversationRefreshNonce] = useState(0)
+  const [conversationHydrationVersion, setConversationHydrationVersion] = useState(0)
   const conversationReadBusyRef = useRef<Set<string>>(new Set())
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
@@ -279,6 +284,8 @@ function App() {
     }
 
     conversationPollingBusyRef.current = true
+    const requestVersion = conversationRequestVersionRef.current
+    conversationRefreshPendingRef.current = false
     setIsLoadingConversations(!incremental)
     setConversationError(null)
 
@@ -287,8 +294,15 @@ function App() {
         since: incremental ? conversationSyncAtRef.current : null,
       })
 
+      if (requestVersion !== conversationRequestVersionRef.current) {
+        return
+      }
+
       setConversationAlerts(response.alerts)
       conversationSyncAtRef.current = response.generatedAt ?? new Date().toISOString()
+      if (!incremental) {
+        setConversationHydrationVersion((current) => current + 1)
+      }
       setSnapshot((current) => {
         if (!current) {
           return current
@@ -296,7 +310,7 @@ function App() {
 
         const conversations = incremental
           ? mergeConversations(current.conversations, response.conversations)
-          : response.conversations
+          : mergeConversations([], response.conversations)
 
         return {
           ...current,
@@ -320,8 +334,21 @@ function App() {
     } finally {
       conversationPollingBusyRef.current = false
       setIsLoadingConversations(false)
+
+      if (conversationRefreshPendingRef.current) {
+        setConversationRefreshNonce((current) => current + 1)
+      }
     }
   }, [user])
+
+  const refreshConversationState = useCallback(() => {
+    conversationRequestVersionRef.current += 1
+    conversationRefreshPendingRef.current = true
+
+    if (!conversationPollingBusyRef.current) {
+      setConversationRefreshNonce((current) => current + 1)
+    }
+  }, [])
 
   useEffect(() => {
     if (authStatus === 'authenticated') {
@@ -406,6 +433,14 @@ function App() {
       document.removeEventListener('visibilitychange', revalidateWhenVisible)
     }
   }, [activeRoute, authStatus, loadConversations])
+
+  useEffect(() => {
+    if (conversationRefreshNonce === 0 || authStatus !== 'authenticated') {
+      return
+    }
+
+    void loadConversations(true)
+  }, [authStatus, conversationRefreshNonce, loadConversations])
 
   useEffect(() => {
     if (activeRoute === 'conversas' && selectedConversationId && !document.hidden) {
@@ -544,6 +579,7 @@ function App() {
       }
       resetNewOrderForm()
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel criar o pedido.')
     } finally {
@@ -676,6 +712,7 @@ function App() {
         setItemExtraBeef(false)
       }
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
     } finally {
@@ -703,6 +740,7 @@ function App() {
       setActiveModal(null)
       resetItemEditor()
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o item.')
     } finally {
@@ -718,6 +756,7 @@ function App() {
     try {
       applyUpdatedOrder((await removeOrderItem(selectedOrder.id, item.id)).data)
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel remover o item.')
     } finally {
@@ -800,6 +839,7 @@ function App() {
       setCancelReason('')
       setCancelNotes('')
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel cancelar o pedido.')
     } finally {
@@ -970,6 +1010,7 @@ function App() {
       setStatusReason('')
       setStatusNotes('')
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel alterar o status.')
     } finally {
@@ -1010,6 +1051,7 @@ function App() {
       setPaymentAmount('')
       setPaymentNotes('')
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel confirmar o pagamento.')
     } finally {
@@ -1069,6 +1111,7 @@ function App() {
       })
       setActiveModal(null)
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel alternar o modo da conversa.')
     } finally {
@@ -1096,7 +1139,7 @@ function App() {
       setActiveModal(null)
       setPaymentVoidReason('')
       await loadSnapshot()
-      await loadConversations(true)
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Não foi possível anular a confirmação do pagamento.')
     } finally {
@@ -1113,6 +1156,7 @@ function App() {
       const response = await advanceOrderFulfillment(orderId, action)
       applyUpdatedOrder(response.data)
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o preparo do pedido.')
       await loadSnapshot()
@@ -1152,6 +1196,7 @@ function App() {
       setSelectedOrderId(response.data.order.id)
       setActiveRoute('pedidos')
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Não foi possível criar o pedido da conversa.')
     } finally {
@@ -1250,7 +1295,7 @@ function App() {
     try {
       const conversation = await sendConversationMessage(conversationId, body, clientReference, replyToMessageId)
       replaceConversation(conversation)
-      void loadConversations(true)
+      refreshConversationState()
     } catch (error) {
       const failedConversation = conversationFromApiError(error)
       if (failedConversation) {
@@ -1270,7 +1315,7 @@ function App() {
     try {
       const conversation = await sendConversationMedia(conversationId, file, mediaType, caption, options)
       replaceConversation(conversation)
-      void loadConversations(true)
+      refreshConversationState()
     } finally {
       setIsActionBusy(false)
     }
@@ -1301,7 +1346,7 @@ function App() {
     try {
       const conversation = await retryConversationMessage(conversationId, messageId)
       replaceConversation(conversation)
-      void loadConversations(true)
+      refreshConversationState()
     } catch (error) {
       const failedConversation = conversationFromApiError(error)
       if (failedConversation) {
@@ -1370,6 +1415,7 @@ function App() {
       })
       replaceConversation(conversation)
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setConversationError(error instanceof Error ? error.message : 'Não foi possível aprovar o pagamento.')
     } finally {
@@ -1385,6 +1431,7 @@ function App() {
       const conversation = await rejectConversationPaymentProof(conversationId, proofId, { reason })
       replaceConversation(conversation)
       await loadSnapshot()
+      refreshConversationState()
     } catch (error) {
       setConversationError(error instanceof Error ? error.message : 'Não foi possível rejeitar o comprovante.')
     } finally {
@@ -1621,6 +1668,7 @@ function App() {
             alerts={conversationAlerts}
             conversations={snapshot.conversations}
             error={conversationError}
+            hydrationVersion={conversationHydrationVersion}
             isActionBusy={isActionBusy}
             isLoading={isLoadingConversations}
             linkedOrder={linkedOrder}
@@ -2411,7 +2459,7 @@ function mergeConversations(current: Conversation[], incoming: Conversation[]): 
     byId.set(conversation.id, conversation)
   })
   incoming.forEach((conversation) => {
-    byId.set(conversation.id, conversation)
+    byId.set(conversation.id, mergeConversation(byId.get(conversation.id), conversation))
   })
 
   return Array.from(byId.values()).sort((first, second) => {
@@ -2419,8 +2467,43 @@ function mergeConversations(current: Conversation[], incoming: Conversation[]): 
     const firstTime = first.lastMessageAt ? Date.parse(first.lastMessageAt) : 0
     const secondTime = second.lastMessageAt ? Date.parse(second.lastMessageAt) : 0
 
-    return secondTime - firstTime
+    return secondTime - firstTime || second.id.localeCompare(first.id)
   })
+}
+
+function mergeConversation(current: Conversation | undefined, incoming: Conversation): Conversation {
+  if (!current) {
+    return {
+      ...incoming,
+      messages: sortConversationMessages(incoming.messages),
+    }
+  }
+
+  const messages = new Map<string, ConversationMessage>()
+  current.messages.forEach((message) => messages.set(message.id, message))
+  incoming.messages.forEach((message) => messages.set(message.id, message))
+
+  return {
+    ...current,
+    ...incoming,
+    messages: sortConversationMessages(Array.from(messages.values())),
+  }
+}
+
+function sortConversationMessages(messages: ConversationMessage[]): ConversationMessage[] {
+  return [...messages].sort((first, second) => {
+    const firstTime = conversationMessageTime(first)
+    const secondTime = conversationMessageTime(second)
+
+    return firstTime - secondTime || first.id.localeCompare(second.id)
+  })
+}
+
+function conversationMessageTime(message: ConversationMessage): number {
+  const date = message.occurredAt ?? message.createdAt ?? message.sentAt ?? message.receivedAt
+  const parsed = date ? Date.parse(date) : NaN
+
+  return Number.isNaN(parsed) ? 0 : parsed
 }
 
 function mergeConversationAlerts(current: ConversationAlert[], incoming: ConversationAlert[]): ConversationAlert[] {

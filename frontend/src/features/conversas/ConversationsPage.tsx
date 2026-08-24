@@ -56,6 +56,7 @@ type ConversationsPageProps = {
   alerts: ConversationAlert[]
   conversations: Conversation[]
   error: string | null
+  hydrationVersion: number
   isActionBusy: boolean
   isLoading: boolean
   linkedOrder?: Order | null
@@ -86,6 +87,7 @@ export function ConversationsPage({
   alerts,
   conversations,
   error,
+  hydrationVersion,
   isActionBusy,
   isLoading,
   linkedOrder,
@@ -175,7 +177,7 @@ export function ConversationsPage({
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const clientReferenceRef = useRef<string | null>(null)
   const knownNotificationEventsRef = useRef<Set<string>>(new Set())
-  const notificationsInitializedRef = useRef(false)
+  const notificationHydrationVersionRef = useRef<number | null>(null)
   const contextPanelRef = useRef<HTMLElement>(null)
   const contextTriggerRef = useRef<HTMLElement | null>(null)
   const statusLegendRef = useRef<HTMLDivElement>(null)
@@ -443,9 +445,10 @@ export function ConversationsPage({
     const nextEvents = collectNotificationEvents(conversations)
     const knownEvents = knownNotificationEventsRef.current
 
-    if (!notificationsInitializedRef.current) {
+    if (notificationHydrationVersionRef.current !== hydrationVersion) {
+      knownEvents.clear()
       nextEvents.forEach((event) => knownEvents.add(event.key))
-      notificationsInitializedRef.current = true
+      notificationHydrationVersionRef.current = hydrationVersion
       return
     }
 
@@ -468,7 +471,7 @@ export function ConversationsPage({
         playNotificationSound()
       }
     })
-  }, [addToast, browserNotificationsEnabled, conversations, selectedConversation?.id, soundEnabled])
+  }, [addToast, browserNotificationsEnabled, conversations, hydrationVersion, selectedConversation?.id, soundEnabled])
 
   useEffect(() => {
     if (!isContextOpen) {
