@@ -11,6 +11,7 @@ export type MenuItem = {
 export const menuItems: MenuItem[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', group: 'operacao' },
   { key: 'conversas', label: 'Conversas', icon: 'chat', group: 'operacao' },
+  { key: 'caixa', label: 'Caixa', icon: 'cash', group: 'operacao' },
   { key: 'pedidos', label: 'Pedidos', icon: 'orders', group: 'operacao' },
   { key: 'cardapio', label: 'Cardapio', icon: 'menu', group: 'operacao' },
   { key: 'entregas', label: 'Entregas', icon: 'delivery', group: 'operacao' },
@@ -29,6 +30,7 @@ export const routeLabels: Record<RouteKey, string> = {
   cadastro: 'Cadastro',
   dashboard: 'Dashboard',
   conversas: 'Conversas',
+  caixa: 'Caixa',
   pedidos: 'Pedidos',
   cardapio: 'Cardapio',
   entregas: 'Entregas',

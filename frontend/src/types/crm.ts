@@ -3,6 +3,7 @@ export type RouteKey =
   | 'cadastro'
   | 'dashboard'
   | 'conversas'
+  | 'caixa'
   | 'pedidos'
   | 'cardapio'
   | 'entregas'
@@ -552,6 +553,8 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
   groups: StructuredProductOptionGroup[]
   combo_items: StructuredComboItem[]
 }
+
+export type CounterSaleProduct = StructuredMenuProductSummary
 
 export type StructuredMenuCategory = StructuredMenuCategorySummary & {
   products: StructuredMenuProduct[]

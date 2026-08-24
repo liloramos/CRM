@@ -11,6 +11,7 @@ import {
   Clock,
   CodeXml,
   CreditCard,
+  Banknote,
   DollarSign,
   Eye,
   EyeOff,
@@ -83,6 +84,7 @@ export type IconName =
   | 'pin'
   | 'smile'
   | 'sticker'
+  | 'cash'
 
 type IconProps = {
   name: IconName | string
@@ -131,6 +133,7 @@ const iconComponents: Record<string, LucideIcon> = {
   pin: Pin,
   smile: Smile,
   sticker: Sticker,
+  cash: Banknote,
 }
 
 export function Icon({ name, size = 20, className = '' }: IconProps) {

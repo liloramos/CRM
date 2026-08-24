@@ -367,6 +367,7 @@ class OrderWorkflowService
                 Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_READY_TO_PRINT,
                 Order::STATUS_CANCELLED,
+                ...($this->isCounterSale($order) ? [Order::STATUS_FINISHED] : []),
             ],
             Order::STATUS_READY_TO_PRINT => [
                 Order::STATUS_AWAITING_PAYMENT,
@@ -392,6 +393,7 @@ class OrderWorkflowService
                 Order::STATUS_FINISHED,
                 Order::STATUS_CANCELLED,
             ],
+            Order::STATUS_FINISHED => $this->isCounterSale($order) ? [Order::STATUS_CANCELLED] : [],
             default => [],
         };
 
@@ -486,6 +488,12 @@ class OrderWorkflowService
             Order::FULFILLMENT_PICKUP, Order::FULFILLMENT_COUNTER => Order::FULFILLMENT_STATUS_PICKUP_PENDING,
             default => Order::FULFILLMENT_STATUS_PENDING,
         };
+    }
+
+    private function isCounterSale(Order $order): bool
+    {
+        return $order->origin_channel === Order::CHANNEL_COUNTER
+            && $order->fulfillment_type === Order::FULFILLMENT_COUNTER;
     }
 
     private function resolveDate(mixed $date, Company $company): CarbonInterface

@@ -97,7 +97,10 @@ class OperationalCrmPresenter
             'customers' => $customers->map(fn (Customer $customer): array => $this->customer($customer))->values(),
             'products' => $products->map(fn (Product $product): array => $this->product($product))->values(),
             'deliveries' => $orders
-                ->filter(fn (Order $order): bool => $order->fulfillment_type !== null)
+                ->filter(fn (Order $order): bool => in_array($order->fulfillment_type, [
+                    Order::FULFILLMENT_DELIVERY,
+                    Order::FULFILLMENT_PICKUP,
+                ], true))
                 ->map(fn (Order $order): array => $this->deliveryTask($order))
                 ->values(),
             'financeEntries' => $orders->map(fn (Order $order): array => $this->financeEntry($order))->values(),
@@ -392,7 +395,9 @@ class OperationalCrmPresenter
             'id' => (string) $order->id,
             'orderId' => (string) $order->id,
             'paymentId' => $latestPayment?->id ? (string) $latestPayment->id : null,
-            'label' => 'Pedido '.$order->code,
+            'label' => $order->origin_channel === Order::CHANNEL_COUNTER
+                ? 'Venda de balcão '.$order->code
+                : 'Pedido '.$order->code,
             'orderCode' => $order->code,
             'status' => $cancelledWithoutConfirmedPayment
                 ? 'cancelado'
@@ -409,10 +414,16 @@ class OperationalCrmPresenter
             'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'createdLabel' => $order->created_at?->format('d/m H:i') ?? '',
             'description' => $cancelledWithoutConfirmedPayment
-                ? 'Pedido cancelado sem pagamento confirmado.'
+                ? ($order->origin_channel === Order::CHANNEL_COUNTER
+                    ? 'Venda de balcão cancelada sem pagamento confirmado.'
+                    : 'Pedido cancelado sem pagamento confirmado.')
                 : ($latestPayment?->voided_at
                 ? 'Confirmação anulada no CRM: '.$latestPayment->void_reason
-                : ($order->payment_confirmed_at ? 'Pagamento confirmado por atendente.' : 'Aguardando conferencia humana.')),
+                : ($order->payment_confirmed_at
+                    ? ($order->origin_channel === Order::CHANNEL_COUNTER
+                        ? 'Pagamento confirmado pela atendente no Caixa.'
+                        : 'Pagamento confirmado por atendente.')
+                    : 'Aguardando conferencia humana.')),
         ];
     }
 

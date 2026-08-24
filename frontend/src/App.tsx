@@ -9,6 +9,7 @@ import { useAuth } from './features/auth/auth-state'
 import { MenuPage } from './features/cardapio/MenuPage'
 import { CustomersPage } from './features/clientes/CustomersPage'
 import { ConversationsPage } from './features/conversas/ConversationsPage'
+import { CounterSalesPage } from './features/caixa/CounterSalesPage'
 import { SettingsPage } from './features/configuracoes/SettingsPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DeliveryPage } from './features/entregas/DeliveryPage'
@@ -1644,6 +1645,13 @@ function App() {
             onToggleConversationPin={handleConversationPin}
             onUpdateCustomer={handleUpdateCustomerFromPage}
             selectedConversation={selectedConversation}
+          />
+        )
+      case 'caixa':
+        return (
+          <CounterSalesPage
+            canManageOrders={canManageOrders}
+            onSaleChanged={loadSnapshot}
           />
         )
       case 'pedidos':

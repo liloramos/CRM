@@ -20,6 +20,7 @@ import type {
   AuthUser,
   BackendOrderStatus,
   ComponentAvailabilityMutationResponse,
+  CounterSaleProduct,
   Conversation,
   ConversationAiStyle,
   ConversationAlert,
@@ -435,6 +436,34 @@ function normalizeOperationalSnapshot(snapshot: OperationalSnapshot | null | und
 
 export async function createDraftOrder(payload: DraftOrderPayload = {}) {
   return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>('/api/app/orders/drafts', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+}
+
+export type CompleteCounterSalePayload = {
+  items: Array<{
+    product_id: number
+    quantity: number
+  }>
+  payment_method: 'pix' | 'cash' | 'debit_card' | 'credit_card'
+}
+
+export async function getCounterSaleProducts(): Promise<CounterSaleProduct[]> {
+  const response = await requestJson<ApiEnvelope<CounterSaleProduct[]>>('/api/app/counter-sales/products')
+
+  return response.data
+}
+
+export async function completeCounterSale(payload: CompleteCounterSalePayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>('/api/app/counter-sales', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+}
+
+export async function cancelCounterSale(orderId: string, payload: CancelOrderPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/counter-sales/${orderId}/cancel`, {
     body: JSON.stringify(payload),
     method: 'POST',
   })

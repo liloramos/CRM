@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AdminMenuReadController;
 use App\Http\Controllers\Api\AppSessionController;
 use App\Http\Controllers\Api\ConversationConfigurationController;
 use App\Http\Controllers\Api\ConversationOperationsController;
+use App\Http\Controllers\Api\CounterSaleController;
 use App\Http\Controllers\Api\CustomerOperationsController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
@@ -105,6 +106,15 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
         Route::patch('customers/{customer}', [CustomerOperationsController::class, 'update'])->name('customers.update');
         Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
+        Route::get('counter-sales/products', [CounterSaleController::class, 'products'])
+            ->middleware('permission:orders.view')
+            ->name('counter-sales.products');
+        Route::post('counter-sales', [CounterSaleController::class, 'store'])
+            ->middleware('permission:orders.manage')
+            ->name('counter-sales.store');
+        Route::post('counter-sales/{order}/cancel', [CounterSaleController::class, 'cancel'])
+            ->middleware('permission:orders.manage')
+            ->name('counter-sales.cancel');
         Route::post('orders/drafts', [OrderOperationsController::class, 'storeDraft'])->name('orders.drafts.store');
         Route::get('orders/{order}', [OrderOperationsController::class, 'show'])->name('orders.show');
         Route::delete('orders/{order}', [OrderOperationsController::class, 'destroyDraft'])->name('orders.destroy');
