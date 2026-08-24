@@ -452,7 +452,7 @@ class StructuredProductConfigurationService
             && $product->base_price_cents === null;
     }
 
-    private function productImageUrl(Product $product): ?string
+    public function productImageUrl(Product $product): ?string
     {
         $path = data_get($product->metadata, 'catalog_image_path');
 

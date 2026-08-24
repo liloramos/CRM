@@ -21,6 +21,9 @@ import type {
   BackendOrderStatus,
   ComponentAvailabilityMutationResponse,
   CounterSaleProduct,
+  CounterSaleDetail,
+  CounterSaleHistory,
+  CounterSaleHistoryFilters,
   Conversation,
   ConversationAiStyle,
   ConversationAlert,
@@ -451,6 +454,26 @@ export type CompleteCounterSalePayload = {
 
 export async function getCounterSaleProducts(): Promise<CounterSaleProduct[]> {
   const response = await requestJson<ApiEnvelope<CounterSaleProduct[]>>('/api/app/counter-sales/products')
+
+  return response.data
+}
+
+export async function getCounterSaleHistory(filters: CounterSaleHistoryFilters = {}): Promise<CounterSaleHistory> {
+  const params = new URLSearchParams()
+
+  if (filters.dateFrom) params.set('date_from', filters.dateFrom)
+  if (filters.dateTo) params.set('date_to', filters.dateTo)
+  if (filters.paymentMethod) params.set('payment_method', filters.paymentMethod)
+  if (filters.status) params.set('status', filters.status)
+
+  const query = params.toString()
+  const response = await requestJson<ApiEnvelope<CounterSaleHistory>>(`/api/app/counter-sales${query ? `?${query}` : ''}`)
+
+  return response.data
+}
+
+export async function getCounterSaleDetail(orderId: string): Promise<CounterSaleDetail> {
+  const response = await requestJson<ApiEnvelope<CounterSaleDetail>>(`/api/app/counter-sales/${orderId}`)
 
   return response.data
 }

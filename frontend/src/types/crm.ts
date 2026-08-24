@@ -556,6 +556,82 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
 
 export type CounterSaleProduct = StructuredMenuProductSummary
 
+export type CounterSaleHistoryFilters = {
+  dateFrom?: string
+  dateTo?: string
+  paymentMethod?: 'cash' | 'pix' | 'debit_card' | 'credit_card'
+  status?: 'completed' | 'cancelled'
+}
+
+export type CounterSaleRecord = {
+  id: string
+  code: string
+  timeLabel: string
+  dateLabel: string
+  itemsQuantity: number
+  totalCents: number
+  paymentMethod: 'cash' | 'pix' | 'debit_card' | 'credit_card' | null
+  paymentMethodLabel: string
+  status: 'completed' | 'cancelled'
+  statusLabel: string
+  isCancellable: boolean
+}
+
+export type CounterSaleSummary = {
+  dateLabel: string
+  totalSoldCents: number
+  completedSalesCount: number
+  totalCancelledCents: number
+  paymentTotals: {
+    cash: number
+    pix: number
+    card: number
+  }
+}
+
+export type CounterSaleTopProduct = {
+  productName: string
+  quantity: number
+  totalCents: number
+}
+
+export type CounterSaleHistory = {
+  filters: Required<Pick<CounterSaleHistoryFilters, 'dateFrom' | 'dateTo'>> & {
+    paymentMethod: CounterSaleHistoryFilters['paymentMethod'] | null
+    status: CounterSaleHistoryFilters['status'] | null
+    timezone: string
+  }
+  summary: CounterSaleSummary
+  topProducts: CounterSaleTopProduct[]
+  sales: CounterSaleRecord[]
+}
+
+export type CounterSaleDetail = CounterSaleRecord & {
+  originLabel: string
+  payment: {
+    methodLabel: string
+    statusLabel: string
+    amountCents: number
+    confirmedAtLabel: string | null
+    voidReason: string | null
+  }
+  items: Array<{
+    id: string
+    productName: string
+    productImageUrl: string | null
+    quantity: number
+    unitPriceCents: number
+    subtotalCents: number
+  }>
+  history: Array<{
+    id: string
+    title: string
+    description: string
+    actorName: string | null
+    timeLabel: string
+  }>
+}
+
 export type StructuredMenuCategory = StructuredMenuCategorySummary & {
   products: StructuredMenuProduct[]
   display_order: number

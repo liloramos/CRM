@@ -106,6 +106,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
         Route::patch('customers/{customer}', [CustomerOperationsController::class, 'update'])->name('customers.update');
         Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
+        Route::get('counter-sales', [CounterSaleController::class, 'index'])
+            ->middleware('permission:orders.view')
+            ->name('counter-sales.index');
         Route::get('counter-sales/products', [CounterSaleController::class, 'products'])
             ->middleware('permission:orders.view')
             ->name('counter-sales.products');
@@ -115,6 +118,9 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('counter-sales/{order}/cancel', [CounterSaleController::class, 'cancel'])
             ->middleware('permission:orders.manage')
             ->name('counter-sales.cancel');
+        Route::get('counter-sales/{order}', [CounterSaleController::class, 'show'])
+            ->middleware('permission:orders.view')
+            ->name('counter-sales.show');
         Route::post('orders/drafts', [OrderOperationsController::class, 'storeDraft'])->name('orders.drafts.store');
         Route::get('orders/{order}', [OrderOperationsController::class, 'show'])->name('orders.show');
         Route::delete('orders/{order}', [OrderOperationsController::class, 'destroyDraft'])->name('orders.destroy');

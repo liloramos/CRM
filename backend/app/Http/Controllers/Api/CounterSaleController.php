@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Services\CounterSales\CounterSaleCatalogService;
+use App\Services\CounterSales\CounterSaleHistoryService;
 use App\Services\CounterSales\CounterSaleWorkflowService;
 use App\Services\Operational\OperationalCrmPresenter;
 use Carbon\CarbonImmutable;
@@ -18,6 +19,30 @@ use Illuminate\Validation\Rule;
 class CounterSaleController extends Controller
 {
     use ResolvesOperationalCompany;
+
+    public function index(Request $request, CounterSaleHistoryService $history): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+        $validated = $request->validate([
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d'],
+            'payment_method' => ['nullable', Rule::in([
+                Payment::METHOD_CASH,
+                Payment::METHOD_PIX,
+                Payment::METHOD_DEBIT_CARD,
+                Payment::METHOD_CREDIT_CARD,
+            ])],
+            'status' => ['nullable', Rule::in(['completed', 'cancelled'])],
+        ]);
+
+        try {
+            $data = $history->history($company, $validated);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $data]);
+    }
 
     public function products(Request $request, CounterSaleCatalogService $catalog): JsonResponse
     {
@@ -85,6 +110,19 @@ class CounterSaleController extends Controller
         return response()->json([
             'data' => $presenter->order($order->load($this->orderRelations())),
         ]);
+    }
+
+    public function show(Request $request, Order $order, CounterSaleHistoryService $history): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+
+        try {
+            $data = $history->detail($company, $order);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 404);
+        }
+
+        return response()->json(['data' => $data]);
     }
 
     /** @return list<string> */
