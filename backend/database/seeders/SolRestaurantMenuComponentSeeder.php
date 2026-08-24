@@ -117,6 +117,7 @@ class SolRestaurantMenuComponentSeeder extends Seeder
                 'Tamarindo',
                 'Acerola',
                 'Abacaxi',
+                'Laranja',
                 'Abacaxi com hortelã',
                 'Caju',
                 'Limão',

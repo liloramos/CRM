@@ -171,6 +171,7 @@ class SolRestaurantProductRuleSeeder extends Seeder
             'tamarindo',
             'acerola',
             'abacaxi',
+            'laranja',
             'abacaxi-com-hortela',
             'caju',
             'limao',

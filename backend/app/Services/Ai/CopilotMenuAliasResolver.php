@@ -8,18 +8,25 @@ use Illuminate\Support\Str;
 
 class CopilotMenuAliasResolver
 {
+    public function __construct(private readonly CopilotProductEligibility $eligibility) {}
+
     public function resolve(Company $company, ?int $id, string $identifier): ?Product
     {
         if ($id) {
-            return Product::query()->where('company_id', $company->id)->whereKey($id)->first();
+            return $this->eligibility->apply(Product::query())
+                ->where('company_id', $company->id)
+                ->whereKey($id)
+                ->first();
         }
 
         $needle = $this->key($identifier);
         $slug = $this->aliases()[$needle] ?? $identifier;
 
-        return Product::query()->where('company_id', $company->id)->where(function ($query) use ($slug, $needle): void {
-            $query->where('slug', $slug)->orWhereRaw('LOWER(REPLACE(name, \' \', \'\')) = ?', [$needle]);
-        })->first();
+        return $this->eligibility->apply(Product::query())
+            ->where('company_id', $company->id)
+            ->where(function ($query) use ($slug, $needle): void {
+                $query->where('slug', $slug)->orWhereRaw('LOWER(REPLACE(name, \' \', \'\')) = ?', [$needle]);
+            })->first();
     }
 
     /** @param list<array<string,mixed>> $messages */

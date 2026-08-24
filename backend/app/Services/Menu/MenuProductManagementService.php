@@ -8,11 +8,15 @@ use App\Enums\ProductServiceDay as ProductServiceDayEnum;
 use App\Models\Company;
 use App\Models\MenuComponent;
 use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\ProductGroupComponent;
 use App\Models\ProductOptionGroup;
 use App\Models\ProductServiceDay;
 use Carbon\CarbonInterface;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -34,7 +38,17 @@ class MenuProductManagementService
     ): array {
         abort_unless((int) $product->company_id === (int) $company->id, Response::HTTP_NOT_FOUND);
 
-        DB::transaction(function () use ($product, $attributes, $serviceDays): void {
+        DB::transaction(function () use ($company, $product, $attributes, $serviceDays): void {
+            if (isset($attributes['category_slug'])) {
+                if (! $this->isCounterProduct($product)) {
+                    throw ValidationException::withMessages([
+                        'category_slug' => ['A categoria so pode ser alterada para produtos de balcao.'],
+                    ]);
+                }
+
+                $product->category_id = $this->counterCategory($company, $attributes['category_slug'])->id;
+            }
+
             $product->fill([
                 'name' => $attributes['name'],
                 'description' => $attributes['description'] ?? null,
@@ -51,6 +65,97 @@ class MenuProductManagementService
             if (isset($attributes['beef_rules']) && is_array($attributes['beef_rules'])) {
                 $this->syncTraditionalMarmitaBeefRules($product, $attributes['beef_rules']);
             }
+        });
+
+        return $this->configuration->configuration($product->refresh(), $company, $date);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @param  array<int, string>  $serviceDays
+     * @return array<string, mixed>
+     */
+    public function createCounterProduct(
+        Company $company,
+        array $attributes,
+        array $serviceDays,
+        CarbonInterface $date,
+    ): array {
+        $name = trim((string) $attributes['name']);
+        $slug = Str::slug($name);
+
+        if ($slug === '') {
+            throw ValidationException::withMessages(['name' => ['Informe um nome valido para o produto.']]);
+        }
+
+        if (Product::query()->where('company_id', $company->id)->where('slug', $slug)->exists()) {
+            throw ValidationException::withMessages(['name' => ['Ja existe um produto com este nome para a empresa.']]);
+        }
+
+        $product = DB::transaction(function () use ($attributes, $company, $name, $serviceDays, $slug): Product {
+            $category = $this->counterCategory($company, (string) $attributes['category_slug']);
+            $nextOrder = ((int) Product::query()
+                ->where('company_id', $company->id)
+                ->where('category_id', $category->id)
+                ->max('display_order')) + 10;
+
+            $product = Product::query()->create([
+                'company_id' => $company->id,
+                'category_id' => $category->id,
+                'name' => $name,
+                'slug' => $slug,
+                'product_type' => Product::TYPE_COUNTER,
+                'description' => $attributes['description'] ?? null,
+                'base_price_cents' => $attributes['price_cents'],
+                'currency' => 'BRL',
+                'is_active' => $attributes['is_active'],
+                'is_available_by_default' => $attributes['is_available_by_default'],
+                'allows_item_notes' => true,
+                'metadata' => ['counter_sale' => true],
+                'display_order' => $attributes['display_order'] ?? $nextOrder,
+            ]);
+
+            $this->syncServiceDays($product, $serviceDays);
+
+            return $product;
+        });
+
+        return $this->configuration->configuration($product->refresh(), $company, $date);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function replaceProductImage(Company $company, Product $product, UploadedFile $image, CarbonInterface $date): array
+    {
+        abort_unless((int) $product->company_id === (int) $company->id, Response::HTTP_NOT_FOUND);
+
+        $extension = strtolower($image->guessExtension() ?: $image->extension() ?: 'jpg');
+        $directory = "menu-products/{$company->id}/{$product->id}";
+        $path = $image->storePubliclyAs($directory, Str::uuid().'.'.$extension, 'public');
+
+        DB::transaction(function () use ($path, $product): void {
+            $metadata = (array) $product->metadata;
+            $this->deleteStoredImage($product, $metadata['catalog_image_path'] ?? null);
+            $metadata['catalog_image_path'] = $path;
+            $product->forceFill(['metadata' => $metadata])->save();
+        });
+
+        return $this->configuration->configuration($product->refresh(), $company, $date);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function removeProductImage(Company $company, Product $product, CarbonInterface $date): array
+    {
+        abort_unless((int) $product->company_id === (int) $company->id, Response::HTTP_NOT_FOUND);
+
+        DB::transaction(function () use ($product): void {
+            $metadata = (array) $product->metadata;
+            $this->deleteStoredImage($product, $metadata['catalog_image_path'] ?? null);
+            unset($metadata['catalog_image_path']);
+            $product->forceFill(['metadata' => $metadata])->save();
         });
 
         return $this->configuration->configuration($product->refresh(), $company, $date);
@@ -273,5 +378,34 @@ class MenuProductManagementService
                 'display_order' => $attributes['display_order'],
             ],
         );
+    }
+
+    private function isCounterProduct(Product $product): bool
+    {
+        return $product->product_type === Product::TYPE_COUNTER
+            || (bool) data_get($product->metadata, 'counter_sale', false);
+    }
+
+    private function counterCategory(Company $company, string $slug): ProductCategory
+    {
+        $definition = ProductCategory::counterCategoryDefinitions()[$slug] ?? null;
+
+        if ($definition === null) {
+            throw ValidationException::withMessages(['category_slug' => ['Selecione uma categoria valida para o produto de balcao.']]);
+        }
+
+        return ProductCategory::query()->firstOrCreate(
+            ['company_id' => $company->id, 'slug' => $slug],
+            $definition,
+        );
+    }
+
+    private function deleteStoredImage(Product $product, mixed $path): void
+    {
+        if (! is_string($path) || ! str_starts_with($path, "menu-products/{$product->company_id}/{$product->id}/")) {
+            return;
+        }
+
+        Storage::disk('public')->delete($path);
     }
 }

@@ -9,8 +9,10 @@ import { SelectField } from '../../components/ui/SelectField'
 import { EmptyState, ErrorState } from '../../components/ui/States'
 import {
   ApiError,
+  type CounterProductCategorySlug,
   clearComponentAvailability,
   clearDailyMenuAdjustment,
+  createCounterProduct,
   createMenuComponent,
   deleteWeeklyMenuItem,
   getAdminDailyMenuAdjustments,
@@ -19,9 +21,11 @@ import {
   getAdminWeeklyMenu,
   getDailyStructuredMenu,
   setComponentAvailability,
+  removeMenuProductImage,
   updateMenuComponent,
   updateMenuProduct,
   updateProductComponentOption,
+  uploadMenuProductImage,
   updateWeeklyMenuItem,
   upsertDailyMenuAdjustment,
   upsertWeeklyMenuComponent,
@@ -59,7 +63,7 @@ type MenuPageProps = {
 type MenuAdminTab = 'today' | 'products' | 'weekly' | 'rules'
 
 type ModalState =
-  | { type: 'product'; product: StructuredMenuProduct }
+  | { type: 'product'; product: StructuredMenuProduct | null }
   | { type: 'component'; component: AdminMenuComponent | null }
   | { type: 'availability'; item: DailyMenuComponent; action: 'set' | 'clear' }
   | { type: 'daily-adjustment'; item: DailyMenuComponent | null; action: DailyMenuAdjustmentAction }
@@ -77,6 +81,7 @@ type ProductFormState = {
   is_active: boolean
   is_available_by_default: boolean
   display_order: string
+  category_slug: CounterProductCategorySlug
   service_days: ProductServiceDayKey[]
   beef_rules: BeefRulesFormState | null
 }
@@ -189,6 +194,14 @@ const componentTypeLabels: Record<MenuComponentTypeKey, string> = {
 
 const componentTypes: MenuComponentTypeKey[] = ['base', 'hot', 'salad', 'meat', 'extra', 'addon', 'juice_flavor']
 
+const counterProductCategoryOptions: Array<{ value: CounterProductCategorySlug; label: string }> = [
+  { value: 'doces', label: 'Doces' },
+  { value: 'geladinhos', label: 'Geladinhos' },
+  { value: 'bebidas', label: 'Bebidas' },
+  { value: 'sucos', label: 'Sucos' },
+  { value: 'outros', label: 'Outros' },
+]
+
 const tabLabels: Record<MenuAdminTab, string> = {
   today: 'Hoje',
   products: 'Produtos e precos',
@@ -215,6 +228,9 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
   const [isMutating, setIsMutating] = useState(false)
   const [modal, setModal] = useState<ModalState>(null)
   const [productForm, setProductForm] = useState<ProductFormState | null>(null)
+  const [productImageFile, setProductImageFile] = useState<File | null>(null)
+  const [productImagePreview, setProductImagePreview] = useState<string | null>(null)
+  const [removeProductImage, setRemoveProductImage] = useState(false)
   const [componentForm, setComponentForm] = useState<ComponentFormState | null>(null)
   const [availabilityForm, setAvailabilityForm] = useState<AvailabilityFormState>(emptyAvailabilityForm())
   const [dailyAdjustmentForm, setDailyAdjustmentForm] = useState<DailyAdjustmentFormState>(emptyDailyAdjustmentForm())
@@ -302,10 +318,59 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       is_active: product.is_active,
       is_available_by_default: product.is_available_by_default,
       display_order: String(product.display_order),
+      category_slug: counterCategorySlug(product.category?.slug),
       service_days: [...product.service_days],
       beef_rules: beefRulesFormFromProduct(product),
     })
+    resetProductImage(product.image_url)
     setModal({ type: 'product', product })
+  }
+
+  function openCreateCounterProductModal() {
+    setMutationError(null)
+    setProductForm({
+      name: '',
+      description: '',
+      price: '',
+      is_active: true,
+      is_available_by_default: true,
+      display_order: '0',
+      category_slug: 'doces',
+      service_days: serviceDayOrder.filter((day) => day !== 'sunday'),
+      beef_rules: null,
+    })
+    resetProductImage(null)
+    setModal({ type: 'product', product: null })
+  }
+
+  function resetProductImage(imageUrl: string | null) {
+    if (productImagePreview?.startsWith('blob:')) {
+      URL.revokeObjectURL(productImagePreview)
+    }
+
+    setProductImageFile(null)
+    setProductImagePreview(imageUrl)
+    setRemoveProductImage(false)
+  }
+
+  function selectProductImage(file: File | null) {
+    if (productImagePreview?.startsWith('blob:')) {
+      URL.revokeObjectURL(productImagePreview)
+    }
+
+    setProductImageFile(file)
+    setProductImagePreview(file ? URL.createObjectURL(file) : null)
+    setRemoveProductImage(false)
+  }
+
+  function clearProductImage() {
+    if (productImagePreview?.startsWith('blob:')) {
+      URL.revokeObjectURL(productImagePreview)
+    }
+
+    setProductImageFile(null)
+    setProductImagePreview(null)
+    setRemoveProductImage(true)
   }
 
   function openComponentModal(component: AdminMenuComponent | null = null) {
@@ -466,7 +531,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }
   }
 
-  async function handleSaveProduct(product: StructuredMenuProduct) {
+  async function handleSaveProduct(product: StructuredMenuProduct | null) {
     if (!productForm) {
       return
     }
@@ -479,7 +544,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       return
     }
 
-    if (displayOrder === null) {
+    if (product && displayOrder === null) {
       setMutationError('Informe uma ordem valida.')
       return
     }
@@ -491,18 +556,40 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }
 
     await runMutation(async () => {
-      await updateMenuProduct(product.id, {
+      const payload = {
         date: selectedDate,
         name: productForm.name.trim(),
         description: productForm.description.trim() || null,
         price_cents: priceCents,
         is_active: productForm.is_active,
         is_available_by_default: productForm.is_available_by_default,
-        display_order: displayOrder,
+        display_order: displayOrder ?? 0,
         service_days: productForm.service_days,
         ...(beefRules ? { beef_rules: beefRules } : {}),
-      })
-    }, 'Produto atualizado com dados do backend.')
+      }
+
+      const savedProduct = product
+        ? await updateMenuProduct(product.id, {
+          ...payload,
+          ...(product.is_counter_product ? { category_slug: productForm.category_slug } : {}),
+        })
+        : await createCounterProduct({
+          date: payload.date,
+          name: payload.name,
+          description: payload.description,
+          price_cents: payload.price_cents,
+          is_active: payload.is_active,
+          is_available_by_default: payload.is_available_by_default,
+          category_slug: productForm.category_slug,
+          service_days: payload.service_days,
+        })
+
+      if (productImageFile) {
+        await uploadMenuProductImage(savedProduct.id, productImageFile)
+      } else if (product && removeProductImage && product.image_url) {
+        await removeMenuProductImage(product.id)
+      }
+    }, product ? 'Produto atualizado com dados do backend.' : 'Produto de balcao criado.')
   }
 
   async function handleSaveComponent(component: AdminMenuComponent | null) {
@@ -808,6 +895,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
               categories={productCategories}
               isLoading={isAdminLoading && canManageMenu}
               onEditProduct={openProductModal}
+              onCreateCounterProduct={openCreateCounterProductModal}
               onResolvePending={openPendingConfigurationModal}
             />
           ) : null}
@@ -866,12 +954,15 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             mutationError,
             pendingConfigurationForm,
             productForm,
+            productImagePreview,
             setAvailabilityForm,
             setComponentDaysForm,
             setComponentForm,
             setDailyAdjustmentForm,
             setPendingConfigurationForm,
             setProductForm,
+            onClearProductImage: clearProductImage,
+            onSelectProductImage: selectProductImage,
             setWeeklyItemForm,
             weeklyItemForm,
           })}
@@ -1135,12 +1226,14 @@ function ProductsTab({
   canManageMenu,
   categories,
   isLoading,
+  onCreateCounterProduct,
   onEditProduct,
   onResolvePending,
 }: {
   canManageMenu: boolean
   categories: AdminMenuProductsResponse['categories']
   isLoading: boolean
+  onCreateCounterProduct: () => void
   onEditProduct: (product: StructuredMenuProduct) => void
   onResolvePending: (product: StructuredMenuProduct) => void
 }) {
@@ -1204,6 +1297,20 @@ function ProductsTab({
           value={activeFilter}
         />
       </Card>
+      {canManageMenu ? (
+        <Card className="counter-products-intro">
+          <SectionTitle
+            action={(
+              <Button icon="plus" onClick={onCreateCounterProduct} size="sm" variant="primary">
+                Novo produto de balcão
+              </Button>
+            )}
+            eyebrow="Venda rápida"
+            title="Produtos de balcão"
+          />
+          <p className="muted-text">Cadastre doces, geladinhos e itens rápidos para ficarem disponíveis no catálogo operacional.</p>
+        </Card>
+      ) : null}
       <ProductCatalog
         actionLabel={canManageMenu ? 'Catalogo administrativo' : 'Produtos visiveis'}
         emptyDescription="Nenhum produto corresponde aos filtros."
@@ -1475,8 +1582,14 @@ function StructuredProductCard({
         {mode === 'admin' ? <ProductAdministrativeBadge product={product} /> : <AvailabilityBadge availability={product.availability} />}
         <strong>{price}</strong>
       </div>
+      {product.image_url ? <img alt="" className="structured-product-card__image" src={product.image_url} /> : null}
       <div className="structured-product-card__title">
         <h3>{product.name}</h3>
+        {product.is_counter_product ? (
+          <Badge size="sm" tone="info">
+            Balcão
+          </Badge>
+        ) : null}
         {product.is_legacy && mode !== 'admin' ? (
           <Badge size="sm" tone="neutral">
             Legado
@@ -1837,7 +1950,10 @@ function renderModalContent({
   modal,
   mutationError,
   pendingConfigurationForm,
+  onClearProductImage,
+  onSelectProductImage,
   productForm,
+  productImagePreview,
   setAvailabilityForm,
   setComponentDaysForm,
   setComponentForm,
@@ -1857,7 +1973,10 @@ function renderModalContent({
   modal: Exclude<ModalState, null>
   mutationError: string | null
   pendingConfigurationForm: PendingConfigurationFormState
+  onClearProductImage: () => void
+  onSelectProductImage: (file: File | null) => void
   productForm: ProductFormState | null
+  productImagePreview: string | null
   setAvailabilityForm: (updater: (current: AvailabilityFormState) => AvailabilityFormState) => void
   setComponentDaysForm: (updater: (current: ComponentDaysFormState) => ComponentDaysFormState) => void
   setComponentForm: (updater: (current: ComponentFormState | null) => ComponentFormState | null) => void
@@ -1870,7 +1989,16 @@ function renderModalContent({
   return (
     <div className="modal-fields">
       {modal.type === 'product' && productForm ? (
-        <ProductForm form={productForm} isMutating={isMutating} setForm={setProductForm} />
+        <ProductForm
+          form={productForm}
+          imagePreview={productImagePreview}
+          isCounterProduct={modal.product?.is_counter_product ?? true}
+          isMutating={isMutating}
+          isNew={modal.product === null}
+          onClearImage={onClearProductImage}
+          onSelectImage={onSelectProductImage}
+          setForm={setProductForm}
+        />
       ) : null}
       {modal.type === 'component' && componentForm ? (
         <ComponentForm form={componentForm} isMutating={isMutating} setForm={setComponentForm} />
@@ -1939,11 +2067,21 @@ function renderModalContent({
 
 function ProductForm({
   form,
+  imagePreview,
+  isCounterProduct,
   isMutating,
+  isNew,
+  onClearImage,
+  onSelectImage,
   setForm,
 }: {
   form: ProductFormState
+  imagePreview: string | null
+  isCounterProduct: boolean
   isMutating: boolean
+  isNew: boolean
+  onClearImage: () => void
+  onSelectImage: (file: File | null) => void
   setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void
 }) {
   return (
@@ -1970,16 +2108,41 @@ function ProductForm({
             onChange={(event) => updateProductForm(setForm, 'price', event.target.value)}
           />
         </label>
-        <label>
-          <span>Ordem</span>
-          <input
+        {isCounterProduct || isNew ? (
+          <SelectField
             disabled={isMutating}
-            inputMode="numeric"
-            value={form.display_order}
-            onChange={(event) => updateProductForm(setForm, 'display_order', event.target.value)}
+            label="Categoria"
+            onChange={(value) => updateProductForm(setForm, 'category_slug', value as CounterProductCategorySlug)}
+            options={counterProductCategoryOptions}
+            value={form.category_slug}
           />
-        </label>
+        ) : null}
       </div>
+      {isCounterProduct || isNew ? (
+        <div className="product-image-field">
+          <div aria-label="Prévia da foto do produto" className="product-image-field__preview">
+            {imagePreview ? <img alt="Prévia do produto" src={imagePreview} /> : <span>Sem foto</span>}
+          </div>
+          <div className="product-image-field__actions">
+            <label className="button button--secondary button--sm">
+              <span>{imagePreview ? 'Trocar foto' : 'Adicionar foto'}</span>
+              <input
+                accept="image/jpeg,image/png,image/webp"
+                className="sr-only"
+                disabled={isMutating}
+                onChange={(event) => onSelectImage(event.target.files?.[0] ?? null)}
+                type="file"
+              />
+            </label>
+            {imagePreview ? (
+              <Button disabled={isMutating} onClick={onClearImage} size="sm" variant="ghost">
+                Remover foto
+              </Button>
+            ) : null}
+            <p className="muted-text">JPG, PNG ou WebP de até 5 MB.</p>
+          </div>
+        </div>
+      ) : null}
       <div className="menu-admin-check-grid">
         <CheckField
           checked={form.is_active}
@@ -2179,15 +2342,6 @@ function ComponentForm({
           options={componentTypes.map((type) => ({ value: type, label: componentTypeLabels[type] }))}
           value={form.component_type}
         />
-        <label>
-          <span>Ordem</span>
-          <input
-            disabled={isMutating}
-            inputMode="numeric"
-            value={form.display_order}
-            onChange={(event) => updateComponentForm(setForm, 'display_order', event.target.value)}
-          />
-        </label>
       </div>
       <label>
         <span>Descricao</span>
@@ -2237,27 +2391,18 @@ function ComponentDaysForm({
       />
       <fieldset className="menu-admin-choice-group" disabled={isMutating}>
         <legend>Dias da semana</legend>
-        {weeklyDayOrder.map((day) => (
-          <label key={day}>
-            <input
+        <div className="menu-admin-choice-group__days">
+          {weeklyDayOrder.map((day) => (
+            <CheckField
               checked={form.service_days.includes(day)}
+              disabled={isMutating}
+              key={day}
+              label={serviceDayLabels[day]}
               onChange={() => setForm((current) => toggleWeeklyServiceDay(current, day))}
-              type="checkbox"
             />
-            <span>{serviceDayLabels[day]}</span>
-          </label>
-        ))}
+          ))}
+        </div>
       </fieldset>
-      <label>
-        <span>Ordem opcional</span>
-        <input
-          disabled={isMutating}
-          inputMode="numeric"
-          placeholder="Deixe vazio para usar a proxima ordem"
-          value={form.display_order}
-          onChange={(event) => setForm((current) => ({ ...current, display_order: event.target.value }))}
-        />
-      </label>
       <p className="muted-text">Domingo nao possui cardapio semanal recorrente nesta estrutura.</p>
     </>
   )
@@ -2452,7 +2597,7 @@ function WeeklyItemForm({
         searchPlaceholder="Buscar componente..."
         value={form.component_id}
       />
-      <div className="menu-admin-form-grid">
+      <div className="menu-admin-form-grid menu-admin-form-grid--single">
         <SelectField
           disabled={isMutating}
           label="Dia"
@@ -2562,6 +2707,12 @@ function productMatchesAdminFilter(product: StructuredMenuProduct, filter: Produ
 
 function productPriceCents(product: StructuredMenuProduct): number {
   return product.base_price_cents ?? 0
+}
+
+function counterCategorySlug(slug: string | undefined): CounterProductCategorySlug {
+  return counterProductCategoryOptions.some((option) => option.value === slug)
+    ? slug as CounterProductCategorySlug
+    : 'outros'
 }
 
 function componentDisplayName(component: StructuredMenuComponentSummary): string {
@@ -2859,7 +3010,7 @@ function listNames(names: string[]): string {
 function modalTitle(modal: Exclude<ModalState, null>): string {
   switch (modal.type) {
     case 'product':
-      return 'Editar produto'
+      return modal.product ? 'Editar produto' : 'Novo produto de balcão'
     case 'component':
       return modal.component ? 'Editar componente' : 'Novo componente'
     case 'availability':

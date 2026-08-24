@@ -23,6 +23,26 @@ class ProductCategory extends Model
 
     public const TYPE_ACAI = 'acai';
 
+    public const TYPE_DOCES = 'doces';
+
+    public const TYPE_GELADINHOS = 'geladinhos';
+
+    public const TYPE_OUTROS = 'outros';
+
+    /**
+     * @return array<string, array{name: string, category_type: string, display_order: int}>
+     */
+    public static function counterCategoryDefinitions(): array
+    {
+        return [
+            'doces' => ['name' => 'Doces', 'category_type' => self::TYPE_DOCES, 'display_order' => 80],
+            'geladinhos' => ['name' => 'Geladinhos', 'category_type' => self::TYPE_GELADINHOS, 'display_order' => 90],
+            'bebidas' => ['name' => 'Bebidas', 'category_type' => self::TYPE_BEBIDAS, 'display_order' => 30],
+            'sucos' => ['name' => 'Sucos', 'category_type' => self::TYPE_SUCOS, 'display_order' => 40],
+            'outros' => ['name' => 'Outros', 'category_type' => self::TYPE_OUTROS, 'display_order' => 100],
+        ];
+    }
+
     protected $fillable = [
         'company_id',
         'name',

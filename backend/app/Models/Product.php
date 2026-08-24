@@ -23,6 +23,8 @@ class Product extends Model
 
     public const TYPE_ACAI = 'acai';
 
+    public const TYPE_COUNTER = 'counter';
+
     protected $fillable = [
         'company_id',
         'category_id',

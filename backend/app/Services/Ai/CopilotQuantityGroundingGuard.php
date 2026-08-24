@@ -8,6 +8,8 @@ use Illuminate\Support\Str;
 
 final class CopilotQuantityGroundingGuard
 {
+    public function __construct(private readonly CopilotProductEligibility $eligibility) {}
+
     /**
      * Grounds explicit customer quantities before trusting the provider's
      * proposed item shape. This keeps an invalid "zero N5" invalid even when
@@ -19,7 +21,7 @@ final class CopilotQuantityGroundingGuard
      */
     public function ground(Company $company, array $items, array $messages): array
     {
-        $products = Product::query()
+        $products = $this->eligibility->apply(Product::query())
             ->where('company_id', $company->id)
             ->where('is_active', true)
             ->get()

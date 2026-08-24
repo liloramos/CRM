@@ -151,10 +151,10 @@ class StructuredMenuReadApiTest extends TestCase
 
         $suco = $service->configuration($this->product('suco'), $company, $date);
         $this->assertSame(
-            ['goiaba', 'tamarindo', 'acerola', 'abacaxi', 'abacaxi-com-hortela', 'caju', 'limao'],
+            ['goiaba', 'tamarindo', 'acerola', 'abacaxi', 'laranja', 'abacaxi-com-hortela', 'caju', 'limao'],
             $this->componentOptionSlugs($suco, 'sabor'),
         );
-        $this->assertSame([0, 0, 0, 0, 0, 0, 0], array_column($this->group($suco, 'sabor')['component_options'], 'price_delta_cents'));
+        $this->assertSame([0, 0, 0, 0, 0, 0, 0, 0], array_column($this->group($suco, 'sabor')['component_options'], 'price_delta_cents'));
 
         $comboLatinha = $service->configuration($this->product('combo-n8-com-latinha'), $company, $date);
         $this->assertSame(

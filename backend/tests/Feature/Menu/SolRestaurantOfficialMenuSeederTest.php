@@ -37,7 +37,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
 
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
         $this->assertSame(count($this->officialProducts()), Product::query()->where('company_id', $company->id)->count());
-        $this->assertSame(64, MenuComponent::query()->where('company_id', $company->id)->count());
+        $this->assertSame(65, MenuComponent::query()->where('company_id', $company->id)->count());
     }
 
     public function test_official_categories_exist_once(): void
@@ -408,6 +408,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'Tamarindo',
             'Acerola',
             'Abacaxi',
+            'Laranja',
             'Abacaxi com hortelã',
             'Caju',
             'Limão',

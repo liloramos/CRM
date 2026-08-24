@@ -196,6 +196,7 @@ export type UpdateMenuProductPayload = {
   is_active: boolean
   is_available_by_default: boolean
   display_order: number
+  category_slug?: CounterProductCategorySlug
   service_days: ProductServiceDayKey[]
   beef_rules?: {
     beef_only: {
@@ -283,6 +284,19 @@ export class ApiError extends Error {
     this.details = details
     this.code = code
   }
+}
+
+export type CounterProductCategorySlug = 'doces' | 'geladinhos' | 'bebidas' | 'sucos' | 'outros'
+
+export type CreateCounterProductPayload = {
+  date?: string
+  name: string
+  description: string | null
+  price_cents: number
+  is_active: boolean
+  is_available_by_default: boolean
+  category_slug: CounterProductCategorySlug
+  service_days: ProductServiceDayKey[]
 }
 
 export function describeApiError(error: unknown, fallback: string): string {
@@ -1103,6 +1117,35 @@ async function getStructuredOperationalProducts(): Promise<Product[]> {
   return dailyMenu.catalog.categories
     .flatMap((category) => category.products.map((product) => mapStructuredProduct(product, category.name, dailyMeats)))
     .filter((product) => product.available)
+}
+
+export async function createCounterProduct(payload: CreateCounterProductPayload): Promise<StructuredMenuProduct> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>('/api/app/menu/products', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function uploadMenuProductImage(productId: number | string, image: File): Promise<StructuredMenuProduct> {
+  const form = new FormData()
+  form.append('image', image)
+
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(`/api/app/menu/products/${productId}/image`, {
+    body: form,
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function removeMenuProductImage(productId: number | string): Promise<StructuredMenuProduct> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>(`/api/app/menu/products/${productId}/image`, {
+    method: 'DELETE',
+  })
+
+  return response.data
 }
 
 export async function getResolvedProductConfiguration(productId: number | string, date?: string): Promise<ResolvedProductConfiguration> {

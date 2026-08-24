@@ -37,9 +37,9 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
 
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
         $this->assertSame(30, Product::query()->where('company_id', $company->id)->count());
-        $this->assertSame(64, DB::table('menu_components')->where('company_id', $company->id)->count());
+        $this->assertSame(65, DB::table('menu_components')->where('company_id', $company->id)->count());
         $this->assertSame(12, DB::table('product_option_groups')->where('company_id', $company->id)->count());
-        $this->assertSame(32, DB::table('product_group_components')->count());
+        $this->assertSame(33, DB::table('product_group_components')->count());
         $this->assertSame(5, DB::table('product_group_products')->count());
         $this->assertSame(1, WeeklyMenu::query()->where('company_id', $company->id)->count());
         $this->assertSame(210, WeeklyMenuComponentItem::query()->where('company_id', $company->id)->count());
@@ -152,7 +152,7 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
             'included_in_base_price' => true,
         ]);
         $this->assertSame(
-            ['goiaba', 'tamarindo', 'acerola', 'abacaxi', 'abacaxi-com-hortela', 'caju', 'limao'],
+            ['goiaba', 'tamarindo', 'acerola', 'abacaxi', 'laranja', 'abacaxi-com-hortela', 'caju', 'limao'],
             $this->componentSlugs('suco', 'sabor'),
         );
 

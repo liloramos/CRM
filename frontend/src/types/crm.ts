@@ -430,6 +430,8 @@ export type StructuredMenuProductSummary = {
   is_legacy: boolean
   legacy_reason: string | null
   display_order: number
+  is_counter_product: boolean
+  image_url: string | null
   availability: EffectiveAvailability
   service_days: ProductServiceDayKey[]
   category: StructuredMenuCategorySummary | null

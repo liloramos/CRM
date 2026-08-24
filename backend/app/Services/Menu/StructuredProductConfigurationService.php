@@ -8,6 +8,7 @@ use App\Models\DailyMenuOverride;
 use App\Models\Product;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Storage;
 
 class StructuredProductConfigurationService
 {
@@ -158,6 +159,8 @@ class StructuredProductConfigurationService
             'is_legacy' => $this->isLegacyProduct($product),
             'legacy_reason' => $this->legacyReason($product),
             'display_order' => $product->display_order,
+            'is_counter_product' => (bool) data_get($product->metadata, 'counter_sale', false),
+            'image_url' => $this->productImageUrl($product),
             'availability' => $this->productAvailability($product, $company, $date),
             'service_days' => $this->serviceDays($product),
             'category' => $product->category ? [
@@ -447,6 +450,19 @@ class StructuredProductConfigurationService
         return (bool) data_get($product->metadata, 'official_price_pending', false)
             && ! $product->is_active
             && $product->base_price_cents === null;
+    }
+
+    private function productImageUrl(Product $product): ?string
+    {
+        $path = data_get($product->metadata, 'catalog_image_path');
+
+        if (! is_string($path) || ! str_starts_with($path, "menu-products/{$product->company_id}/")) {
+            return null;
+        }
+
+        $disk = Storage::disk('public');
+
+        return $disk->exists($path) ? $disk->url($path) : null;
     }
 
     private function legacyReason(Product $product): ?string

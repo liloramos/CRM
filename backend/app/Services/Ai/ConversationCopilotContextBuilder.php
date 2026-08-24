@@ -18,6 +18,7 @@ final class ConversationCopilotContextBuilder
         private readonly DailyStructuredMenuService $dailyMenu,
         private readonly CopilotResolvedProductConfigurationService $resolvedProducts,
         private readonly CustomerActiveOrderResolver $activeOrders,
+        private readonly CopilotProductEligibility $eligibility,
     ) {}
 
     /** @return array<string,mixed> */
@@ -234,7 +235,7 @@ final class ConversationCopilotContextBuilder
     /** @return list<array<string,mixed>> */
     private function menuContext(Company $company, CarbonInterface $date): array
     {
-        return Product::query()
+        return $this->eligibility->apply(Product::query())
             ->where('company_id', $company->id)
             ->where('is_active', true)
             ->where('is_available_by_default', true)

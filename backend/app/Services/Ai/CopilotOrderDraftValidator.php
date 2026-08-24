@@ -22,6 +22,7 @@ class CopilotOrderDraftValidator
         private readonly CopilotPreparationNoteRecovery $preparationNotes,
         private readonly CopilotProductGroundingGuard $products,
         private readonly CopilotIntentGroundingGuard $intents,
+        private readonly CopilotProductEligibility $eligibility,
     ) {}
 
     /** @param array<string,mixed> $context */
@@ -263,7 +264,7 @@ class CopilotOrderDraftValidator
             }));
         }
 
-        $products = Product::query()
+        $products = $this->eligibility->apply(Product::query())
             ->where('company_id', $company->id)
             ->whereIn('id', collect($items)->pluck('menu_item_id')->filter()->unique()->all())
             ->with('optionGroups')

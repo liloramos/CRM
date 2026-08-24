@@ -50,6 +50,15 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('menu/admin/day-adjustments', [AdminMenuReadController::class, 'dayAdjustments'])
             ->middleware('permission:menu.manage')
             ->name('menu.admin.day-adjustments');
+        Route::post('menu/products', [MenuProductAdminController::class, 'store'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.store');
+        Route::post('menu/products/{product}/image', [MenuProductAdminController::class, 'replaceImage'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.image.replace');
+        Route::delete('menu/products/{product}/image', [MenuProductAdminController::class, 'removeImage'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.image.remove');
         Route::patch('menu/products/{product}', [MenuProductAdminController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.update');
@@ -109,6 +118,8 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
             ->middleware('permission:orders.manage')
             ->name('orders.test-cleanup');
         Route::post('orders/{order}/items', [OrderOperationsController::class, 'addItem'])->name('orders.items.store');
+        Route::patch('orders/{order}/items/{item}', [OrderOperationsController::class, 'updateItem'])->name('orders.items.update');
+        Route::delete('orders/{order}/items/{item}', [OrderOperationsController::class, 'removeItem'])->name('orders.items.destroy');
         Route::post('orders/{order}/cancel', [OrderOperationsController::class, 'cancel'])->name('orders.cancel');
         Route::post('orders/{order}/payments/confirm', [OrderOperationsController::class, 'confirmPayment'])->name('orders.payments.confirm');
         Route::post('orders/{order}/payments/void', [OrderOperationsController::class, 'voidPayment'])
@@ -118,8 +129,6 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('orders/{order}/fulfillment/{action}', [OrderOperationsController::class, 'advanceFulfillment'])
             ->whereIn('action', ['ready', 'start-delivery', 'delivered', 'picked-up'])
             ->name('orders.fulfillment.advance');
-        Route::patch('orders/{order}/items/{item}', [OrderOperationsController::class, 'updateItem'])->name('orders.items.update');
-        Route::delete('orders/{order}/items/{item}', [OrderOperationsController::class, 'removeItem'])->name('orders.items.destroy');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
         Route::get('conversation-quick-replies', [ConversationConfigurationController::class, 'quickReplies'])
             ->middleware('permission:whatsapp.view')

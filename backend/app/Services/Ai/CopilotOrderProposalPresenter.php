@@ -9,7 +9,10 @@ use Illuminate\Support\Collection;
 
 final class CopilotOrderProposalPresenter
 {
-    public function __construct(private readonly CustomerActiveOrderResolver $activeOrders) {}
+    public function __construct(
+        private readonly CustomerActiveOrderResolver $activeOrders,
+        private readonly CopilotProductEligibility $eligibility,
+    ) {}
 
     /** @param array<string,mixed> $safe @return array<string,mixed> */
     public function present(Conversation $conversation, array $safe, array $context = []): array
@@ -17,7 +20,7 @@ final class CopilotOrderProposalPresenter
         $items = collect(data_get($safe, 'draft_order.items', []))
             ->filter(fn (mixed $item): bool => is_array($item) && (int) ($item['menu_item_id'] ?? 0) > 0)
             ->values();
-        $products = Product::query()
+        $products = $this->eligibility->apply(Product::query())
             ->where('company_id', $conversation->company_id)
             ->whereIn('id', $items->pluck('menu_item_id')->unique()->all())
             ->get()

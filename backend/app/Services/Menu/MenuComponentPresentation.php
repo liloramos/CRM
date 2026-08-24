@@ -2,6 +2,7 @@
 
 namespace App\Services\Menu;
 
+use App\Enums\MenuComponentType;
 use App\Models\MenuComponent;
 
 class MenuComponentPresentation
@@ -27,6 +28,14 @@ class MenuComponentPresentation
      */
     public function searchAliases(MenuComponent $component): array
     {
+        if ($component->component_type === MenuComponentType::JuiceFlavor) {
+            return array_values(array_unique([
+                $component->name,
+                $this->displayName($component),
+                "Suco de {$component->name}",
+            ]));
+        }
+
         return match ($component->slug) {
             'file-de-peixe' => [
                 'Peixe frito',
@@ -46,6 +55,10 @@ class MenuComponentPresentation
 
     private function displayName(MenuComponent $component): string
     {
+        if ($component->component_type === MenuComponentType::JuiceFlavor) {
+            return "Suco de {$component->name} 500ml";
+        }
+
         return match ($component->slug) {
             'file-de-peixe' => 'Peixe frito',
             default => $component->name,
@@ -54,6 +67,10 @@ class MenuComponentPresentation
 
     private function supportingName(MenuComponent $component): ?string
     {
+        if ($component->component_type === MenuComponentType::JuiceFlavor) {
+            return 'Sabor de suco';
+        }
+
         return match ($component->slug) {
             'file-de-peixe' => $component->name,
             default => $component->description,

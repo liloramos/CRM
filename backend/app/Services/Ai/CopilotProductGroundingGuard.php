@@ -14,6 +14,7 @@ final class CopilotProductGroundingGuard
     public function __construct(
         private readonly CopilotMenuAliasResolver $aliases,
         private readonly StructuredProductConfigurationService $productConfiguration,
+        private readonly CopilotProductEligibility $eligibility,
     ) {}
 
     /** @param list<array<string,mixed>> $messages */
@@ -25,7 +26,7 @@ final class CopilotProductGroundingGuard
     /** @param list<array<string,mixed>> $messages */
     public function hasGroundedProductReference(Company $company, array $messages): bool
     {
-        return Product::query()
+        return $this->eligibility->apply(Product::query())
             ->where('company_id', $company->id)
             ->where('is_active', true)
             ->where('is_available_by_default', true)
