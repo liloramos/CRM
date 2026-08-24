@@ -1112,7 +1112,7 @@ export function ConversationsPage({
       setCopilotProposalApplied(false)
       setCopilotTargetChoice(null)
     } catch {
-      setLocalError('Nao foi possivel analisar a conversa agora.')
+      setLocalError('Não foi possível analisar a conversa agora.')
     } finally {
       setIsAnalyzingCopilot(false)
     }
@@ -1838,7 +1838,7 @@ export function ConversationsPage({
               ) : null}
 
               <div className="conversation-context-block">
-                <h3>Proposta do Copiloto</h3>
+                <h3>Sugestão do Copiloto</h3>
                 {!visibleCopilotAnalysis ? (
                   <>
                     <p>Analise a conversa para identificar intencao, pedido e informacoes pendentes.</p>
@@ -1872,15 +1872,15 @@ export function ConversationsPage({
                     {visibleCopilotAnalysis.proposal?.blocking_reasons.length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--warning"><span>Revisão necessária</span>{visibleCopilotAnalysis.proposal.blocking_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div> : null}
                     {visibleCopilotAnalysis.proposal?.target.requires_human_selection ? <div className="conversation-copilot-result__section">
                       <span>Escolha onde aplicar</span>
-                      <small>Existe um pedido em andamento. A proposta continua apenas como rascunho local.</small>
+                      <small>Existe um pedido em andamento. Escolha onde preparar os itens para conferência.</small>
                       <div className="conversation-copilot-targets">
                         {visibleCopilotAnalysis.proposal.target.choices.includes('NEW_ORDER') ? <Button onClick={() => setCopilotTargetChoice('NEW_ORDER')} variant={copilotTargetChoice === 'NEW_ORDER' ? 'primary' : 'secondary'}>Criar novo pedido</Button> : null}
                         {visibleCopilotAnalysis.proposal.target.choices.includes('ACTIVE_ORDER') ? <Button onClick={() => setCopilotTargetChoice('ACTIVE_ORDER')} variant={copilotTargetChoice === 'ACTIVE_ORDER' ? 'primary' : 'secondary'}>{visibleCopilotAnalysis.proposal.target.active_order?.code ?? 'Pedido em andamento'}</Button> : null}
                       </div>
-                      {copilotTargetChoice === 'ACTIVE_ORDER' && visibleCopilotAnalysis.proposal.target.active_order ? <div className="conversation-copilot-diff"><small>Antes</small><p>{visibleCopilotAnalysis.proposal.target.active_order.code}</p><small>Proposta</small><p>Adicionar os itens acima ao rascunho, sem substituir itens existentes.</p></div> : null}
+                      {copilotTargetChoice === 'ACTIVE_ORDER' && visibleCopilotAnalysis.proposal.target.active_order ? <div className="conversation-copilot-diff"><small>Pedido atual</small><p>{visibleCopilotAnalysis.proposal.target.active_order.code}</p><small>O que será preparado</small><p>Adicionar os itens acima ao pedido em montagem, sem substituir itens existentes.</p></div> : null}
                     </div> : null}
-                    {visibleCopilotAnalysis.proposal?.can_apply ? <Button disabled={isActionBusy || (visibleCopilotAnalysis.proposal.target.requires_human_selection && !copilotTargetChoice)} onClick={handleApplyCopilotProposal} variant="primary">Preparar rascunho</Button> : null}
-                    {copilotProposalApplied ? <small>Proposta aplicada ao rascunho. Revise antes de salvar.</small> : null}
+                    {visibleCopilotAnalysis.proposal?.can_apply ? <Button disabled={isActionBusy || (visibleCopilotAnalysis.proposal.target.requires_human_selection && !copilotTargetChoice)} onClick={handleApplyCopilotProposal} variant="primary">Preparar pedido</Button> : null}
+                    {copilotProposalApplied ? <small>Itens preparados para conferência. Revise antes de salvar.</small> : null}
                     {visibleCopilotAnalysis.suggested_reply ? <div className="conversation-copilot-result__section conversation-copilot-result__section--reply"><span>Resposta sugerida</span><p>{visibleCopilotAnalysis.suggested_reply}</p><Button onClick={handleUseCopilotReply} variant="secondary">Usar resposta</Button></div> : null}
                     <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="ghost">Analisar novamente</Button>
                       </>

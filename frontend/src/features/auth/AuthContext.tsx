@@ -19,7 +19,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (sessionError) {
       setUser(null)
       setStatus('unauthenticated')
-      setError(sessionError instanceof Error ? sessionError.message : 'Nao foi possivel verificar a sessao.')
+      setError(sessionError instanceof Error ? sessionError.message : 'Não foi possível verificar a sessão.')
     }
   }, [])
 

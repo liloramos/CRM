@@ -177,9 +177,9 @@ const serviceDayLabels: Record<ProductServiceDayKey, string> = {
 }
 
 const statusLabels: Record<EffectiveAvailabilityStatus, string> = {
-  available: 'Disponivel',
+  available: 'Disponível',
   sold_out: 'Esgotado',
-  unavailable: 'Indisponivel',
+  unavailable: 'Indisponível',
 }
 
 const componentTypeLabels: Record<MenuComponentTypeKey, string> = {
@@ -204,8 +204,8 @@ const counterProductCategoryOptions: Array<{ value: CounterProductCategorySlug; 
 
 const tabLabels: Record<MenuAdminTab, string> = {
   today: 'Hoje',
-  products: 'Produtos e precos',
-  weekly: 'Cardapio semanal',
+  products: 'Produtos e preços',
+  weekly: 'Cardápio semanal',
   rules: 'Regras e combos',
 }
 
@@ -248,7 +248,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     try {
       setDailyMenu(await getDailyStructuredMenu(selectedDate))
     } catch (error) {
-      setDailyError(friendlyError(error, 'Nao foi possivel carregar o cardapio do dia.'))
+      setDailyError(friendlyError(error, 'Não foi possível carregar o cardápio do dia.'))
     } finally {
       setIsDailyLoading(false)
     }
@@ -280,7 +280,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       setWeeklyMenu(weeklyResponse)
       setDayAdjustments(adjustmentsResponse.adjustments)
     } catch (error) {
-      setAdminError(friendlyError(error, 'Nao foi possivel carregar os dados administrativos do cardapio.'))
+      setAdminError(friendlyError(error, 'Não foi possível carregar os dados administrativos do cardápio.'))
     } finally {
       setIsAdminLoading(false)
     }
@@ -504,17 +504,17 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     const extraBeefMaxQuantity = form.extra_beef_enabled ? parseInteger(form.extra_beef_max_quantity) : null
 
     if (form.beef_only_enabled && beefOnlyFinalPrice === null) {
-      setMutationError('Informe o preco final do modo somente bife.')
+      setMutationError('Informe o preço final do modo somente bife.')
       return null
     }
 
     if (form.extra_beef_enabled && extraBeefPrice === null) {
-      setMutationError('Informe o preco do bife adicional.')
+      setMutationError('Informe o preço do bife adicional.')
       return null
     }
 
     if (form.extra_beef_enabled && (extraBeefMaxQuantity === null || extraBeefMaxQuantity < 1)) {
-      setMutationError('Informe uma quantidade maxima valida para o bife adicional.')
+      setMutationError('Informe uma quantidade máxima válida para o bife adicional.')
       return null
     }
 
@@ -540,12 +540,12 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     const displayOrder = parseInteger(productForm.display_order)
 
     if (priceCents === null) {
-      setMutationError('Informe um preco valido em reais.')
+      setMutationError('Informe um preço válido em reais.')
       return
     }
 
     if (product && displayOrder === null) {
-      setMutationError('Informe uma ordem valida.')
+      setMutationError('Informe uma ordem válida.')
       return
     }
 
@@ -589,7 +589,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       } else if (product && removeProductImage && product.image_url) {
         await removeMenuProductImage(product.id)
       }
-    }, product ? 'Produto atualizado com dados do backend.' : 'Produto de balcao criado.')
+    }, product ? 'Produto atualizado.' : 'Produto de balcão criado.')
   }
 
   async function handleSaveComponent(component: AdminMenuComponent | null) {
@@ -600,7 +600,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     const displayOrder = parseInteger(componentForm.display_order)
 
     if (displayOrder === null) {
-      setMutationError('Informe uma ordem valida.')
+      setMutationError('Informe uma ordem válida.')
       return
     }
 
@@ -648,7 +648,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     const displayOrder = dailyAdjustmentForm.display_order ? parseInteger(dailyAdjustmentForm.display_order) : null
 
     if (dailyAdjustmentForm.display_order && displayOrder === null) {
-      setMutationError('Informe uma ordem valida.')
+      setMutationError('Informe uma ordem válida.')
       return
     }
 
@@ -660,7 +660,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
         display_order: displayOrder,
         notes: dailyAdjustmentForm.notes.trim() || null,
       })
-    }, dailyAdjustmentForm.action === 'include' ? 'Item incluido somente nesta data.' : 'Item ocultado somente nesta data.')
+    }, dailyAdjustmentForm.action === 'include' ? 'Item incluído somente nesta data.' : 'Item ocultado somente nesta data.')
   }
 
   async function handleClearDailyAdjustment(adjustment: AdminDailyMenuAdjustment) {
@@ -714,7 +714,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     const pendingOption = pendingComponentOption(product)
 
     if (!pendingOption) {
-      setMutationError('Nao ha configuracao pendente para este produto.')
+      setMutationError('Não há configuração pendente para este produto.')
       return
     }
 
@@ -723,7 +723,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       : null
 
     if (pendingConfigurationForm.resolution === 'offered' && finalPriceCents === null) {
-      setMutationError('Informe o preco final da variacao em reais.')
+      setMutationError('Informe o preço final da variação em reais.')
       return
     }
 
@@ -732,7 +732,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       && finalPriceCents !== null
       && finalPriceCents < productPriceCents(product)
     ) {
-      setMutationError('O preco final da variacao nao pode ser menor que o preco base do produto.')
+      setMutationError('O preço final da variação não pode ser menor que o preço base do produto.')
       return
     }
 
@@ -743,8 +743,8 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
         final_price_cents: finalPriceCents,
       })
     }, pendingConfigurationForm.resolution === 'offered'
-      ? 'Variacao configurada com preco informado.'
-      : 'Variacao marcada como nao oferecida.')
+      ? 'Variação configurada com preço informado.'
+      : 'Variação marcada como não oferecida.')
   }
 
   async function handleSaveComponentDays(component: AdminMenuComponent) {
@@ -803,7 +803,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       setSuccessMessage(success)
       await reloadWorkspace()
     } catch (error) {
-      setMutationError(friendlyError(error, 'Nao foi possivel salvar a alteracao.'))
+      setMutationError(friendlyError(error, 'Não foi possível salvar a alteração.'))
     } finally {
       setIsMutating(false)
     }
@@ -822,8 +822,8 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             </Button>
           </div>
         }
-        description="Controle o cardapio operacional sem tirar precos, regras ou disponibilidade do backend."
-        title="Cardapio"
+        description="Controle o cardápio operacional preservando preços, regras e disponibilidade."
+        title="Cardápio"
       />
 
       <div className="menu-admin-workspace">
@@ -839,7 +839,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
           </div>
         </Card>
 
-        <div aria-label="Areas do cardapio" className="menu-admin-tabs" role="tablist">
+        <div aria-label="Áreas do cardápio" className="menu-admin-tabs" role="tablist">
           {(Object.keys(tabLabels) as MenuAdminTab[]).map((tab) => (
             <button
               aria-controls={`menu-admin-panel-${tab}`}
@@ -1003,9 +1003,9 @@ function TodayTab({
     return (
       <ErrorState
         actionLabel="Tentar novamente"
-        description="Verifique a conexao com o backend e tente novamente."
+        description="Verifique a conexão e tente novamente."
         onAction={onRetry}
-        title="Nao foi possivel atualizar o cardapio"
+        title="Não foi possível atualizar o cardápio"
       />
     )
   }
@@ -1013,8 +1013,8 @@ function TodayTab({
   if (!dailyMenu) {
     return (
       <EmptyState
-        description="A consulta ao backend ainda nao retornou dados."
-        title="Cardapio nao carregado"
+        description="A consulta ainda não retornou dados."
+        title="Cardápio não carregado"
       />
     )
   }
@@ -1032,8 +1032,8 @@ function TodayTab({
         <DailyAdjustmentsPanel adjustments={adjustments} onClearAdjustment={onClearAdjustment} />
       ) : null}
       <ProductCatalog
-        actionLabel="Vendaveis nesta data"
-        emptyDescription="Nao ha produtos liberados pelo backend para esta data."
+        actionLabel="Vendáveis nesta data"
+        emptyDescription="Não há produtos liberados para esta data."
         mode="daily"
         productsByCategory={dailyMenu.catalog.categories}
       />
@@ -1065,12 +1065,12 @@ function DailyMenuSections({
               </Button>
             ) : null
           }
-          eyebrow="Operacao do dia"
-          title="Cardapio do dia"
+          eyebrow="Operação do dia"
+          title="Cardápio do dia"
         />
         <EmptyState
-          description="Produtos vendaveis tambem dependem da agenda da data. Domingo nao recebe itens automaticamente."
-          title="Sem cardapio semanal neste dia"
+          description="Produtos vendáveis também dependem da agenda da data. Domingo não recebe itens automaticamente."
+          title="Sem cardápio semanal neste dia"
         />
       </Card>
     )

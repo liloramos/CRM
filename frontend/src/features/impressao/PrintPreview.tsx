@@ -19,7 +19,7 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
       <SectionTitle
         action={<Badge tone={orderState.printBadge.tone}>{orderState.printBadge.label}</Badge>}
         eyebrow="Fluxo obrigatorio"
-        title="Comanda / previa de impressao"
+        title="Comanda / prévia de impressão"
       />
 
       <div className="print-panel__layout">
@@ -91,7 +91,7 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
             <strong>{formatCurrency(order.total)}</strong>
           </div>
           <p className="receipt-note">{order.generalNotes}</p>
-          <p className="receipt-note">Previa HTML. Impressao fisica real depende de confirmacao/configuracao.</p>
+          <p className="receipt-note">Prévia da comanda. A impressão física depende da configuração disponível.</p>
         </div>
 
         <div className="print-panel__side">
@@ -106,14 +106,14 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
             <span>2</span>
             <div>
               <strong>Gerar comanda</strong>
-              <p>Previa HTML antes da impressao termica.</p>
+              <p>Prévia antes da impressão térmica.</p>
             </div>
           </div>
           <div className={order.printStatus === 'impresso' ? 'print-step is-done' : 'print-step'}>
             <span>3</span>
             <div>
               <strong>Imprimir antes do preparo</strong>
-              <p>Bloqueio operacional ate impressao ou autorizacao manual.</p>
+              <p>Bloqueio operacional até a impressão ou autorização manual.</p>
             </div>
           </div>
           <div className="print-actions">
@@ -129,7 +129,7 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
           </div>
           {!orderState.canPrint ? (
             <p className="muted-text">
-              {orderState.isCancelled ? 'Pedido cancelado nao libera impressao operacional.' : 'Adicione itens antes de gerar a comanda.'}
+              {orderState.isCancelled ? 'Pedido cancelado não libera impressão operacional.' : 'Adicione itens antes de gerar a comanda.'}
             </p>
           ) : null}
         </div>

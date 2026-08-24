@@ -102,7 +102,7 @@ export function OrdersPage({
             </div>
           </div>
         }
-        description="Fila de pedidos com conferencia humana, pagamento e impressao antes do preparo."
+        description="Fila de pedidos com conferência humana, pagamento e impressão antes do preparo."
         title="Pedidos"
       />
 
@@ -226,7 +226,7 @@ export function OrdersPage({
               {selectedOrderState.isCancelled ? (
                 <div className="order-cancelled-notice" role="status">
                   <Badge tone="danger">Cancelado</Badge>
-                  <p>Este pedido esta preservado no historico, mas saiu da fila operacional e nao aceita novas acoes de preparo.</p>
+                  <p>Este pedido está preservado no histórico, mas saiu da fila operacional e não aceita novas ações de preparo.</p>
                 </div>
               ) : null}
 
@@ -270,7 +270,7 @@ export function OrdersPage({
                 {selectedOrder.items.length === 0 ? (
                   <EmptyState
                     actionLabel="Adicionar item"
-                    description="Rascunho criado. Escolha um produto do cardapio para montar o pedido."
+        description="Pedido em montagem criado. Escolha um produto do cardápio para montar o pedido."
                     onAction={selectedOrderState.canReceiveItems ? () => onOpenModal('add-product') : undefined}
                     title="Pedido sem itens"
                   />
@@ -290,7 +290,7 @@ export function OrdersPage({
                   </div>
                 </Card>
                 <Card>
-                  <SectionTitle title="Historico e observacoes" />
+                  <SectionTitle title="Histórico e observações" />
                   <div className="timeline">
                     {selectedOrder.history.map((entry) => (
                       <div className="timeline__item" key={entry.id}>
@@ -302,7 +302,7 @@ export function OrdersPage({
                         <small>{entry.timeLabel}</small>
                       </div>
                     ))}
-                    {selectedOrder.history.length === 0 ? <p className="muted-text">Sem historico registrado.</p> : null}
+                    {selectedOrder.history.length === 0 ? <p className="muted-text">Sem histórico registrado.</p> : null}
                   </div>
                 </Card>
               </div>
@@ -340,7 +340,7 @@ export function OrdersPage({
               Cancelar pedido
             </Button>
             <Button disabled={!selectedOrderState?.canDeleteDraft} icon="close" onClick={() => onOpenModal('delete-draft')} variant="ghost">
-              Excluir rascunho
+              Excluir pedido em montagem
             </Button>
             {canPermanentlyDeleteOrders && selectedOrder ? (
               <Button icon="close" onClick={() => onRequestPermanentDelete(selectedOrder.id)} variant="ghost">
@@ -350,7 +350,7 @@ export function OrdersPage({
           </div>
           <div className="attention-box">
             <Badge tone="manual">Confirmacao humana</Badge>
-            <p>Ambiguidades, credito e comprovantes nao devem ser decididos pela IA sem atendente.</p>
+            <p>Ambiguidades, crédito e comprovantes não devem ser decididos pela IA sem atendente.</p>
           </div>
         </Card>
       </div>
@@ -420,7 +420,7 @@ function emptyQueueTitle(filter: OrderQueueFilter): string {
 function emptyQueueDescription(filter: OrderQueueFilter): string {
   switch (filter) {
     case 'cancelled':
-      return 'Pedidos cancelados ficam preservados no historico, fora da fila ativa.'
+      return 'Pedidos cancelados ficam preservados no histórico, fora da fila ativa.'
     case 'finished':
       return 'Pedidos finalizados saem da operacao ativa.'
     case 'all':

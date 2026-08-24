@@ -30,13 +30,13 @@ type FinancePageProps = {
 }
 
 const statusLabels: Record<FinanceEntry['status'], string> = {
-  credito: 'Credito',
+  credito: 'Crédito',
   anulado: 'Anulado',
   cancelado: 'Cancelado',
   pago: 'Pago',
   parcial: 'Parcial',
   pendente: 'Pendente',
-  revisao_humana: 'Revisao humana',
+  revisao_humana: 'Conferência necessária',
 }
 
 function financeStatusTone(status: FinanceEntry['status']): BadgeTone {

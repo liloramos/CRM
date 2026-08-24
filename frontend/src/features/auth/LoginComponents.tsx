@@ -368,12 +368,12 @@ export function LoginHeroPanel({ children }: LoginHeroPanelProps) {
       </div>
 
       <div className="login-hero-panel__copy">
-        <span className="eyebrow">Gestao operacional</span>
+        <span className="eyebrow">Gestão operacional</span>
         <h1>
-          <span>Operacao mais clara.</span>
+        <span>Operação mais clara.</span>
           <strong>Atendimento mais rapido.</strong>
         </h1>
-        <p>Organize pedidos, cardapio e comandas em uma rotina mais simples e visual.</p>
+        <p>Organize pedidos, cardápio e comandas em uma rotina mais simples e visual.</p>
         <span className="login-hero-panel__accent" />
       </div>
 

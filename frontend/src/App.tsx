@@ -560,7 +560,7 @@ function App() {
         customer_name_snapshot: customerName,
         customer_phone_snapshot: customerPhone || null,
         fulfillment_type: newOrderFulfillmentType,
-        general_notes: newOrderNotes.trim() || 'Pedido manual criado na operacao local.',
+        general_notes: newOrderNotes.trim() || 'Pedido manual criado na operação local.',
         pickup_person_name: customerName,
       })
 
@@ -581,7 +581,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel criar o pedido.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível criar o pedido.')
     } finally {
       setIsActionBusy(false)
     }
@@ -653,12 +653,12 @@ function App() {
 
   async function handleAddItem() {
     if (!addItemContext || addItemContext.source !== 'api' || !isPersistedBackendId(addItemContext.orderId)) {
-      setActionError('O pedido nao possui um ID valido.')
+      setActionError('O pedido não possui um ID válido.')
       return
     }
 
     if (!addItemContext.product || !isPersistedBackendId(addItemContext.product.id)) {
-      setActionError('O produto nao possui um ID valido.')
+      setActionError('O produto não possui um ID válido.')
       return
     }
 
@@ -714,7 +714,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível adicionar o item.')
     } finally {
       setIsActionBusy(false)
     }
@@ -722,7 +722,7 @@ function App() {
 
   async function handleUpdateItem() {
     if (!addItemContext?.product || !editingOrderItemId || !isPersistedBackendId(addItemContext.orderId)) {
-      setActionError('O item do pedido nao esta disponivel para edicao.')
+      setActionError('O item do pedido não está disponível para edição.')
       return
     }
 
@@ -742,7 +742,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o item.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível atualizar o item.')
     } finally {
       setIsActionBusy(false)
     }
@@ -758,7 +758,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel remover o item.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível remover o item.')
     } finally {
       setIsActionBusy(false)
     }
@@ -777,7 +777,7 @@ function App() {
     const product = snapshot?.products.find((candidate) => candidate.id === productId)
 
     if (!product || !isPersistedBackendId(product.id)) {
-      setActionError('O produto nao possui um ID valido.')
+      setActionError('O produto não possui um ID válido.')
       return
     }
 
@@ -806,7 +806,7 @@ function App() {
       setPrintPreview(response.data.preview)
       await loadSnapshot()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel gerar a previa da comanda.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível gerar a prévia da comanda.')
     } finally {
       setIsActionBusy(false)
     }
@@ -814,7 +814,7 @@ function App() {
 
   async function handleCancelOrder() {
     if (!selectedOrder || !isPersistedBackendId(selectedOrder.id)) {
-      setActionError('O pedido nao possui um ID valido.')
+      setActionError('O pedido não possui um ID válido.')
       return
     }
 
@@ -841,7 +841,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel cancelar o pedido.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível cancelar o pedido.')
     } finally {
       setIsActionBusy(false)
     }
@@ -849,12 +849,12 @@ function App() {
 
   async function handleDeleteDraft() {
     if (!selectedOrder || !isPersistedBackendId(selectedOrder.id)) {
-      setActionError('O pedido nao possui um ID valido.')
+      setActionError('O pedido não possui um ID válido.')
       return
     }
 
     if (!getOrderOperationalState(selectedOrder).canDeleteDraft) {
-      setActionError('Somente rascunho vazio, sem pagamento ou impressao, pode ser excluido.')
+      setActionError('Somente pedido em montagem vazio, sem pagamento ou impressão, pode ser excluído.')
       return
     }
 
@@ -879,7 +879,7 @@ function App() {
       setActiveModal(null)
       await loadSnapshot()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel excluir o rascunho.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível excluir o pedido em montagem.')
     } finally {
       setIsActionBusy(false)
     }
@@ -887,12 +887,12 @@ function App() {
 
   async function handleDeleteOrderPermanently() {
     if (!selectedOrder || !isPersistedBackendId(selectedOrder.id)) {
-      setActionError('O pedido nao possui um ID valido.')
+      setActionError('O pedido não possui um ID válido.')
       return
     }
 
     if (deleteConfirmation !== 'EXCLUIR') {
-      setActionError('Digite EXCLUIR para confirmar a exclusao permanente.')
+      setActionError('Digite EXCLUIR para confirmar a exclusão permanente.')
       return
     }
 
@@ -911,7 +911,7 @@ function App() {
       await loadSnapshot()
     } catch (error) {
       setBlockedOrderDeletions(blockedDeletionsFromError(error))
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel excluir o pedido.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível excluir o pedido.')
     } finally {
       setIsActionBusy(false)
     }
@@ -945,7 +945,7 @@ function App() {
       await loadSnapshot()
     } catch (error) {
       setBlockedOrderDeletions(blockedDeletionsFromError(error))
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel excluir os pedidos selecionados.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível excluir os pedidos selecionados.')
     } finally {
       setIsActionBusy(false)
     }
@@ -978,7 +978,7 @@ function App() {
       setActiveModal(null)
       await loadSnapshot()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel executar a limpeza ampla de teste.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível executar a limpeza ampla de teste.')
     } finally {
       setIsActionBusy(false)
     }
@@ -986,12 +986,12 @@ function App() {
 
   async function handleChangeStatus() {
     if (!selectedOrder || !isPersistedBackendId(selectedOrder.id)) {
-      setActionError('O pedido nao possui um ID valido.')
+      setActionError('O pedido não possui um ID válido.')
       return
     }
 
     if (!statusTarget) {
-      setActionError('Escolha um status valido para este pedido.')
+      setActionError('Escolha um status válido para este pedido.')
       return
     }
 
@@ -1012,7 +1012,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel alterar o status.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível alterar o status.')
     } finally {
       setIsActionBusy(false)
     }
@@ -1020,12 +1020,12 @@ function App() {
 
   async function handleConfirmPayment() {
     if (!selectedOrder || !isPersistedBackendId(selectedOrder.id)) {
-      setActionError('O pedido nao possui um ID valido.')
+      setActionError('O pedido não possui um ID válido.')
       return
     }
 
     if (selectedOrder.status === 'cancelado') {
-      setActionError('Nao e possivel confirmar pagamento em pedido cancelado.')
+      setActionError('Não é possível confirmar pagamento em pedido cancelado.')
       return
     }
 
@@ -1053,7 +1053,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel confirmar o pagamento.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível confirmar o pagamento.')
     } finally {
       setIsActionBusy(false)
     }
@@ -1063,7 +1063,7 @@ function App() {
     setActionError(null)
 
     if (!orderId.trim() || snapshotSource !== 'api') {
-      setActionError('Selecione um pedido real ja salvo no backend antes de imprimir a comanda.')
+      setActionError('Selecione um pedido salvo antes de imprimir a comanda.')
       setActiveModal('print-error')
       return
     }
@@ -1071,7 +1071,7 @@ function App() {
     const order = snapshot?.orders.find((candidate) => candidate.id === orderId)
 
     if (order && !getOrderOperationalState(order).canPrint) {
-      setActionError(order.status === 'cancelado' ? 'Pedido cancelado nao libera impressao operacional.' : 'Adicione itens ao pedido antes de imprimir.')
+      setActionError(order.status === 'cancelado' ? 'Pedido cancelado não libera impressão operacional.' : 'Adicione itens ao pedido antes de imprimir.')
       setActiveModal('print-error')
       return
     }
@@ -1083,7 +1083,7 @@ function App() {
     )
 
     if (!ticketWindow) {
-      setActionError('O navegador bloqueou a janela de impressao. Libere pop-ups para este sistema e tente novamente.')
+      setActionError('O navegador bloqueou a janela de impressão. Libere pop-ups para este sistema e tente novamente.')
       setActiveModal('print-error')
       return
     }
@@ -1113,7 +1113,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel alternar o modo da conversa.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível alternar o modo da conversa.')
     } finally {
       setIsActionBusy(false)
     }
@@ -1158,7 +1158,7 @@ function App() {
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o preparo do pedido.')
+      setActionError(error instanceof Error ? error.message : 'Não foi possível atualizar o preparo do pedido.')
       await loadSnapshot()
       throw error
     } finally {
@@ -1511,13 +1511,13 @@ function App() {
 
     if (!selectedOrder || snapshotSource !== 'api' || !isPersistedBackendId(selectedOrder.id)) {
       setAddItemContext(null)
-      setActionError('O pedido nao possui um ID valido.')
+          setActionError('O pedido não possui um ID válido.')
       return
     }
 
     if (!getOrderOperationalState(selectedOrder).canReceiveItems) {
       setAddItemContext(null)
-      setActionError('Este pedido nao aceita novos itens no status atual.')
+          setActionError('Este pedido não aceita novos itens no status atual.')
       return
     }
 
@@ -1535,7 +1535,7 @@ function App() {
 
   function openEditItem(item: OrderItem) {
     if (!selectedOrder || !getOrderOperationalState(selectedOrder).canReceiveItems) {
-      setActionError('Este pedido nao permite alteracoes de itens no status atual.')
+          setActionError('Este pedido não permite alterações de itens no status atual.')
       return
     }
     const product = snapshot?.products.find((candidate) => candidate.id === item.edit?.productId)
@@ -2121,7 +2121,7 @@ function buildOrderItemOptions(
     }
 
     if (group.same_component_only && choiceCount > 1) {
-      throw new Error(`${group.label} nao permite mistura de opcoes.`)
+        throw new Error(`${group.label} não permite mistura de opções.`)
     }
 
     for (const option of componentSelections) {
@@ -2166,7 +2166,7 @@ function buildOrderItemOptions(
 
   if (meatMode === 'beef_only') {
     if (dailyMeatIds.length > 0 || extraBeefSelected) {
-      throw new Error('Somente bife nao pode ser combinado com outras carnes.')
+      throw new Error('Somente bife não pode ser combinado com outras carnes.')
     }
 
     return {
@@ -2183,7 +2183,7 @@ function buildOrderItemOptions(
 
   if (meatMode === 'none' || genericNoMeatGroups.includes('carne')) {
     if (dailyMeatIds.length > 0 || extraBeefSelected) {
-      throw new Error('Sem carne nao pode ser combinado com carnes ou bife adicional.')
+      throw new Error('Sem carne não pode ser combinado com carnes ou bife adicional.')
     }
 
     return {
@@ -2271,13 +2271,13 @@ function hydrateEditableOrderItem(
 
 function assertStructuredComponentOptionAvailable(option: StructuredComponentOption) {
   if (!option.link_active || option.requires_confirmation || !option.available) {
-    throw new Error(`${option.name} nao esta disponivel para este item.`)
+        throw new Error(`${option.name} não está disponível para este item.`)
   }
 }
 
 function assertStructuredProductOptionAvailable(option: StructuredProductOption) {
   if (!option.link_active || option.requires_confirmation || !option.available) {
-    throw new Error(`${option.selectable_product.name} nao esta disponivel para este item.`)
+        throw new Error(`${option.selectable_product.name} não está disponível para este item.`)
   }
 }
 

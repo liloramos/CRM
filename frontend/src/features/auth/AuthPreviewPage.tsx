@@ -43,8 +43,8 @@ export function AuthPreviewPage({ mode }: AuthPreviewPageProps) {
           </Button>
         </Card>
         <Card className="auth-side">
-          <h2>Operacao sem ruído</h2>
-          <p>Atendimento, pedidos, pagamento e impressao em um fluxo unico para a equipe.</p>
+          <h2>Operação sem ruído</h2>
+          <p>Atendimento, pedidos, pagamento e impressão em um fluxo único para a equipe.</p>
           <div className="auth-side__steps">
             <span>Atendimento</span>
             <span>Conferencia</span>

@@ -16,7 +16,7 @@ const LOCAL_DEMO_PASSWORD = 'password'
 const ACCESS_ROLE_OPTIONS = [
   { label: 'Atendimento', value: 'atendente' },
   { label: 'Gerencia', value: 'gerente' },
-  { label: 'Cozinha / impressao', value: 'cozinha' },
+  { label: 'Cozinha / impressão', value: 'cozinha' },
 ]
 
 export function LoginPage() {
@@ -41,7 +41,7 @@ export function LoginPage() {
     try {
       await login(email, password, remember)
     } catch (loginError) {
-      setFormError(loginError instanceof Error ? loginError.message : 'Nao foi possivel entrar.')
+      setFormError(loginError instanceof Error ? loginError.message : 'Não foi possível entrar.')
     } finally {
       setIsSubmitting(false)
     }

@@ -303,7 +303,7 @@ export function OperationalModalContent({
             ) : null}
           </div>
         ) : selectedOrder ? (
-          <p>O pedido selecionado nao esta pronto para receber itens reais.</p>
+          <p>O pedido selecionado não está pronto para receber itens.</p>
         ) : (
           <p>Crie ou selecione um pedido antes de adicionar itens.</p>
         )}
@@ -378,7 +378,7 @@ export function OperationalModalContent({
             }}
             type="checkbox"
           />
-          Este item e para outra pessoa
+          Este item é para outra pessoa
         </label>
         {itemHasDifferentBeneficiary ? (
           <label>
@@ -391,7 +391,7 @@ export function OperationalModalContent({
           </label>
         ) : null}
         <label>
-          Observacao por item
+          Observação por item
           <textarea
             onChange={(event) => onItemNotesChange(event.target.value)}
             placeholder="Ex.: sem salada, retirar cebola, separar para retirada."
@@ -423,7 +423,7 @@ export function OperationalModalContent({
         {printPreview?.html ? (
           <iframe className="ticket-frame" srcDoc={printPreview.html} title="Previa HTML da comanda" />
         ) : (
-          <EmptyState description="A previa sera exibida aqui quando o backend gerar o ticket." title="Sem previa carregada" />
+          <EmptyState description="A prévia será exibida aqui quando a comanda estiver pronta." title="Sem prévia carregada" />
         )}
       </div>
     )
@@ -505,7 +505,7 @@ export function OperationalModalContent({
             </label>
           </>
         ) : (
-          <EmptyState description="Este pedido nao possui transicoes disponiveis no momento." title="Sem status disponivel" />
+          <EmptyState description="Este pedido não possui mudanças de status disponíveis no momento." title="Sem status disponível" />
         )}
         {actionError ? <p className="form-error">{actionError}</p> : null}
       </div>
@@ -570,11 +570,11 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          O rascunho <strong>{selectedOrder?.code ?? 'selecionado'}</strong> sera apagado permanentemente somente se ainda estiver vazio, sem pagamento e sem impressao.
+          O pedido em montagem <strong>{selectedOrder?.code ?? 'selecionado'}</strong> será apagado permanentemente somente se ainda estiver vazio, sem pagamento e sem impressão.
         </p>
         <div className="attention-box">
-          <Badge tone="danger">Acao permanente</Badge>
-          <p>Pedidos com itens, pagamento, comanda, entrega, conversa ou historico operacional devem ser cancelados, nao apagados.</p>
+          <Badge tone="danger">Ação permanente</Badge>
+          <p>Pedidos com itens, pagamento, comanda, entrega, conversa ou histórico operacional devem ser cancelados, não apagados.</p>
         </div>
         {actionError ? <p className="form-error">{actionError}</p> : null}
       </div>
@@ -612,8 +612,8 @@ export function OperationalModalContent({
           {bulkDeleteCount} pedido(s) selecionado(s) serao excluidos permanentemente somente se todos forem operacionalmente elegiveis.
         </p>
         <div className="attention-box">
-          <Badge tone="danger">Exclusao em lote</Badge>
-          <p>Pedidos bloqueados nao serao ignorados silenciosamente. Se houver bloqueio, nenhum pedido da selecao sera excluido.</p>
+          <Badge tone="danger">Exclusão em lote</Badge>
+          <p>Pedidos bloqueados não serão ignorados silenciosamente. Se houver bloqueio, nenhum pedido da seleção será excluído.</p>
         </div>
         <BlockedDeletionList blocked={blockedOrderDeletions} />
         <label>
@@ -700,7 +700,7 @@ export function OperationalModalContent({
           </span>
           <span className="mode-card__copy">
             <strong>Atendimento manual</strong>
-            <small>A equipe assume a conversa; o sistema registra tomada manual e mantem revisao humana ativa.</small>
+            <small>A equipe assume a conversa; o sistema registra a tomada manual e mantém a conferência humana ativa.</small>
           </span>
         </label>
         {actionError ? <p className="form-error">{actionError}</p> : null}
@@ -723,10 +723,10 @@ export function OperationalModalContent({
   if (modal === 'whatsapp-error') {
     return (
       <div className="modal-fields">
-        <p>Verifique provider, webhook e variaveis seguras. Tokens reais nao devem aparecer na interface.</p>
+        <p>Verifique a integração, o webhook e as configurações seguras. Tokens reais não devem aparecer na interface.</p>
         <label>
-          Diagnostico
-          <input placeholder="Sem conexao ou configuracao ausente" />
+          Diagnóstico
+          <input placeholder="Sem conexão ou configuração disponível" />
         </label>
       </div>
     )
@@ -951,7 +951,7 @@ function CopilotDraftNotice({ proposal, queuePosition, stage }: {
 
   return (
     <div className="copilot-draft-notice" role="status">
-      <strong>Proposta do Copiloto aplicada ao rascunho local</strong>
+      <strong>Sugestão do Copiloto pronta para conferência</strong>
       {queuePosition && queuePosition.total > 1 ? <span>Item {queuePosition.current} de {queuePosition.total}</span> : null}
       {item ? <span>{item.quantity}x {item.product_name}{copilotMeatModeLabel(item.selections)}</span> : null}
       {proposal.fulfillment ? <span>Atendimento: {proposal.fulfillment === 'delivery' ? 'Entrega' : 'Retirada'}.</span> : null}

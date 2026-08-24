@@ -63,7 +63,7 @@ const CLOSED_ORDER_STATUSES: OrderStatus[] = ['finalizado', 'cancelado']
 const PAYMENT_ATTENTION_STATUSES = ['pendente', 'parcial', 'revisao_humana']
 
 const STATUS_GROUPS: Array<{ status: OrderStatus; label: string }> = [
-  { status: 'novo', label: 'Novos / rascunhos' },
+  { status: 'novo', label: 'Pedidos em montagem' },
   { status: 'em_conferencia', label: 'Em conferência' },
   { status: 'aguardando_pagamento', label: 'Aguardando pagamento' },
   { status: 'comprovante_recebido', label: 'Comprovante recebido' },
@@ -99,8 +99,8 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   pendente: 'Pendente',
   parcial: 'Parcial',
   pago: 'Confirmado',
-  credito: 'Credito',
-  revisao_humana: 'Revisao humana',
+  credito: 'Crédito',
+  revisao_humana: 'Conferência necessária',
 }
 
 const PAYMENT_STATUS_TONES: Record<PaymentStatus, BadgeTone> = {

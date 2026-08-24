@@ -16,7 +16,7 @@ export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }:
   if (variant === 'whatsapp') {
     return (
       <TechnicalIntegrationPage
-        description="Configuracao tecnica do provider e webhooks. Nao substitui a tela operacional de conversas."
+        description="Configuração técnica da integração e dos webhooks. Não substitui a tela operacional de conversas."
         integrations={integrations}
         onOpenModal={onOpenModal}
         title="WhatsApp / API tecnico"
@@ -70,17 +70,17 @@ export function SettingsPage({ integrations, onNavigate, onOpenModal, variant }:
             Adicionar usuario
           </Button>
         }
-        description="Hub de configuracoes gerais, usuarios, marca, impressao, WhatsApp e IA."
+        description="Configurações gerais, usuários, marca, impressão, WhatsApp e IA."
         title="Configuracoes"
       />
 
       <div className="settings-grid">
         {[
-          ['Geral', 'Horario, operacao e padroes do restaurante.'],
+          ['Geral', 'Horário, operação e padrões do restaurante.'],
           ['Usuarios e permissoes', 'Perfis, papeis e acesso por modulo.'],
           ['Aparencia e marca', 'Cores, logo e textos principais.'],
-          ['Impressao', 'Impressora, fila e previa HTML.'],
-          ['Pagamentos', 'Pix, comprovantes e credito do cliente.'],
+          ['Impressão', 'Impressora, fila e prévia da comanda.'],
+          ['Pagamentos', 'Pix, comprovantes e crédito do cliente.'],
           ['Seguranca', 'Senha, sessoes e boas praticas.'],
         ].map(([title, description]) => (
           <Card className="settings-card" key={title}>
@@ -154,7 +154,7 @@ function TechnicalIntegrationPage({ description, integrations, onOpenModal, titl
           </label>
           <div className="inline-actions">
             <Button icon="arrow" onClick={() => onOpenModal('whatsapp-error')} variant="secondary">
-              Testar conexao
+              Testar conexão
             </Button>
             <Button icon="alert" onClick={() => onOpenModal('whatsapp-error')} variant="secondary">
               Simular erro

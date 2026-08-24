@@ -59,7 +59,7 @@ export function getOrderOperationalState(order: Order): OrderOperationalState {
     canDeleteDraft,
     statusBadge: orderStatusBadge(order.status),
     paymentBadge: isCancelled ? cancelledPaymentBadge(order.paymentStatus) : paymentStatusBadge(order.paymentStatus),
-    printBadge: isCancelled ? { label: 'Nao aplicavel', tone: 'neutral' } : printStatusBadge(order.printStatus),
+    printBadge: isCancelled ? { label: 'Não aplicável', tone: 'neutral' } : printStatusBadge(order.printStatus),
   }
 }
 
@@ -91,7 +91,7 @@ function cancelledPaymentBadge(status: PaymentStatus): BadgeView {
     return { label: 'Pagamento parcial cancelado', tone: 'neutral' }
   }
 
-  return { label: 'Nao pago - pedido cancelado', tone: 'neutral' }
+  return { label: 'Não pago - pedido cancelado', tone: 'neutral' }
 }
 
 function orderStatusBadge(status: OrderStatus): BadgeView {
@@ -151,10 +151,10 @@ function printStatusBadge(status: PrintStatus): BadgeView {
     case 'impresso':
       return { label: 'Impresso', tone: 'success' }
     case 'reimpressao':
-      return { label: 'Reimpressao solicitada', tone: 'manual' }
+      return { label: 'Reimpressão solicitada', tone: 'manual' }
     case 'erro':
-      return { label: 'Falha na impressao', tone: 'danger' }
+      return { label: 'Falha na impressão', tone: 'danger' }
     case 'aguardando':
-      return { label: 'Aguardando impressao', tone: 'warning' }
+      return { label: 'Aguardando impressão', tone: 'warning' }
   }
 }
