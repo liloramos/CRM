@@ -33,6 +33,7 @@ class RestaurantBaseSeeder extends Seeder
                 'settings' => [
                     'tenant_type' => 'restaurant',
                     'data_source' => 'safe_seed',
+                    'operational_day_start_time' => '00:00',
                 ],
             ],
         );

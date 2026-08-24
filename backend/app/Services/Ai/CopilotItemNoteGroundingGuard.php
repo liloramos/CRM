@@ -21,7 +21,7 @@ final class CopilotItemNoteGroundingGuard
 
         $items = array_map(function (array $item) use ($customerText, &$warnings): array {
             $note = trim((string) ($item['item_notes'] ?? ''));
-            if ($note === '' || str_contains($customerText, $this->key($note))) {
+            if ($note === '' || str_contains($customerText, $this->key($note)) || ($note === 'Salada à escolha da casa' && $this->hasHouseSaladDelegation($customerText))) {
                 return $item;
             }
 
@@ -39,5 +39,10 @@ final class CopilotItemNoteGroundingGuard
     private function key(string $value): string
     {
         return Str::of($value)->ascii()->lower()->squish()->rtrim('.!?:;')->toString();
+    }
+
+    private function hasHouseSaladDelegation(string $text): bool
+    {
+        return preg_match('/(?:qualquer|a\s+escolha\s+da\s+casa).{0,32}salada|salada.{0,32}(?:qualquer|a\s+escolha\s+da\s+casa)|nao\s+tenho\s+preferencia/', $text) === 1;
     }
 }

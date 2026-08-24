@@ -14,6 +14,7 @@ import type {
   Order,
   PrintPreviewResult,
   Product,
+  ResolvedProductConfiguration,
   StructuredMeatConfiguration,
   StructuredComponentOption,
   DailyMenuComponent,
@@ -46,6 +47,7 @@ type OperationalModalContentProps = {
   cancelNotes: string
   cancelReason: string
   copilotProposal: CopilotOrderProposal | null
+  copilotQueuePosition: { current: number; total: number } | null
   deleteConfirmation: string
   itemHasDifferentBeneficiary: boolean
   itemExtraBeef: boolean
@@ -73,6 +75,7 @@ type OperationalModalContentProps = {
   onItemMeatModeChange: (value: MeatModeSelection) => void
   onItemNotesChange: (value: string) => void
   onItemQuantityChange: (value: number) => void
+  onOpenConversation?: (conversationId: string) => void
   onNewCustomerModeChange: (value: boolean) => void
   onNewCustomerNameChange: (value: string) => void
   onNewCustomerPhoneChange: (value: string) => void
@@ -96,6 +99,7 @@ type OperationalModalContentProps = {
   paymentVoidReason: string
   printPreview: PrintPreviewResult | null
   products: Product[]
+  resolvedProductConfiguration?: ResolvedProductConfiguration | null
   selectedConversation?: Conversation
   selectedNewOrderCustomer: CustomerSummary | null
   selectedOrder?: Order
@@ -116,6 +120,7 @@ export function OperationalModalContent({
   cancelNotes,
   cancelReason,
   copilotProposal,
+  copilotQueuePosition,
   deleteConfirmation,
   itemHasDifferentBeneficiary,
   itemExtraBeef,
@@ -143,6 +148,7 @@ export function OperationalModalContent({
   onItemMeatModeChange,
   onItemNotesChange,
   onItemQuantityChange,
+  onOpenConversation,
   onNewCustomerModeChange,
   onNewCustomerNameChange,
   onNewCustomerPhoneChange,
@@ -166,6 +172,7 @@ export function OperationalModalContent({
   paymentVoidReason,
   printPreview,
   products,
+  resolvedProductConfiguration,
   selectedConversation,
   selectedNewOrderCustomer,
   selectedOrder,
@@ -179,7 +186,7 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>Crie um pedido real para cliente cadastrado ou cliente avulso. Destinatario diferente fica apenas no item, quando necessario.</p>
-        {copilotProposal ? <CopilotDraftNotice proposal={copilotProposal} stage="order" /> : null}
+        {copilotProposal ? <CopilotDraftNotice proposal={copilotProposal} queuePosition={copilotQueuePosition} stage="order" /> : null}
 
         {newCustomerMode ? (
           <div className="customer-create-panel">
@@ -270,8 +277,11 @@ export function OperationalModalContent({
     )
   }
 
-  if (modal === 'add-product') {
-    const selectedProduct = addItemContext?.product ?? products.find((product) => product.id === selectedProductId)
+  if (modal === 'add-product' || modal === 'edit-item') {
+    const baseProduct = addItemContext?.product ?? products.find((product) => product.id === selectedProductId)
+    const selectedProduct = baseProduct
+      ? { ...baseProduct, resolvedConfiguration: resolvedProductConfiguration ?? baseProduct.resolvedConfiguration }
+      : undefined
     const structuredGroups = selectedProduct?.structuredGroups ?? []
     const visibleStructuredGroups = selectedProduct?.meatConfiguration
       ? structuredGroups.filter((group) => !['variacao_bife', 'bife_adicional'].includes(group.code))
@@ -280,11 +290,18 @@ export function OperationalModalContent({
 
     return (
       <div className="modal-fields">
-        {copilotProposal ? <CopilotDraftNotice proposal={copilotProposal} stage="item" /> : null}
+        {copilotProposal ? <CopilotDraftNotice proposal={copilotProposal} queuePosition={copilotQueuePosition} stage="item" /> : null}
         {addItemContext ? (
-          <p>
-            Pedido <strong>{addItemContext.orderCode}</strong>. O item sera adicionado somente a este pedido real.
-          </p>
+          <div className="inline-actions">
+            <p>
+              Pedido <strong>{addItemContext.orderCode}</strong>. {modal === 'edit-item' ? 'Revise a composição e salve as alterações deste item.' : 'O item será adicionado somente a este pedido real.'}
+            </p>
+            {addItemContext.resolvedConversationId && onOpenConversation ? (
+              <button className="text-button" onClick={() => onOpenConversation(addItemContext.resolvedConversationId!)} type="button">
+                Ver conversa
+              </button>
+            ) : null}
+          </div>
         ) : selectedOrder ? (
           <p>O pedido selecionado nao esta pronto para receber itens reais.</p>
         ) : (
@@ -314,6 +331,13 @@ export function OperationalModalContent({
             meatMode={itemMeatMode}
             onExtraBeefChange={onItemExtraBeefChange}
             onMeatModeChange={onItemMeatModeChange}
+            onSelectedOptionsChange={onSelectedOptionsChange}
+            selectedOptionIds={selectedOptionIds}
+          />
+        ) : null}
+        {selectedProduct?.resolvedConfiguration ? (
+          <ResolvedDailyComponentPicker
+            configuration={selectedProduct.resolvedConfiguration}
             onSelectedOptionsChange={onSelectedOptionsChange}
             selectedOptionIds={selectedOptionIds}
           />
@@ -918,14 +942,22 @@ function CustomerSearchCombobox({
   )
 }
 
-function CopilotDraftNotice({ proposal, stage }: { proposal: CopilotOrderProposal; stage: 'order' | 'item' }) {
+function CopilotDraftNotice({ proposal, queuePosition, stage }: {
+  proposal: CopilotOrderProposal
+  queuePosition: { current: number; total: number } | null
+  stage: 'order' | 'item'
+}) {
   const item = proposal.items[0]
 
   return (
     <div className="copilot-draft-notice" role="status">
       <strong>Proposta do Copiloto aplicada ao rascunho local</strong>
+      {queuePosition && queuePosition.total > 1 ? <span>Item {queuePosition.current} de {queuePosition.total}</span> : null}
       {item ? <span>{item.quantity}x {item.product_name}{copilotMeatModeLabel(item.selections)}</span> : null}
-      <span>{stage === 'order' ? 'Revise os dados e crie o pedido manualmente.' : 'Revise a composicao antes de adicionar o item.'}</span>
+      {proposal.fulfillment ? <span>Atendimento: {proposal.fulfillment === 'delivery' ? 'Entrega' : 'Retirada'}.</span> : null}
+      {proposal.delivery_address ? <span>Endereço informado: {proposal.delivery_address}.</span> : null}
+      {proposal.payment_method ? <span>Pagamento informado: {proposal.payment_method} (sem confirmação financeira).</span> : null}
+      <span>{stage === 'order' ? 'Revise os dados e crie o pedido manualmente.' : queuePosition && queuePosition.current < queuePosition.total ? 'Após confirmar este item, o próximo será preparado para revisão.' : 'Revise a composição antes de adicionar o item.'}</span>
       {proposal.missing_information.length > 0 ? <span>Falta confirmar: {proposal.missing_information.map((missing) => missing.label).join(', ')}.</span> : null}
     </div>
   )
@@ -1083,6 +1115,107 @@ function BeefChoicePicker({
               Adicionar 1 bife - + {formatCurrency((extraBeef?.price_cents ?? 0) / 100)}
             </label>
           ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ResolvedDailyComponentPicker({
+  configuration,
+  onSelectedOptionsChange,
+  selectedOptionIds,
+}: {
+  configuration: ResolvedProductConfiguration
+  onSelectedOptionsChange: (optionIds: string[]) => void
+  selectedOptionIds: string[]
+}) {
+  const sections = ['salad', 'hot', 'extra'] as const
+  const labels: Record<(typeof sections)[number], string> = {
+    salad: 'Saladas disponíveis',
+    hot: 'Acompanhamentos disponíveis',
+    extra: 'Componentes do buffet',
+  }
+
+  return (
+    <div className="option-picker">
+      <div>
+        <strong>Buffet do dia</strong>
+        <p>Escolha os componentes disponíveis que devem acompanhar esta marmita.</p>
+      </div>
+      {sections.map((section) => {
+        const components = configuration.daily_components.filter((component) => (
+          component.section === section && component.applicability === 'AVAILABLE_TODAY' && component.available
+        ))
+
+        if (components.length === 0) return null
+
+        return (
+          <div className="option-picker__group" key={section}>
+            <div className="option-picker__heading">
+              <span>{labels[section]}</span>
+              <small>Disponíveis hoje, sem quantidade mínima definida.</small>
+            </div>
+            <div className="option-picker__grid">
+              {components.map((component) => {
+                const token = dailyComponentToken(component.id)
+                const checked = selectedOptionIds.includes(token)
+
+                return (
+                  <label className={optionChoiceClassName(checked, false)} key={token}>
+                    <input
+                      checked={checked}
+                      onChange={() => onSelectedOptionsChange(
+                        checked
+                          ? selectedOptionIds.filter((optionId) => optionId !== token)
+                          : [...selectedOptionIds, token],
+                      )}
+                      type="checkbox"
+                    />
+                    <span className="option-choice__box" aria-hidden="true" />
+                    <span className="option-choice__content">
+                      <strong>{component.name}</strong>
+                      <small>Disponível hoje</small>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+      {configuration.daily_components.filter((component) => (
+        component.section !== 'meat'
+        && component.applicability !== 'AVAILABLE_TODAY'
+        && selectedOptionIds.includes(dailyComponentToken(component.id))
+      )).length > 0 ? (
+        <div className="option-picker__group">
+          <div className="option-picker__heading">
+            <span>Escolhas persistidas</span>
+            <small>Indisponíveis hoje; mantenha ou remova conscientemente ao editar.</small>
+          </div>
+          <div className="option-picker__grid">
+            {configuration.daily_components
+              .filter((component) => component.section !== 'meat' && component.applicability !== 'AVAILABLE_TODAY' && selectedOptionIds.includes(dailyComponentToken(component.id)))
+              .map((component) => {
+                const token = dailyComponentToken(component.id)
+
+                return (
+                  <label className={optionChoiceClassName(true, false)} key={token}>
+                    <input
+                      checked
+                      onChange={() => onSelectedOptionsChange(selectedOptionIds.filter((optionId) => optionId !== token))}
+                      type="checkbox"
+                    />
+                    <span className="option-choice__box" aria-hidden="true" />
+                    <span className="option-choice__content">
+                      <strong>{component.name}</strong>
+                      <small>Escolha histórica</small>
+                    </span>
+                  </label>
+                )
+              })}
+          </div>
         </div>
       ) : null}
     </div>
@@ -1577,6 +1710,10 @@ function fixedComponentHint(option: StructuredComponentOption, checked: boolean,
 
 function dailyMeatToken(id: number): string {
   return `daily-meat:${id}`
+}
+
+function dailyComponentToken(id: number): string {
+  return `daily-component:${id}`
 }
 
 function removedComponentToken(id: number): string {

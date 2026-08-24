@@ -146,6 +146,7 @@ class CopilotOrderItemSelectionAdapter
                 [
                     'removed_component_ids' => array_values(array_unique($removedComponentIds)),
                     'removed_group_codes' => array_values(array_unique($removedGroupCodes)),
+                    'daily_component_ids' => array_values(array_unique(array_map('intval', $item['daily_component_ids'] ?? []))),
                 ],
             );
         } catch (DomainException|ValidationException $exception) {
@@ -167,6 +168,103 @@ class CopilotOrderItemSelectionAdapter
                 'unit_price_cents' => $validated['unit_price_cents'] ?? $product->base_price_cents,
             ],
             'warnings' => $this->dedupeWarnings($warnings),
+        ];
+    }
+
+    /** @param array<string,mixed> $item @param list<array<string,mixed>> $customerMessages @return array<string,mixed> */
+    public function recoverExplicitDailyMeats(Company $company, Product $product, CarbonInterface $date, array $item, array $customerMessages): array
+    {
+        if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
+            return $item;
+        }
+
+        $selections = is_array($item['selections'] ?? null) ? $item['selections'] : [];
+        if (in_array($selections['meat_mode'] ?? 'traditional', ['none', 'beef_only'], true)) {
+            return $item;
+        }
+
+        $text = collect($customerMessages)
+            ->reverse()
+            ->first(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text');
+        $text = $this->key((string) data_get($text, 'body', ''));
+        if ($text === '') {
+            return $item;
+        }
+
+        $meats = collect($selections['meats'] ?? $selections['meat'] ?? [])
+            ->filter(fn (mixed $meat): bool => is_string($meat) && $meat !== '')
+            ->values()
+            ->all();
+        foreach ($this->dailyMeatCandidates($company, $product, $date) as $component) {
+            $names = [$component->slug, $component->name, $component->display_name];
+            if (collect($names)->map(fn ($name): string => $this->key((string) $name))->filter(fn (string $name): bool => strlen($name) > 2 && str_contains($text, $name))->isNotEmpty()) {
+                $name = (string) ($component->display_name ?: $component->name);
+                if (! collect($meats)->contains(fn (string $meat): bool => $this->key($meat) === $this->key($name))) {
+                    $meats[] = $name;
+                }
+            }
+        }
+
+        return [...$item, 'selections' => [...$selections, 'meat' => null, 'meats' => $meats]];
+    }
+
+    /**
+     * Resolves only real, available daily buffet components. Text is never persisted as a
+     * component identity: the operational validator receives canonical menu component IDs.
+     *
+     * @param  array<string,mixed>  $item
+     * @param  list<array<string,mixed>>  $customerMessages
+     * @return array{item:array<string,mixed>,warnings:list<array{code:string,message:string}>}
+     */
+    public function recoverExplicitDailyComponents(Company $company, Product $product, CarbonInterface $date, array $item, array $customerMessages): array
+    {
+        if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
+            return ['item' => $item, 'warnings' => []];
+        }
+
+        $text = $this->customerText($customerMessages);
+        if ($text === '') {
+            return ['item' => $item, 'warnings' => []];
+        }
+
+        $day = $this->dailyMenu->day($company, $date);
+        $available = collect(data_get($day, 'sections', []))
+            ->except('meat')
+            ->flatMap(fn (array $section): array => $section)
+            ->filter(fn (array $entry): bool => (bool) ($entry['available'] ?? false))
+            ->map(fn (array $entry): mixed => data_get($entry, 'component'))
+            ->filter()
+            ->values();
+        $availableIds = $available->map(fn (mixed $component): int => (int) data_get($component, 'id'))->filter()->all();
+        $unavailable = MenuComponent::query()
+            ->where('company_id', $company->id)
+            ->where('is_active', true)
+            ->where('component_type', '!=', 'meat')
+            ->whereNotIn('id', $availableIds)
+            ->get()
+            ->values();
+
+        $componentIds = collect($item['daily_component_ids'] ?? [])
+            ->filter(fn (mixed $id): bool => is_numeric($id) && (int) $id > 0)
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+        foreach ($available as $component) {
+            if ($this->dailyComponentIsExplicit($component, $text) && ! in_array((int) data_get($component, 'id'), $componentIds, true)) {
+                $componentIds[] = (int) data_get($component, 'id');
+            }
+        }
+
+        $warnings = [];
+        if ($unavailable->contains(fn (mixed $component): bool => $this->dailyComponentIsExplicit($component, $text))) {
+            $warnings[] = [
+                'code' => 'UNAVAILABLE_DAILY_COMPONENT',
+                'message' => 'Um componente citado pelo cliente não está disponível hoje e não foi incluído.',
+            ];
+        }
+
+        return [
+            'item' => [...$item, 'daily_component_ids' => array_values(array_unique($componentIds))],
+            'warnings' => $warnings,
         ];
     }
 
@@ -338,15 +436,42 @@ class CopilotOrderItemSelectionAdapter
             return $matches->first();
         }
 
-        if ($needle !== 'frango') {
-            return null;
-        }
+        $partialMatches = $availableMeats
+            ->filter(function (MenuComponent $component) use ($needle): bool {
+                foreach ([$component->slug, $component->name, $component->display_name] as $candidate) {
+                    $candidate = $this->key((string) $candidate);
+                    if ($candidate !== '' && (str_starts_with($candidate, $needle) || str_starts_with($needle, $candidate))) {
+                        return true;
+                    }
+                }
 
-        $chickenMatches = $availableMeats
-            ->filter(fn (MenuComponent $component): bool => str_contains($this->key((string) $component->slug), 'frango'))
+                return false;
+            })
             ->values();
 
-        return $chickenMatches->count() === 1 ? $chickenMatches->first() : null;
+        if ($partialMatches->count() === 1) {
+            return $partialMatches->first();
+        }
+
+        // Short aliases such as "frango" are safe only when the day's menu
+        // contains one unambiguous component whose canonical name includes it.
+        $containsMatches = $availableMeats
+            ->filter(function (MenuComponent $component) use ($needle): bool {
+                if (strlen($needle) < 4) {
+                    return false;
+                }
+
+                foreach ([$component->slug, $component->name, $component->display_name] as $candidate) {
+                    if (str_contains($this->key((string) $candidate), $needle)) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->values();
+
+        return $containsMatches->count() === 1 ? $containsMatches->first() : null;
     }
 
     /** @return list<MenuComponent> */
@@ -373,7 +498,9 @@ class CopilotOrderItemSelectionAdapter
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
 
-        if ($productMeatIds === [] && in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
+        // N8/N9 Livre select traditional meats from the daily menu. Their structured
+        // groups configure beef rules, not a static whitelist of the day's meats.
+        if (in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
             return $availableMeats->all();
         }
 
@@ -470,5 +597,35 @@ class CopilotOrderItemSelectionAdapter
     private function key(string $value): string
     {
         return Str::of($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', '')->toString();
+    }
+
+    private function customerText(array $messages): string
+    {
+        return collect($messages)
+            ->filter(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text')
+            ->pluck('body')
+            ->implode(' ');
+    }
+
+    private function dailyComponentIsExplicit(mixed $component, string $text): bool
+    {
+        $haystack = $this->key($text);
+        $identities = collect([
+            data_get($component, 'slug'),
+            data_get($component, 'name'),
+            data_get($component, 'display_name'),
+        ])
+            ->map(fn (mixed $value): string => $this->key((string) $value))
+            ->filter(fn (string $value): bool => $value !== '')
+            ->all();
+        if (collect($identities)->contains(fn (string $identity): bool => str_contains($haystack, $identity))) {
+            return true;
+        }
+
+        // “Purê” is a unique short form for the canonical Purê de batata entry. We only
+        // accept a shortened identity when it resolves to exactly one component for today.
+        $short = collect($identities)->filter(fn (string $identity): bool => str_starts_with($identity, 'pure'))->first();
+
+        return $short !== null && str_contains($haystack, 'pure');
     }
 }

@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Order;
 use App\Models\OrderFragment;
 use App\Models\OrderItem;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductOption;
 use App\Models\User;
@@ -151,6 +152,48 @@ class OrderWorkflowService
             $this->recalculateTotals($order);
 
             return $item->refresh();
+        });
+    }
+
+    /** @param array<string, mixed> $attributes */
+    public function updateItem(Order $order, OrderItem $item, Product $product, array $attributes, ?User $user = null): OrderItem
+    {
+        $this->assertItemsMutable($order);
+
+        return DB::transaction(function () use ($order, $item, $product, $attributes, $user): OrderItem {
+            $lockedItem = OrderItem::query()->where('order_id', $order->id)->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $before = $lockedItem->product_name.' - '.implode(', ', $lockedItem->options()->pluck('name')->all());
+            $this->writeItem($lockedItem, $product, $attributes);
+            $this->recalculateTotals($order);
+            $after = $lockedItem->product_name.' - '.implode(', ', $lockedItem->options()->pluck('name')->all());
+            $order->statusHistories()->create([
+                'user_id' => $user?->id,
+                'from_status' => $order->status,
+                'to_status' => $order->status,
+                'reason' => 'order_item_updated_manually',
+                'notes' => "Item {$lockedItem->product_name} atualizado manualmente: {$before} -> {$after}.",
+            ]);
+
+            return $lockedItem->refresh();
+        });
+    }
+
+    public function removeItem(Order $order, OrderItem $item, ?User $user = null): void
+    {
+        $this->assertItemsMutable($order);
+
+        DB::transaction(function () use ($order, $item, $user): void {
+            $lockedItem = OrderItem::query()->where('order_id', $order->id)->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $name = $lockedItem->product_name;
+            $lockedItem->delete();
+            $this->recalculateTotals($order);
+            $order->statusHistories()->create([
+                'user_id' => $user?->id,
+                'from_status' => $order->status,
+                'to_status' => $order->status,
+                'reason' => 'order_item_removed_manually',
+                'notes' => "Item {$name} removido manualmente.",
+            ]);
         });
     }
 
@@ -380,6 +423,43 @@ class OrderWorkflowService
         if (! $order->canBeEdited()) {
             throw new DomainException('Order cannot be edited after printing, preparation, finalization or cancellation.');
         }
+    }
+
+    public function assertItemsMutable(Order $order): void
+    {
+        $this->assertEditable($order);
+
+        if ($order->payments()->where('status', Payment::STATUS_CONFIRMED)->exists()) {
+            throw new DomainException('Este pedido ja possui pagamento confirmado. Anule ou revise o pagamento antes de alterar itens.');
+        }
+    }
+
+    /** @param array<string,mixed> $attributes */
+    private function writeItem(OrderItem $item, Product $product, array $attributes): void
+    {
+        $quantity = max(1, (int) ($attributes['quantity'] ?? 1));
+        $unitPriceCents = (int) ($attributes['unit_price_cents'] ?? ($product->base_price_cents ?? 0));
+        $item->forceFill([
+            'product_id' => $product->id, 'product_name' => $product->name, 'product_type' => $product->product_type,
+            'menu_rule_code' => $product->menu_rule_code, 'quantity' => $quantity, 'unit_price_cents' => $unitPriceCents,
+            'currency' => $attributes['currency'] ?? $product->currency, 'item_notes' => $attributes['item_notes'] ?? null,
+            'beneficiary_name' => $attributes['beneficiary_name'] ?? null, 'removed_ingredients' => $attributes['removed_ingredients'] ?? null,
+            'selected_components' => $attributes['selected_components'] ?? null,
+            'preferences' => is_array($attributes['preferences'] ?? null)
+                ? [...(is_array($item->preferences) ? $item->preferences : []), ...$attributes['preferences']]
+                : $item->preferences,
+        ])->save();
+        $item->options()->delete();
+        $optionsTotal = 0;
+        foreach ($attributes['options'] ?? [] as $optionRow) {
+            $option = $this->resolveProductOption($optionRow);
+            $quantityOption = max(1, (int) ($optionRow['quantity'] ?? 1));
+            $delta = (int) ($optionRow['price_delta_cents'] ?? ($option?->price_delta_cents ?? 0));
+            $total = array_key_exists('total_price_cents', $optionRow) ? (int) $optionRow['total_price_cents'] : $delta * $quantityOption;
+            $optionsTotal += $total;
+            $item->options()->create(['product_option_id' => $option?->id, 'name' => $optionRow['name'] ?? $option?->name ?? 'Opcao do item', 'option_type' => $optionRow['option_type'] ?? $option?->option_type ?? ProductOption::TYPE_ADDON, 'group_code' => $optionRow['group_code'] ?? $option?->group_code, 'quantity' => $quantityOption, 'price_delta_cents' => $delta, 'total_price_cents' => $total, 'metadata' => $optionRow['metadata'] ?? null]);
+        }
+        $item->forceFill(['options_total_cents' => $optionsTotal, 'total_price_cents' => ($unitPriceCents * $quantity) + $optionsTotal])->save();
     }
 
     public function assertCanAdvanceToPreparation(Order $order): void

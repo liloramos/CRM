@@ -111,12 +111,36 @@ export type OrderItem = {
   composition?: string[]
   removals?: string[]
   additions: string[]
+  edit?: {
+    productId: string
+    itemNotes: string
+    beneficiaryName?: string | null
+    composition?: {
+      structured_options?: Array<{ component_link_id?: number; product_link_id?: number; quantity?: number }>
+      included_component_ids?: number[]
+      removed_component_ids?: number[]
+      removed_group_codes?: string[]
+      daily_component_ids?: number[]
+      meat_mode?: 'traditional' | 'beef_only' | 'none'
+      traditional_meat_component_ids?: number[]
+      additions?: Array<{ code: string; quantity: number }>
+    }
+    options?: Array<{
+      name: string
+      groupCode: string
+      quantity: number
+      metadata: Record<string, unknown>
+    }>
+    removals?: string[]
+  }
   unavailable?: boolean
 }
 
 export type Order = {
   id: string
   code: string
+  conversationId?: string | null
+  resolvedConversationId?: string | null
   backendStatus?: BackendOrderStatus
   customer: CustomerSummary
   status: OrderStatus
@@ -309,6 +333,35 @@ export type Product = {
   removableGroupCodes?: string[]
   configurationPending?: boolean
   serviceDays?: ProductServiceDayKey[]
+  resolvedConfiguration?: ResolvedProductConfiguration | null
+}
+
+export type ResolvedDailyProductComponent = {
+  id: number
+  slug: string
+  name: string
+  category: string
+  section: DailyMenuSectionKey
+  available: boolean
+  applicability: 'AVAILABLE_TODAY' | 'UNAVAILABLE_TODAY' | 'NOT_APPLICABLE'
+  selectable: boolean
+  fixed: boolean
+  removable: boolean
+}
+
+export type ResolvedProductConfiguration = {
+  product: {
+    id: number
+    slug: string
+    name: string
+    base_price_cents: number
+    availability: EffectiveAvailability
+  }
+  date: string
+  static_configuration: StructuredMenuProduct
+  daily_components: ResolvedDailyProductComponent[]
+  meat_selection: StructuredMeatConfiguration['traditional']['selection_rules']
+  allow_no_meat: boolean
 }
 
 export type EffectiveAvailabilityStatus = 'available' | 'unavailable' | 'sold_out'
@@ -735,7 +788,8 @@ export type AddItemContext = {
   orderId: string
   orderCode: string
   defaultBeneficiaryName: string
-  product: Product
+  product: Product | null
+  resolvedConversationId?: string | null
   source: SnapshotSource
 }
 

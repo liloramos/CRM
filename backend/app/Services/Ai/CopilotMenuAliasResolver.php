@@ -71,6 +71,8 @@ class CopilotMenuAliasResolver
             'n9' => 'n9-tradicional',
             'n9livre' => 'n9-tradicional',
             'n9tradicional' => 'n9-tradicional',
+            'aguasemgas' => 'agua-mineral',
+            'aguamineral' => 'agua-mineral',
             'coca600' => 'coca-cola-600ml',
             'cocacola600' => 'coca-cola-600ml',
             'cocade600' => 'coca-cola-600ml',

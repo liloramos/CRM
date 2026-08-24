@@ -114,9 +114,13 @@ class OperationalCrmPresenter
      */
     public function order(Order $order): array
     {
+        $resolvedConversationId = $this->resolvedConversationId($order);
+
         return [
             'id' => (string) $order->id,
             'code' => $order->code,
+            'conversationId' => $order->conversation_id ? (string) $order->conversation_id : null,
+            'resolvedConversationId' => $resolvedConversationId,
             'backendStatus' => $order->status,
             'customer' => $this->orderCustomer($order),
             'status' => $this->mapOrderStatus((string) $order->status),
@@ -158,6 +162,25 @@ class OperationalCrmPresenter
         ];
     }
 
+    private function resolvedConversationId(Order $order): ?string
+    {
+        if ($order->conversation_id) {
+            return (string) $order->conversation_id;
+        }
+
+        if (! $order->payer_customer_id) {
+            return null;
+        }
+
+        $candidateIds = Conversation::query()
+            ->where('company_id', $order->company_id)
+            ->where('customer_id', $order->payer_customer_id)
+            ->limit(2)
+            ->pluck('id');
+
+        return $candidateIds->count() === 1 ? (string) $candidateIds->first() : null;
+    }
+
     /**
      * @return array<string, mixed>
      */
@@ -184,6 +207,19 @@ class OperationalCrmPresenter
                 ->map(fn ($option): string => $this->optionLabel($option))
                 ->values()
                 ->all(),
+            'edit' => [
+                'productId' => (string) $item->product_id,
+                'itemNotes' => $item->item_notes ?? '',
+                'beneficiaryName' => $item->beneficiary_name,
+                'composition' => data_get($item->preferences, 'composition_snapshot', []),
+                'options' => $options->map(fn ($option): array => [
+                    'name' => (string) $option->name,
+                    'groupCode' => (string) ($option->group_code ?? ''),
+                    'quantity' => (int) $option->quantity,
+                    'metadata' => is_array($option->metadata) ? $option->metadata : [],
+                ])->values()->all(),
+                'removals' => $this->stringList($item->removed_ingredients),
+            ],
             'unavailable' => false,
         ];
     }

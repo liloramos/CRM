@@ -39,7 +39,7 @@ export function getOrderOperationalState(order: Order): OrderOperationalState {
   const hasItems = order.items.length > 0
   const hasFinancialMovement = order.paid > 0 || order.creditUsed > 0
   const hasPrintMovement = order.printStatus !== 'aguardando'
-  const canReceiveItems = !LOCKED_ORDER_STATUSES.includes(order.status)
+  const canReceiveItems = !LOCKED_ORDER_STATUSES.includes(order.status) && order.paymentStatus !== 'pago'
   const canConfirmPayment = !isCancelled && order.amountDue > 0
   const canChangeStatus = !isCancelled && order.availableTransitions.length > 0
   const canCancel = !isCancelled && order.availableTransitions.some((transition) => transition.status === 'cancelled')

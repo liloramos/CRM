@@ -2386,6 +2386,52 @@ label textarea {
   white-space: pre-line;
 }
 
+.conversation-copilot-item {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.conversation-copilot-item small,
+.conversation-copilot-item em {
+  color: var(--color-muted);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.conversation-copilot-item p,
+.conversation-copilot-diff p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.conversation-copilot-targets {
+  display: grid;
+  gap: 6px;
+}
+
+.conversation-copilot-targets .button {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.conversation-copilot-diff {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.conversation-copilot-diff small {
+  color: var(--color-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
 .ai-assist-card,
 .attention-box {
   display: grid;

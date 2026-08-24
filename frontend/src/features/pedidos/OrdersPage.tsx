@@ -20,6 +20,9 @@ type OrdersPageProps = {
   orders: Order[]
   selectedOrder?: Order
   onNewOrder: () => void
+  onOpenConversation: (conversationId: string) => void
+  onEditItem: (item: OrderItem) => void
+  onRemoveItem: (item: OrderItem) => void
   onAdvanceOrder: (orderId: string, action: FulfillmentAction) => Promise<void>
   onOpenModal: (modal: AppModal) => void
   onPreviewTicket: (orderId: string) => void
@@ -44,6 +47,9 @@ export function OrdersPage({
   canManageOrders,
   isLoading,
   onNewOrder,
+  onOpenConversation,
+  onEditItem,
+  onRemoveItem,
   onAdvanceOrder,
   onOpenModal,
   onPreviewTicket,
@@ -65,7 +71,7 @@ export function OrdersPage({
   const visibleOrderIds = filteredOrders.map((order) => order.id)
   const selectedVisibleIds = bulkSelection.filter((orderId) => visibleOrderIds.includes(orderId))
   const showBeneficiaryColumn = selectedOrder?.items.some((item) => item.beneficiary) ?? false
-  const itemColumns = orderItemColumns(showBeneficiaryColumn)
+  const itemColumns = orderItemColumns(showBeneficiaryColumn, onEditItem, onRemoveItem, Boolean(selectedOrderState?.canReceiveItems))
 
   return (
     <PageContainer density="wide">
@@ -76,7 +82,13 @@ export function OrdersPage({
               <Button icon="plus" onClick={onNewOrder} variant="primary">
                 Novo pedido
               </Button>
-              <Button disabled={!selectedOrderState?.canReceiveItems} icon="plus" onClick={() => onOpenModal('add-product')} variant="secondary">
+              <Button
+                disabled={!selectedOrderState?.canReceiveItems}
+                icon="plus"
+                onClick={() => onOpenModal('add-product')}
+                title={selectedOrderState?.canReceiveItems ? undefined : 'Este pedido não aceita novos itens no status atual.'}
+                variant="secondary"
+              >
                 Adicionar item
               </Button>
             </div>
@@ -241,9 +253,16 @@ export function OrdersPage({
               <Card>
                 <SectionTitle
                   action={
-                    <Button disabled={!selectedOrderState.canReceiveItems} icon="plus" onClick={() => onOpenModal('add-product')} variant="ghost">
-                      Adicionar item
-                    </Button>
+                    <div className="inline-actions">
+                      {selectedOrder.resolvedConversationId ? <Button icon="chat" onClick={() => onOpenConversation(selectedOrder.resolvedConversationId!)} variant="ghost">Ver conversa</Button> : null}
+                      <Button
+                        disabled={!selectedOrderState.canReceiveItems}
+                        icon="plus"
+                        onClick={() => onOpenModal('add-product')}
+                        title={selectedOrderState.canReceiveItems ? undefined : 'Este pedido não aceita novos itens no status atual.'}
+                        variant="ghost"
+                      >Adicionar item</Button>
+                    </div>
                   }
                   title="Itens do pedido"
                 />
@@ -339,7 +358,12 @@ export function OrdersPage({
   )
 }
 
-function orderItemColumns(showBeneficiary: boolean): DataTableColumn<OrderItem>[] {
+function orderItemColumns(
+  showBeneficiary: boolean,
+  onEditItem: (item: OrderItem) => void,
+  onRemoveItem: (item: OrderItem) => void,
+  canMutate: boolean,
+): DataTableColumn<OrderItem>[] {
   const columns: DataTableColumn<OrderItem>[] = [
     {
       key: 'item',
@@ -367,6 +391,14 @@ function orderItemColumns(showBeneficiary: boolean): DataTableColumn<OrderItem>[
   columns.push(
     { key: 'quantity', header: 'Qtd.', render: (item) => `${item.quantity}x`, align: 'right' },
     { key: 'total', header: 'Subtotal', render: (item) => formatCurrency(item.totalPrice ?? item.quantity * item.unitPrice), align: 'right' },
+    {
+      key: 'actions', header: 'Ações', align: 'right', render: (item) => (
+        <div className="inline-actions">
+          <Button aria-label={`Editar ${item.name}`} disabled={!canMutate} icon="edit" onClick={() => onEditItem(item)} variant="ghost">Editar</Button>
+          <Button aria-label={`Remover ${item.name}`} disabled={!canMutate} icon="close" onClick={() => onRemoveItem(item)} variant="ghost">Remover</Button>
+        </div>
+      ),
+    },
   )
 
   return columns

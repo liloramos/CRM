@@ -7,6 +7,8 @@ use Illuminate\Support\Str;
 
 final class CopilotMeatModeGroundingGuard
 {
+    public function __construct(private readonly CopilotProductGroundingGuard $products) {}
+
     /**
      * @param  array<string,mixed>  $selections
      * @param  list<array<string,mixed>>  $messages
@@ -14,7 +16,7 @@ final class CopilotMeatModeGroundingGuard
      */
     public function ground(Product $product, array $selections, array $messages): array
     {
-        $text = $this->customerText($messages);
+        $text = $this->products->selectionText($product, $messages);
         $supportsBeefModes = in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true);
         $supportsWithoutMeat = $supportsBeefModes
             ? true
@@ -99,16 +101,6 @@ final class CopilotMeatModeGroundingGuard
         }
 
         return ['selections' => $selections, 'warnings' => []];
-    }
-
-    /** @param list<array<string,mixed>> $messages */
-    private function customerText(array $messages): string
-    {
-        return collect($messages)
-            ->filter(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text')
-            ->pluck('body')
-            ->map(fn (mixed $body): string => Str::of((string) $body)->ascii()->lower()->toString())
-            ->implode(' ');
     }
 
     /** @param array<string,mixed> $selections */

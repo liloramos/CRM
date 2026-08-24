@@ -38,6 +38,7 @@ import type {
   PrintPreviewResult,
   Product,
   ProductServiceDayKey,
+  ResolvedProductConfiguration,
   SnapshotSource,
   StructuredMenuCatalogResponse,
   StructuredMenuProduct,
@@ -81,7 +82,7 @@ type DraftOrderPayload = {
   pickup_person_name?: string
 }
 
-type AddItemPayload = {
+export type AddItemPayload = {
   product_id: string
   quantity: number
   item_notes?: string
@@ -530,6 +531,19 @@ export async function setConversationAutomationMode(conversationId: string, payl
   return response.data
 }
 
+export async function updateOrderItem(orderId: string, itemId: string, payload: AddItemPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/items/${itemId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+}
+
+export async function removeOrderItem(orderId: string, itemId: string) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/items/${itemId}`, {
+    method: 'DELETE',
+  })
+}
+
 export type CopilotAnalysis = {
   schema_version: number
   intent: string
@@ -539,6 +553,7 @@ export type CopilotAnalysis = {
   missing_information: Array<{ code: string; label: string; message?: string }>
   warnings: Array<{ code: string; message: string }>
   suggested_reply: string
+  metadata?: Record<string, unknown>
   clarification?: { type: 'PRODUCT'; prompt: string; options: Array<{ menu_item_id: number; menu_item_slug: string; display_name: string }>; source: 'MENU'; grounded: true } | null
   requires_human_review: boolean
   proposal?: CopilotOrderProposal
@@ -558,8 +573,21 @@ export type CopilotOrderProposal = {
     selections: Record<string, unknown>
     removed_components: string[]
     item_notes: string
+    applyability: 'READY' | 'PARTIAL'
+    missing_information: Array<{ code: string; label: string; message?: string }>
+    warnings: Array<{ code: string; message: string }>
+    operation: 'ADD_ITEM'
   }>
+  target: {
+    state: 'NEW_ORDER' | 'ACTIVE_ORDER' | 'UNRESOLVED' | 'UNAVAILABLE'
+    requires_human_selection: boolean
+    choices: Array<'NEW_ORDER' | 'ACTIVE_ORDER'>
+    default_choice: 'NEW_ORDER' | 'ACTIVE_ORDER' | null
+    active_order: { id: string; code: string; company_id: number; customer_id: string | null } | null
+  }
   fulfillment: 'delivery' | 'pickup' | null
+  delivery_address: string
+  payment_method: string
   missing_information: Array<{ code: string; label: string; message?: string }>
   warnings: Array<{ code: string; message: string }>
   requires_human_review: true
@@ -1075,6 +1103,15 @@ async function getStructuredOperationalProducts(): Promise<Product[]> {
   return dailyMenu.catalog.categories
     .flatMap((category) => category.products.map((product) => mapStructuredProduct(product, category.name, dailyMeats)))
     .filter((product) => product.available)
+}
+
+export async function getResolvedProductConfiguration(productId: number | string, date?: string): Promise<ResolvedProductConfiguration> {
+  const separator = date ? '&' : '?'
+  const response = await requestJson<ApiEnvelope<ResolvedProductConfiguration>>(
+    `/api/app/menu/products/${productId}/configuration${dateQuery(date)}${separator}resolved=1`,
+  )
+
+  return response.data
 }
 
 function mapStructuredProduct(

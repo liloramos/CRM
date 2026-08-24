@@ -87,7 +87,6 @@ class OrderItemSelectionValidator
         $validated = [];
         $selectedComponents = [];
         $removedIngredients = [];
-
         foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
             $validated = [
                 ...$validated,
@@ -145,6 +144,14 @@ class OrderItemSelectionValidator
         $validated = [];
         $selectedComponents = [];
         $removedIngredients = [];
+        $dailyBuffetRows = $this->dailyBuffetRows(
+            $company,
+            $product,
+            $date,
+            $this->integerList($compositionSelection['daily_component_ids'] ?? []),
+            $this->integerList($compositionSelection['historical_daily_component_ids'] ?? []),
+        );
+        $selectedComponents = [...$selectedComponents, ...collect($dailyBuffetRows)->pluck('name')->all()];
 
         foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
             if ($this->isBeefRuleGroup($group)) {
@@ -178,6 +185,7 @@ class OrderItemSelectionValidator
             return [
                 'options' => [
                     ...$validated,
+                    ...$dailyBuffetRows,
                     $this->beefOnlyRow($beefOnly, $quote),
                 ],
                 'unit_price_cents' => (int) $quote['total_cents'],
@@ -188,7 +196,7 @@ class OrderItemSelectionValidator
 
         if ($mode === 'none') {
             return [
-                'options' => [...$validated, $this->withoutMeatRow()],
+                'options' => [...$validated, ...$dailyBuffetRows, $this->withoutMeatRow()],
                 'unit_price_cents' => (int) $quote['total_cents'],
                 'selected_components' => $selectedComponents,
                 'removed_ingredients' => $removedIngredients,
@@ -207,6 +215,7 @@ class OrderItemSelectionValidator
         return [
             'options' => [
                 ...$validated,
+                ...$dailyBuffetRows,
                 ...$traditionalRows,
             ],
             'unit_price_cents' => (int) $quote['total_cents'],
@@ -423,6 +432,63 @@ class OrderItemSelectionValidator
         return collect($day['sections']['meat'] ?? [])
             ->filter(fn (array $item): bool => (bool) ($item['available'] ?? false))
             ->keyBy(fn (array $item): int => (int) data_get($item, 'component.id'));
+    }
+
+    /**
+     * N8/N9 Livre may carry available buffet components without imposing a
+     * cardinality that is absent from the restaurant configuration.
+     *
+     * @param  list<int>  $componentIds
+     * @return list<array<string, mixed>>
+     */
+    private function dailyBuffetRows(Company $company, Product $product, CarbonInterface $date, array $componentIds, array $historicalComponentIds = []): array
+    {
+        if (! $this->hasTraditionalBeefRules($product) || $componentIds === []) {
+            return [];
+        }
+
+        $dailyComponents = collect($this->dailyMenu->day($company, $date)['sections'] ?? [])
+            ->except('meat')
+            ->flatMap(function (mixed $items, string $section): Collection {
+                return collect(is_array($items) ? $items : [])
+                    ->filter(fn (mixed $item): bool => is_array($item))
+                    ->map(fn (array $item): array => [...$item, '_section' => $section]);
+            });
+        $available = $dailyComponents
+            ->filter(fn (array $item): bool => (bool) ($item['available'] ?? false))
+            ->keyBy(fn (array $item): int => (int) data_get($item, 'component.id'));
+        $historical = $dailyComponents->keyBy(fn (array $item): int => (int) data_get($item, 'component.id'));
+
+        $rows = [];
+        foreach (array_values(array_unique($componentIds)) as $componentId) {
+            $item = $available->get($componentId)
+                ?? (in_array($componentId, $historicalComponentIds, true) ? $historical->get($componentId) : null);
+            if (! is_array($item)) {
+                throw ValidationException::withMessages([
+                    'daily_component_ids' => ['Um dos componentes escolhidos não está disponível hoje para esta marmita.'],
+                ]);
+            }
+
+            $component = is_array($item['component'] ?? null) ? $item['component'] : [];
+            $rows[] = [
+                'product_option_id' => null,
+                'name' => (string) ($component['display_name'] ?? $component['name'] ?? 'Componente do buffet'),
+                'option_type' => ProductSelectionMode::IncludedChoice->value,
+                'group_code' => 'buffet_'.(string) ($item['_section'] ?? 'item'),
+                'quantity' => 1,
+                'price_delta_cents' => 0,
+                'total_price_cents' => 0,
+                'metadata' => [
+                    'source' => 'daily_menu_component',
+                    'menu_component_id' => (int) ($component['id'] ?? 0),
+                    'daily_menu_section' => (string) ($item['_section'] ?? ''),
+                    'historical_selection' => ! (bool) ($item['available'] ?? false),
+                    'included_in_unit_price' => true,
+                ],
+            ];
+        }
+
+        return $rows;
     }
 
     /**

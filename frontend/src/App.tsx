@@ -18,6 +18,7 @@ import { OrdersPage } from './features/pedidos/OrdersPage'
 import { ReportsPage } from './features/relatorios/ReportsPage'
 import {
   addOrderItem,
+  removeOrderItem,
   advanceOrderFulfillment,
   cancelOrder,
   cleanupTestOrders,
@@ -34,6 +35,7 @@ import {
   approveConversationPaymentProof,
   getConversations,
   getOrderTicketPreviewUrl,
+  getResolvedProductConfiguration,
   analyzeConversationCopilot,
   getOperationalSnapshot,
   markConversationAsRead as markConversationAsReadRequest,
@@ -51,6 +53,7 @@ import {
   setConversationAutomationMode,
   updateCustomer,
   updateOrderStatus,
+  updateOrderItem,
   voidOrderPayment,
   ApiError,
 } from './services/crm.service'
@@ -70,6 +73,8 @@ import type {
   SnapshotSource,
   StructuredComponentOption,
   StructuredProductOption,
+  ResolvedProductConfiguration,
+  OrderItem,
 } from './types/crm'
 import type { UpdateCustomerPayload } from './services/crm.service'
 import { getOrderOperationalState, isOrderInActiveQueue } from './features/pedidos/orderOperationalState'
@@ -84,6 +89,7 @@ type OrderItemOptionPayload =
       included_component_ids?: number[]
       removed_component_ids?: number[]
       removed_group_codes?: string[]
+      daily_component_ids?: number[]
       meat_mode?: 'traditional' | 'beef_only' | 'none'
       traditional_meat_component_ids?: number[]
       additions?: Array<{
@@ -100,6 +106,7 @@ type OrderItemOptionPayload =
       structured_options?: never
       included_component_ids?: never
       removed_component_ids?: never
+      daily_component_ids?: never
       meat_mode?: never
       traditional_meat_component_ids?: never
       additions?: never
@@ -116,6 +123,8 @@ type MeatModeSelection = 'traditional' | 'beef_only' | 'none'
 type PendingCopilotDraft = {
   conversationId: string
   proposal: CopilotOrderProposal
+  targetChoice: 'NEW_ORDER' | 'ACTIVE_ORDER'
+  itemIndex: number
 }
 
 function App() {
@@ -144,10 +153,13 @@ function App() {
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
   const [itemMeatMode, setItemMeatMode] = useState<MeatModeSelection>('traditional')
   const [itemExtraBeef, setItemExtraBeef] = useState(false)
+  const [resolvedProductConfigurations, setResolvedProductConfigurations] = useState<Record<string, ResolvedProductConfiguration>>({})
+  const hydratedCopilotResolvedConfigurationsRef = useRef(new Set<string>())
   const [pendingCopilotDraft, setPendingCopilotDraft] = useState<PendingCopilotDraft | null>(null)
   const [printPreview, setPrintPreview] = useState<PrintPreviewResult | null>(null)
   const [automationMode, setAutomationMode] = useState<AutomationModeSelection>('assisted')
   const [addItemContext, setAddItemContext] = useState<AddItemContext | null>(null)
+  const [editingOrderItemId, setEditingOrderItemId] = useState<string | null>(null)
   const [newOrderCustomerQuery, setNewOrderCustomerQuery] = useState('')
   const [newOrderCustomerResults, setNewOrderCustomerResults] = useState<CustomerSummary[]>([])
   const [selectedNewOrderCustomer, setSelectedNewOrderCustomer] = useState<CustomerSummary | null>(null)
@@ -323,6 +335,47 @@ function App() {
   }, [authStatus, loadSnapshot])
 
   useEffect(() => {
+    const candidateProductId = addItemContext?.product?.id
+    if ((activeModal !== 'add-product' && activeModal !== 'edit-item') || !addItemContext || !candidateProductId) {
+      return undefined
+    }
+
+    if (!isPersistedBackendId(candidateProductId ?? '')) return undefined
+
+    const productId = candidateProductId as string
+    let cancelled = false
+
+    void getResolvedProductConfiguration(productId)
+      .then((configuration) => {
+        if (cancelled) return
+        setResolvedProductConfigurations((current) => ({ ...current, [productId]: configuration }))
+      })
+      .catch(() => {
+        // The regular structured configuration remains available if this read fails.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeModal, addItemContext])
+
+  useEffect(() => {
+    if (!pendingCopilotDraft || !addItemContext) return
+
+    const product = addItemContext.product
+    const configuration = product ? resolvedProductConfigurations[product.id] : null
+    const item = pendingCopilotDraft.proposal.items[pendingCopilotDraft.itemIndex]
+    const key = `${product?.id ?? 'none'}:${pendingCopilotDraft.itemIndex}`
+    if (!product || !configuration || !item || hydratedCopilotResolvedConfigurationsRef.current.has(key)) return
+
+    hydratedCopilotResolvedConfigurationsRef.current.add(key)
+    setSelectedOptionIds(copilotProposalOptionTokens(
+      { ...product, resolvedConfiguration: configuration },
+      item,
+    ))
+  }, [addItemContext, pendingCopilotDraft, resolvedProductConfigurations])
+
+  useEffect(() => {
     if (authStatus !== 'authenticated' || activeRoute !== 'conversas') {
       return undefined
     }
@@ -388,6 +441,13 @@ function App() {
 
     return snapshot.orders.find((order) => order.id === selectedOrderId) ?? snapshot.orders.find(isOrderInActiveQueue)
   }, [selectedOrderId, snapshot])
+
+  const currentCopilotProposal = pendingCopilotDraft
+    ? {
+        ...pendingCopilotDraft.proposal,
+        items: pendingCopilotDraft.proposal.items.slice(pendingCopilotDraft.itemIndex, pendingCopilotDraft.itemIndex + 1),
+      }
+    : null
 
   const selectedConversation = useMemo(() => {
     if (!snapshot) {
@@ -470,26 +530,13 @@ function App() {
 
       setSelectedOrderId(response.data.id)
       setActiveRoute('pedidos')
-      const copilotItem = pendingCopilotDraft?.proposal.items[0]
+      const copilotItem = pendingCopilotDraft?.proposal.items[pendingCopilotDraft.itemIndex]
       const copilotProduct = copilotItem
         ? snapshot?.products.find((product) => product.id === String(copilotItem.menu_item_id))
         : undefined
 
       if (pendingCopilotDraft && copilotItem && copilotProduct && isPersistedBackendId(copilotProduct.id)) {
-        setSelectedProductId(copilotProduct.id)
-        setItemQuantity(copilotItem.quantity)
-        setItemNotes(copilotItem.item_notes)
-        setSelectedOptionIds(copilotProposalOptionTokens(copilotProduct, copilotItem))
-        setItemMeatMode(copilotItem.selections.meat_mode === 'beef_only' || copilotItem.selections.meat_mode === 'none' ? copilotItem.selections.meat_mode : 'traditional')
-        setItemExtraBeef(Number(copilotItem.selections.extra_beef ?? 0) > 0)
-        setAddItemContext({
-          orderId: response.data.id,
-          orderCode: response.data.code,
-          defaultBeneficiaryName: '',
-          product: copilotProduct,
-          source: 'api',
-        })
-        setActiveModal('add-product')
+        prepareCopilotItemDraft(response.data, copilotItem)
       } else {
         setPendingCopilotDraft(null)
         setActiveModal(null)
@@ -511,6 +558,11 @@ function App() {
 
     if (activeModal === 'add-product') {
       await handleAddItem()
+      return
+    }
+
+    if (activeModal === 'edit-item') {
+      await handleUpdateItem()
       return
     }
 
@@ -568,7 +620,7 @@ function App() {
       return
     }
 
-    if (!isPersistedBackendId(addItemContext.product.id)) {
+    if (!addItemContext.product || !isPersistedBackendId(addItemContext.product.id)) {
       setActionError('O produto nao possui um ID valido.')
       return
     }
@@ -602,19 +654,71 @@ function App() {
             : [response.data, ...current.orders],
         }
       })
-      setActiveModal(null)
-      setAddItemContext(null)
-      setItemNotes('')
-      setItemQuantity(1)
-      setItemHasDifferentBeneficiary(false)
-      setBeneficiaryName('')
-      setSelectedOptionIds([])
-      setItemMeatMode('traditional')
-      setItemExtraBeef(false)
-      setPendingCopilotDraft(null)
+      const nextCopilotItem = pendingCopilotDraft?.proposal.items[(pendingCopilotDraft.itemIndex ?? 0) + 1]
+      const nextCopilotProduct = nextCopilotItem
+        ? snapshot?.products.find((product) => product.id === String(nextCopilotItem.menu_item_id))
+        : undefined
+
+      if (pendingCopilotDraft && nextCopilotItem && nextCopilotProduct && isPersistedBackendId(nextCopilotProduct.id)) {
+        setPendingCopilotDraft((current) => current ? { ...current, itemIndex: current.itemIndex + 1 } : current)
+        prepareCopilotItemDraft(response.data, nextCopilotItem)
+      } else {
+        setActiveModal(null)
+        setAddItemContext(null)
+        setPendingCopilotDraft(null)
+        setItemNotes('')
+        setItemQuantity(1)
+        setItemHasDifferentBeneficiary(false)
+        setBeneficiaryName('')
+        setSelectedOptionIds([])
+        setItemMeatMode('traditional')
+        setItemExtraBeef(false)
+      }
       await loadSnapshot()
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'Nao foi possivel adicionar o item.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleUpdateItem() {
+    if (!addItemContext?.product || !editingOrderItemId || !isPersistedBackendId(addItemContext.orderId)) {
+      setActionError('O item do pedido nao esta disponivel para edicao.')
+      return
+    }
+
+    setIsActionBusy(true)
+    setActionError(null)
+    try {
+      const response = await updateOrderItem(addItemContext.orderId, editingOrderItemId, {
+        product_id: addItemContext.product.id,
+        quantity: itemQuantity,
+        item_notes: itemNotes,
+        beneficiary_name: itemHasDifferentBeneficiary ? beneficiaryName.trim() || null : null,
+        ...buildOrderItemOptions(addItemContext.product, selectedOptionIds, itemMeatMode, itemExtraBeef),
+      })
+      applyUpdatedOrder(response.data)
+      setActiveModal(null)
+      resetItemEditor()
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel atualizar o item.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleRemoveItem(item: OrderItem) {
+    if (!selectedOrder || !window.confirm(`Remover ${item.name} deste pedido?`)) return
+
+    setIsActionBusy(true)
+    setActionError(null)
+    try {
+      applyUpdatedOrder((await removeOrderItem(selectedOrder.id, item.id)).data)
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Nao foi possivel remover o item.')
     } finally {
       setIsActionBusy(false)
     }
@@ -1059,15 +1163,30 @@ function App() {
     return response.data
   }
 
-  function handleApplyCopilotProposal(conversation: Conversation, proposal: CopilotOrderProposal): boolean {
+  function handleApplyCopilotProposal(
+    conversation: Conversation,
+    proposal: CopilotOrderProposal,
+    targetChoice: 'NEW_ORDER' | 'ACTIVE_ORDER',
+  ): boolean {
     const item = proposal.items[0]
-    const product = item ? snapshot?.products.find((candidate) => candidate.id === String(item.menu_item_id)) : undefined
+    const rawProduct = item ? snapshot?.products.find((candidate) => candidate.id === String(item.menu_item_id)) : undefined
+    const product = rawProduct
+      ? { ...rawProduct, resolvedConfiguration: resolvedProductConfigurations[rawProduct.id] ?? rawProduct.resolvedConfiguration }
+      : undefined
+    const activeTarget = proposal.target.active_order
 
-    if (!proposal.can_apply || proposal.items.length !== 1 || conversation.activeOrder || !product || !isPersistedBackendId(product.id)) {
+    if (!proposal.can_apply || !item || !product || !isPersistedBackendId(product.id)) {
       return false
     }
+    if (!proposal.target.choices.includes(targetChoice)) return false
+    if (targetChoice === 'ACTIVE_ORDER' && (
+      !activeTarget
+      || conversation.activeOrder?.id !== activeTarget.id
+      || (activeTarget.customer_id !== null && activeTarget.customer_id !== conversation.customer.id)
+    )) return false
 
     resetNewOrderForm()
+    hydratedCopilotResolvedConfigurationsRef.current.clear()
     setActionError(null)
     setSelectedNewOrderCustomer(isPersistedBackendId(conversation.customer.id) ? conversation.customer : null)
     setNewOrderCustomerQuery(conversation.customer.name)
@@ -1078,9 +1197,44 @@ function App() {
     setSelectedOptionIds(copilotProposalOptionTokens(product, item))
     setItemMeatMode(item.selections.meat_mode === 'beef_only' || item.selections.meat_mode === 'none' ? item.selections.meat_mode : 'traditional')
     setItemExtraBeef(Number(item.selections.extra_beef ?? 0) > 0)
-    setPendingCopilotDraft({ conversationId: conversation.id, proposal })
-    setActiveModal('new-order')
+    if (targetChoice === 'ACTIVE_ORDER' && activeTarget) {
+      const order = snapshot?.orders.find((candidate) => candidate.id === activeTarget.id)
+      if (!order || !isPersistedBackendId(order.id)) return false
+      setPendingCopilotDraft({ conversationId: conversation.id, proposal, targetChoice, itemIndex: 0 })
+      setSelectedOrderId(order.id)
+      prepareCopilotItemDraft(order, item)
+    } else {
+      setPendingCopilotDraft({ conversationId: conversation.id, proposal, targetChoice, itemIndex: 0 })
+      setActiveModal('new-order')
+    }
     return true
+  }
+
+  function prepareCopilotItemDraft(
+    order: OperationalSnapshot['orders'][number],
+    item: CopilotOrderProposal['items'][number],
+  ) {
+    const rawProduct = snapshot?.products.find((candidate) => candidate.id === String(item.menu_item_id))
+    const product = rawProduct
+      ? { ...rawProduct, resolvedConfiguration: resolvedProductConfigurations[rawProduct.id] ?? rawProduct.resolvedConfiguration }
+      : undefined
+    if (!product || !isPersistedBackendId(product.id)) return
+
+    setSelectedProductId(product.id)
+    setItemQuantity(item.quantity)
+    setItemNotes(item.item_notes)
+    setSelectedOptionIds(copilotProposalOptionTokens(product, item))
+    setItemMeatMode(item.selections.meat_mode === 'beef_only' || item.selections.meat_mode === 'none' ? item.selections.meat_mode : 'traditional')
+    setItemExtraBeef(Number(item.selections.extra_beef ?? 0) > 0)
+    setAddItemContext({
+      orderId: order.id,
+      orderCode: order.code,
+      defaultBeneficiaryName: '',
+      product,
+      resolvedConversationId: order.resolvedConversationId ?? null,
+      source: 'api',
+    })
+    setActiveModal('add-product')
   }
 
   async function handleConversationSendMessage(
@@ -1296,6 +1450,7 @@ function App() {
   }
 
   function openAddProductModal() {
+    setEditingOrderItemId(null)
     setItemHasDifferentBeneficiary(false)
     setBeneficiaryName('')
     setItemNotes('')
@@ -1309,45 +1464,56 @@ function App() {
     if (!selectedOrder || snapshotSource !== 'api' || !isPersistedBackendId(selectedOrder.id)) {
       setAddItemContext(null)
       setActionError('O pedido nao possui um ID valido.')
-      setActiveModal('add-product')
       return
     }
 
     if (!getOrderOperationalState(selectedOrder).canReceiveItems) {
       setAddItemContext(null)
       setActionError('Este pedido nao aceita novos itens no status atual.')
-      setActiveModal('add-product')
       return
     }
 
-    if (!product || !isPersistedBackendId(product.id)) {
-      setAddItemContext(null)
-      setSelectedProductId('')
-      setActionError('O produto nao possui um ID valido.')
-      setActiveModal('add-product')
-      return
-    }
-
-    setSelectedProductId(product.id)
+    setSelectedProductId(product?.id ?? '')
     setAddItemContext({
       orderId: selectedOrder.id,
       orderCode: selectedOrder.code,
       defaultBeneficiaryName: '',
-      product,
+      product: product ?? null,
+      resolvedConversationId: selectedOrder.resolvedConversationId ?? null,
       source: snapshotSource,
     })
     setActiveModal('add-product')
   }
 
+  function openEditItem(item: OrderItem) {
+    if (!selectedOrder || !getOrderOperationalState(selectedOrder).canReceiveItems) {
+      setActionError('Este pedido nao permite alteracoes de itens no status atual.')
+      return
+    }
+    const product = snapshot?.products.find((candidate) => candidate.id === item.edit?.productId)
+    if (!product) {
+      setActionError('A configuracao atual deste produto nao esta disponivel para edicao.')
+      return
+    }
+    const draft = hydrateEditableOrderItem(product, item)
+    setSelectedProductId(product.id)
+    setSelectedOptionIds(draft.selectedOptionIds)
+    setItemMeatMode(draft.meatMode)
+    setItemExtraBeef(draft.extraBeef)
+    setItemQuantity(item.quantity)
+    setItemNotes(item.edit?.itemNotes ?? '')
+    setBeneficiaryName(item.edit?.beneficiaryName ?? '')
+    setItemHasDifferentBeneficiary(Boolean(item.edit?.beneficiaryName))
+    setAddItemContext({ orderId: selectedOrder.id, orderCode: selectedOrder.code, defaultBeneficiaryName: '', product, resolvedConversationId: selectedOrder.resolvedConversationId ?? null, source: 'api' })
+    setEditingOrderItemId(item.id)
+    setActionError(null)
+    setActiveModal('edit-item')
+  }
+
   function closeModal() {
-    if (activeModal === 'add-product') {
-      setAddItemContext(null)
+    if (activeModal === 'add-product' || activeModal === 'edit-item') {
       setPendingCopilotDraft(null)
-      setItemHasDifferentBeneficiary(false)
-      setBeneficiaryName('')
-      setSelectedOptionIds([])
-      setItemMeatMode('traditional')
-      setItemExtraBeef(false)
+      resetItemEditor()
     }
 
     if (activeModal === 'new-order') {
@@ -1361,6 +1527,18 @@ function App() {
     }
 
     setActiveModal(null)
+  }
+
+  function resetItemEditor() {
+    setAddItemContext(null)
+    setEditingOrderItemId(null)
+    setItemHasDifferentBeneficiary(false)
+    setBeneficiaryName('')
+    setItemNotes('')
+    setItemQuantity(1)
+    setSelectedOptionIds([])
+    setItemMeatMode('traditional')
+    setItemExtraBeef(false)
   }
 
   function applyUpdatedOrder(order: OperationalSnapshot['orders'][number], shouldSelect = true) {
@@ -1477,6 +1655,9 @@ function App() {
             isLoading={isLoadingSnapshot}
             onAdvanceOrder={handleAdvanceOrderFulfillment}
             onNewOrder={handleNewOrder}
+            onOpenConversation={(conversationId) => { setSelectedConversationId(conversationId); setActiveRoute('conversas') }}
+            onEditItem={openEditItem}
+            onRemoveItem={(item) => void handleRemoveItem(item)}
             onOpenModal={openModal}
             onPreviewTicket={handleTicketPreview}
             onPrintTicket={handlePrintTicket}
@@ -1611,17 +1792,17 @@ function App() {
         description={modalDescription(activeModal)}
         onClose={closeModal}
         onPrimary={() => void handleModalPrimary()}
-        open={activeModal !== null}
+        open={activeModal !== null && activeRoute !== 'conversas'}
         primaryDisabled={
           isActionBusy
           || (activeModal === 'toggle-ai' && !selectedConversation)
-          || (activeModal === 'add-product' && !addItemContext)
+          || ((activeModal === 'add-product' || activeModal === 'edit-item') && !addItemContext)
           || (activeModal === 'delete-draft' && (!selectedOrder || !getOrderOperationalState(selectedOrder).canDeleteDraft))
           || (activeModal === 'void-payment' && !paymentVoidReason.trim())
           || ((activeModal === 'delete-order-permanent' || activeModal === 'delete-orders-bulk' || activeModal === 'cleanup-test-orders') && deleteConfirmation !== 'EXCLUIR')
         }
         primaryLabel={primaryLabelForModal(activeModal)}
-        size={activeModal === 'add-product' || activeModal === 'print-preview' || activeModal === 'new-order' ? 'lg' : 'md'}
+        size={activeModal === 'add-product' || activeModal === 'edit-item' || activeModal === 'print-preview' || activeModal === 'new-order' ? 'lg' : 'md'}
         title={modalTitle(activeModal)}
       >
         <OperationalModalContent
@@ -1656,6 +1837,10 @@ function App() {
           onCancelReasonChange={setCancelReason}
           onItemNotesChange={setItemNotes}
           onItemQuantityChange={setItemQuantity}
+          onOpenConversation={(conversationId) => {
+            setSelectedConversationId(conversationId)
+            setActiveRoute('conversas')
+          }}
           onItemHasDifferentBeneficiaryChange={setItemHasDifferentBeneficiary}
           onItemExtraBeefChange={setItemExtraBeef}
           onItemMeatModeChange={handleMeatModeChange}
@@ -1681,9 +1866,14 @@ function App() {
           paymentMethod={paymentMethod}
           paymentNotes={paymentNotes}
           paymentVoidReason={paymentVoidReason}
-          copilotProposal={pendingCopilotDraft?.proposal ?? null}
+          copilotProposal={currentCopilotProposal}
+          copilotQueuePosition={pendingCopilotDraft ? {
+            current: pendingCopilotDraft.itemIndex + 1,
+            total: pendingCopilotDraft.proposal.items.length,
+          } : null}
           printPreview={printPreview}
           products={snapshot.products}
+          resolvedProductConfiguration={addItemContext?.product ? resolvedProductConfigurations[addItemContext.product.id] ?? null : null}
           selectedConversation={selectedConversation}
           selectedNewOrderCustomer={selectedNewOrderCustomer}
           selectedOrder={selectedOrder}
@@ -1699,11 +1889,7 @@ function App() {
 }
 
 function selectedProductForAddItem(products: Product[], selectedProductId: string): Product | undefined {
-  return (
-    products.find((product) => product.id === selectedProductId && isPersistedBackendId(product.id)) ??
-    products.find((product) => product.available && isPersistedBackendId(product.id)) ??
-    products.find((product) => isPersistedBackendId(product.id))
-  )
+  return products.find((product) => product.id === selectedProductId && product.available && isPersistedBackendId(product.id))
 }
 
 function copilotProposalOptionTokens(
@@ -1720,11 +1906,29 @@ function copilotProposalOptionTokens(
       .map(copilotSelectionKey),
   )
 
+  if (selections.meat_mode === 'none') {
+    for (const group of product.structuredGroups ?? []) {
+      if (group.allow_no_meat) {
+        tokens.add(`no-meat:${group.code}`)
+      }
+    }
+  }
+
   if (selections.meat_mode !== 'beef_only' && selections.meat_mode !== 'none') {
     for (const dailyMeat of product.dailyMeatOptions ?? []) {
       if (copilotComponentMatches(dailyMeat.component, selectedValues)) {
         tokens.add(`daily-meat:${dailyMeat.component.id}`)
       }
+    }
+  }
+
+  for (const component of product.resolvedConfiguration?.daily_components ?? []) {
+    if (
+      component.section !== 'meat'
+      && component.applicability === 'AVAILABLE_TODAY'
+      && copilotResolvedDailyComponentMatches(component, selectedValues)
+    ) {
+      tokens.add(dailyComponentToken(component.id))
     }
   }
 
@@ -1761,6 +1965,15 @@ function copilotComponentMatches(
   values: Set<string>,
 ): boolean {
   return [component.slug, component.name, component.display_name, ...component.search_aliases]
+    .map(copilotSelectionKey)
+    .some((candidate) => values.has(candidate))
+}
+
+function copilotResolvedDailyComponentMatches(
+  component: Pick<ResolvedProductConfiguration['daily_components'][number], 'slug' | 'name'>,
+  values: Set<string>,
+): boolean {
+  return [component.slug, component.name]
     .map(copilotSelectionKey)
     .some((candidate) => values.has(candidate))
 }
@@ -1807,6 +2020,10 @@ function buildOrderItemOptions(
   const dailyMeatIds = selectedOptionIds
     .filter(isDailyMeatToken)
     .map((token) => Number(token.replace('daily-meat:', '')))
+    .filter((value) => Number.isFinite(value))
+  const dailyComponentIds = selectedOptionIds
+    .filter(isDailyComponentToken)
+    .map((token) => Number(token.replace('daily-component:', '')))
     .filter((value) => Number.isFinite(value))
   const structuredOptions: Array<{
     component_link_id?: number
@@ -1874,6 +2091,7 @@ function buildOrderItemOptions(
       included_component_ids: includedComponentIds,
       removed_component_ids: removedComponentIds,
       removed_group_codes: removedGroupCodes,
+      daily_component_ids: dailyComponentIds,
       meat_mode: 'none',
       traditional_meat_component_ids: [],
       additions: [],
@@ -1886,6 +2104,7 @@ function buildOrderItemOptions(
       included_component_ids: includedComponentIds,
       removed_component_ids: removedComponentIds,
       removed_group_codes: removedGroupCodes,
+      daily_component_ids: dailyComponentIds,
     }
   }
 
@@ -1899,6 +2118,7 @@ function buildOrderItemOptions(
       included_component_ids: includedComponentIds,
       removed_component_ids: removedComponentIds,
       removed_group_codes: removedGroupCodes,
+      daily_component_ids: dailyComponentIds,
       meat_mode: 'beef_only',
       traditional_meat_component_ids: [],
       additions: [],
@@ -1915,6 +2135,7 @@ function buildOrderItemOptions(
       included_component_ids: includedComponentIds,
       removed_component_ids: removedComponentIds,
       removed_group_codes: removedGroupCodes,
+      daily_component_ids: dailyComponentIds,
       meat_mode: 'none',
       traditional_meat_component_ids: [],
       additions: [],
@@ -1937,10 +2158,59 @@ function buildOrderItemOptions(
     included_component_ids: includedComponentIds,
     removed_component_ids: removedComponentIds,
     removed_group_codes: removedGroupCodes,
+    daily_component_ids: dailyComponentIds,
     meat_mode: 'traditional',
     traditional_meat_component_ids: dailyMeatIds,
     additions: extraBeefSelected ? [{ code: 'extra_beef', quantity: 1 }] : [],
   }
+}
+
+function hydrateEditableOrderItem(
+  product: Product,
+  item: OrderItem,
+): { selectedOptionIds: string[]; meatMode: MeatModeSelection; extraBeef: boolean } {
+  const composition = item.edit?.composition ?? {}
+  const tokens = new Set<string>()
+  let meatMode: MeatModeSelection = composition.meat_mode ?? 'traditional'
+  let extraBeef = (composition.additions ?? []).some((addition) => addition.code === 'extra_beef' && addition.quantity > 0)
+
+  for (const option of composition.structured_options ?? []) {
+    if (option.component_link_id) tokens.add(componentOptionToken(option.component_link_id))
+    if (option.product_link_id) tokens.add(productOptionToken(option.product_link_id))
+  }
+  for (const id of composition.removed_component_ids ?? []) tokens.add(removedComponentToken(id))
+  for (const code of composition.removed_group_codes ?? []) tokens.add(`remove-group:${code}`)
+  for (const id of composition.daily_component_ids ?? []) tokens.add(dailyComponentToken(id))
+  for (const id of composition.traditional_meat_component_ids ?? []) tokens.add(dailyMeatToken(id))
+  // Older items predate the composition snapshot; their option metadata is the durable source.
+  for (const option of item.edit?.options ?? []) {
+    const metadata = option.metadata
+    const source = String(metadata.source ?? '')
+    if (source === 'daily_menu_component' && typeof metadata.menu_component_id === 'number') {
+      if (option.groupCode === 'carne' || metadata.daily_menu_section === 'meat') {
+        tokens.add(dailyMeatToken(metadata.menu_component_id))
+      } else {
+        tokens.add(dailyComponentToken(metadata.menu_component_id))
+      }
+    } else if (source === 'explicit_no_meat') {
+      meatMode = 'none'
+    } else if (source === 'product_group_component' && typeof metadata.product_group_component_id === 'number') {
+      if (option.groupCode === 'variacao_bife') meatMode = 'beef_only'
+      else if (option.groupCode === 'bife_adicional') extraBeef = true
+      else tokens.add(componentOptionToken(metadata.product_group_component_id))
+    } else if (source === 'product_group_product' && typeof metadata.product_group_product_id === 'number') {
+      tokens.add(productOptionToken(metadata.product_group_product_id))
+    }
+  }
+
+  for (const removal of item.edit?.removals ?? []) {
+    const component = product.structuredGroups
+      ?.flatMap((group) => group.component_options)
+      .find((option) => removal === `Sem ${option.name}`)
+    if (component) tokens.add(removedComponentToken(component.component_id))
+  }
+
+  return { selectedOptionIds: [...tokens], meatMode, extraBeef }
 }
 
 function assertStructuredComponentOptionAvailable(option: StructuredComponentOption) {
@@ -1969,6 +2239,22 @@ function componentOptionToken(id: number): string {
 
 function productOptionToken(id: number): string {
   return `product:${id}`
+}
+
+function dailyMeatToken(id: number): string {
+  return `daily-meat:${id}`
+}
+
+function dailyComponentToken(id: number): string {
+  return `daily-component:${id}`
+}
+
+function isDailyComponentToken(token: string): boolean {
+  return token.startsWith('daily-component:')
+}
+
+function removedComponentToken(id: number): string {
+  return `remove-component:${id}`
 }
 
 function isDailyMeatToken(token: string): boolean {
@@ -2066,6 +2352,8 @@ function primaryLabelForModal(modal: AppModal): string {
       return 'Cancelar pedido'
     case 'add-product':
       return 'Adicionar item ao pedido'
+    case 'edit-item':
+      return 'Salvar alterações'
     case 'toggle-ai':
       return 'Confirmar alteracao'
     default:

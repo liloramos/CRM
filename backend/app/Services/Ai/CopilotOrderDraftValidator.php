@@ -28,15 +28,29 @@ class CopilotOrderDraftValidator
     public function validate(Company $company, CopilotAnalysis $analysis, ?CarbonInterface $date = null, array $context = []): CopilotAnalysis
     {
         $date ??= CarbonImmutable::today();
+        $latestIntent = (string) data_get($context, 'latest_intent', $analysis->intent);
+        if (array_key_exists('latest_intent', $context)
+            && in_array($latestIntent, ['MENU_REQUEST', 'BUSINESS_HOURS_REQUEST', 'GENERAL_MESSAGE'], true)
+            && empty($analysis->draftOrder['items'] ?? [])) {
+            return new CopilotAnalysis(
+                $latestIntent,
+                $analysis->confidence,
+                $analysis->summary,
+                [...$analysis->draftOrder, 'items' => []],
+                [],
+                $analysis->warnings,
+                $analysis->suggestedReply,
+                true,
+                $analysis->metadata,
+            );
+        }
+        $selectionMessages = $this->selectionMessages($context, $latestIntent);
         $warnings = $analysis->warnings;
         $invalidQuantityDiscarded = false;
         $ungroundedProductDiscarded = false;
         $proposedItems = $analysis->draftOrder['items'] ?? [];
-        if ($proposedItems === []) {
-            $recovered = $this->products->recoverN8Traditional($company, data_get($context, 'messages', []));
-            $proposedItems = $recovered ? [$recovered] : [];
-        }
-        $validateItem = function (array $item, int $index) use ($company, $date, $context, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded): ?array {
+        $discardedN8Indexes = [];
+        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
             $quantity = filter_var($item['quantity'] ?? null, FILTER_VALIDATE_INT);
             if ($quantity === false || $quantity < 1 || $quantity > 50) {
                 $warnings[] = ['code' => 'INVALID_QUANTITY', 'message' => 'A quantidade sugerida nao e valida.', 'item_index' => $index];
@@ -50,15 +64,25 @@ class CopilotOrderDraftValidator
 
                 return [...$item, 'valid' => false];
             }
-            if (! $this->products->isGrounded($product, data_get($context, 'messages', []))) {
+            if (! $this->products->isGrounded($product, $selectionMessages)) {
                 $warnings[] = ['code' => 'UNGROUNDED_PRODUCT', 'message' => 'O produto sugerido nao possui evidencia suficiente na mensagem do cliente.', 'item_index' => $index];
                 $ungroundedProductDiscarded = true;
+                if ($product->menu_rule_code === 'n8_casa') {
+                    $discardedN8Indexes[] = $index;
+                }
 
                 return null;
             }
-            $item = $this->products->enrichN8Traditional($product, $item, data_get($context, 'messages', []));
+            $item = $this->products->enrichN8Traditional($product, $item, $selectionMessages);
+            $item = $this->selections->recoverExplicitDailyMeats($company, $product, $date, $item, $selectionMessages);
+            $dailyComponents = $this->selections->recoverExplicitDailyComponents($company, $product, $date, $item, $selectionMessages);
+            $item = $dailyComponents['item'];
+            $warnings = [...$warnings, ...$dailyComponents['warnings']];
+            if ($this->hasHouseSaladDelegation($selectionMessages) && trim((string) ($item['item_notes'] ?? '')) === '') {
+                $item['item_notes'] = 'Salada à escolha da casa';
+            }
             if (in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)
-                && $this->hasExplicitWithoutMeat(data_get($context, 'messages', []))) {
+                && $this->hasExplicitWithoutMeat($this->products->selectionText($product, $selectionMessages))) {
                 $item['selections'] = [...(is_array($item['selections'] ?? null) ? $item['selections'] : []), 'meat_mode' => 'none', 'meat' => null, 'meats' => [], 'extra_beef' => 0];
             }
             $result = $this->selections->validate($company, $product, $date, [
@@ -67,24 +91,39 @@ class CopilotOrderDraftValidator
                 'menu_item_slug' => $product->slug,
                 'quantity' => $quantity,
                 'item_notes' => Str::limit((string) ($item['item_notes'] ?? ''), 500, ''),
-            ], data_get($context, 'messages', []));
+            ], $selectionMessages);
             foreach ($result['warnings'] as $warning) {
                 $warnings[] = [...$warning, 'item_index' => $index];
+            }
+
+            $priceWarning = $this->priceWarning($product, $this->products->selectionText($product, $selectionMessages));
+            if ($priceWarning !== null) {
+                $warnings[] = [...$priceWarning, 'item_index' => $index];
             }
 
             return $result['item'];
         };
         $items = collect($proposedItems)->map($validateItem)->filter()->values()->all();
 
-        // A provider can name N8 Casa even when the customer explicitly requested only N8.
-        // After that invalid variant is discarded, recover the canonical N8 Livre from the current turn.
-        if ($items === [] && $ungroundedProductDiscarded) {
-            $recovered = $this->products->recoverN8Traditional($company, data_get($context, 'messages', []));
-            if ($recovered !== null) {
-                $items = collect([$recovered])->map($validateItem)->filter()->values()->all();
-                $ungroundedProductDiscarded = false;
-                $warnings = array_values(array_filter($warnings, fn (array $warning): bool => ($warning['code'] ?? null) !== 'UNGROUNDED_PRODUCT'));
+        // Recover each explicit product reference independently. A rejected N8 Casa must not erase an
+        // explicit N8 Livre just because another item in the same message survived validation.
+        $recoveredItems = $this->products->recoverExplicitItems($company, $selectionMessages, $date);
+        foreach ($recoveredItems as $recovered) {
+            if (collect($items)->contains(fn (array $item): bool => (int) ($item['menu_item_id'] ?? 0) === (int) $recovered['menu_item_id'])) {
+                continue;
             }
+
+            $validated = $validateItem($recovered, count($proposedItems));
+            if ($validated !== null) {
+                $items[] = $validated;
+            }
+        }
+        if ($discardedN8Indexes !== [] && collect($items)->contains(fn (array $item): bool => ($item['menu_item_slug'] ?? null) === 'n8-tradicional')) {
+            $warnings = array_values(array_filter($warnings, fn (array $warning): bool => ! (
+                ($warning['code'] ?? null) === 'UNGROUNDED_PRODUCT'
+                && in_array((int) ($warning['item_index'] ?? -1), $discardedN8Indexes, true)
+            )));
+            $ungroundedProductDiscarded = false;
         }
         $grounded = $this->quantities->ground($company, $items, data_get($context, 'messages', []));
         $items = $grounded['items'];
@@ -95,14 +134,18 @@ class CopilotOrderDraftValidator
         $warnings = [...$warnings, ...$groundedNotes['warnings']];
         $missing = $this->cleanupDependentMissing($company, [
             ...$this->recognizedProviderMissing($analysis->missingInformation),
-            ...($ungroundedProductDiscarded && ! $this->products->hasGroundedProductReference($company, data_get($context, 'messages', [])) ? [['code' => 'PRODUCT', 'label' => 'Produto']] : []),
+            ...($ungroundedProductDiscarded && ! $this->products->hasGroundedProductReference($company, $selectionMessages) ? [['code' => 'PRODUCT', 'label' => 'Produto']] : []),
             ...($invalidQuantityDiscarded ? [['code' => 'VALID_QUANTITY', 'label' => 'Quantidade valida']] : []),
             ...$grounded['missing'],
             ...(collect($warnings)->contains(fn (array $warning): bool => ($warning['code'] ?? null) === 'INVALID_EXTRA_BEEF') ? [['code' => 'EXTRA_BEEF_QUANTITY', 'label' => 'Quantidade de bife adicional']] : []),
             ...collect($items)->flatMap(fn (array $item, int $index): array => $this->missingCustomerSelectionsForResolvedItem($company, $item, $index))->all(),
         ], $items);
-        if (($analysis->draftOrder['fulfillment'] ?? null) === 'delivery' && blank($analysis->draftOrder['address'] ?? null)) {
+        $draftOrder = $this->continueDraft($analysis->draftOrder, $latestIntent, $selectionMessages);
+        if (($draftOrder['fulfillment'] ?? null) === 'delivery' && blank($draftOrder['address'] ?? null)) {
             $missing[] = ['code' => 'ADDRESS', 'label' => 'Endereco'];
+        }
+        if ($this->hasHouseSaladDelegation($selectionMessages)) {
+            $missing = array_values(array_filter($missing, fn (array $entry): bool => strtoupper((string) ($entry['code'] ?? '')) !== 'SALADA'));
         }
         $missing = $this->intents->refineMissing($missing, $items, $context);
 
@@ -110,7 +153,7 @@ class CopilotOrderDraftValidator
             $this->intents->finalize($analysis->intent, $items, $missing, $this->dedupeWarnings($warnings), $context),
             $analysis->confidence,
             $analysis->summary,
-            [...$analysis->draftOrder, 'items' => $items],
+            [...$draftOrder, 'items' => $items],
             $this->identity->missing($missing, $this->hasResolvedN8Variant($items)),
             $this->dedupeWarnings($warnings),
             $analysis->suggestedReply,
@@ -141,7 +184,12 @@ class CopilotOrderDraftValidator
                     || in_array('sem'.$labelKey, $removed, true)
                     || ($groupKey === 'salada' && in_array('salada', $removed, true));
             })
-            ->filter(function ($group) use ($selections): bool {
+            ->filter(function ($group) use ($selections, $product): bool {
+                if ($group->code === 'carne'
+                    && ($selections['meat_mode'] ?? null) === 'none'
+                    && in_array('carne', data_get($product->composition_rules, 'allow_no_meat_group_codes', []), true)) {
+                    return false;
+                }
                 $value = $selections[$group->code] ?? null;
                 if ($group->code === 'carne') {
                     $single = $selections['meat'] ?? null;
@@ -186,13 +234,10 @@ class CopilotOrderDraftValidator
         return Str::of($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', '')->toString();
     }
 
-    /** @param list<array<string,mixed>> $messages */
-    private function hasExplicitWithoutMeat(array $messages): bool
+    private function hasExplicitWithoutMeat(string $text): bool
     {
-        return collect($messages)
-            ->filter(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text')
-            ->contains(fn (array $message): bool => str_contains(Str::of((string) ($message['body'] ?? ''))->ascii()->lower()->toString(), 'sem carne')
-                || preg_match('/\bnao\s+(?:quero|quero)\s+carne\b/i', (string) ($message['body'] ?? '')) === 1);
+        return str_contains(Str::of($text)->ascii()->lower()->toString(), 'sem carne')
+            || preg_match('/\bnao\s+(?:quero|quero)\s+carne\b/i', $text) === 1;
     }
 
     /** @param list<array{code:string,label:string}> $missing @return list<array{code:string,label:string}> */
@@ -238,8 +283,8 @@ class CopilotOrderDraftValidator
                 }
 
                 return match ($code) {
-                    'CARNE' => $product->optionGroups->contains(fn ($group): bool => strtoupper((string) $group->code) === 'CARNE')
-                        || in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true),
+                    'CARNE' => collect($this->missingCustomerSelections($product, $safeItem))
+                        ->contains(fn (array $missing): bool => strtoupper((string) ($missing['code'] ?? '')) === 'CARNE'),
                     'SALADA' => $product->optionGroups->contains(fn ($group): bool => strtoupper((string) $group->code) === 'SALADA'),
                     'N8_VARIANT' => in_array($product->menu_rule_code, ['n8_casa', 'n8_tradicional'], true),
                     default => true,
@@ -269,5 +314,120 @@ class CopilotOrderDraftValidator
         return collect($items)
             ->pluck('menu_item_slug')
             ->contains(fn (mixed $slug): bool => in_array($slug, ['n8-casa', 'n8-tradicional'], true));
+    }
+
+    /** @param array<string,mixed> $context @return list<array<string,mixed>> */
+    private function selectionMessages(array $context, string $intent): array
+    {
+        $messages = array_values(data_get($context, 'messages', []));
+        if (in_array($intent, ['ORDER_CONTINUE', 'ORDER_CONFIRMATION', 'ORDER_CHANGE'], true)) {
+            return $this->currentPendingOrderMessages($messages);
+        }
+
+        foreach (array_reverse($messages) as $message) {
+            if (($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text') {
+                return [$message];
+            }
+        }
+
+        return [];
+    }
+
+    /** @param list<array<string,mixed>> $messages @return list<array<string,mixed>> */
+    private function currentPendingOrderMessages(array $messages): array
+    {
+        $productIndex = null;
+        foreach ($messages as $index => $message) {
+            if (($message['direction'] ?? null) !== 'inbound' || ($message['type'] ?? 'text') !== 'text') {
+                continue;
+            }
+
+            $body = Str::of((string) ($message['body'] ?? ''))->ascii()->lower()->squish()->toString();
+            $isMarmita = preg_match('/\bn\s*[- ]?\s*(?:5|8|9)\b/', $body) === 1;
+            $isBeverage = preg_match('/\b(?:coca|guarana|sprite|mineiro|agua)\b/', $body) === 1;
+            if ($isMarmita || ($productIndex === null && $isBeverage)) {
+                $productIndex = $index;
+            }
+        }
+        if ($productIndex === null) {
+            return [];
+        }
+
+        // A delegation immediately before the product belongs to this pending turn, but older
+        // history must not be allowed to revive a closed or unrelated order.
+        $start = $productIndex;
+        $previous = $messages[$productIndex - 1] ?? null;
+        if (is_array($previous)
+            && ($previous['direction'] ?? null) === 'inbound'
+            && ($previous['type'] ?? 'text') === 'text'
+            && $this->hasHouseSaladDelegation([$previous])) {
+            $start--;
+        }
+
+        return array_values(array_slice($messages, $start));
+    }
+
+    /** @param list<array<string,mixed>> $messages */
+    private function hasHouseSaladDelegation(array $messages): bool
+    {
+        $text = collect($messages)
+            ->filter(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text')
+            ->pluck('body')
+            ->implode(' ');
+        $normalized = Str::of($text)->ascii()->lower()->squish()->toString();
+
+        return preg_match('/(?:qualquer|a\s+escolha\s+da\s+casa).{0,32}salada|salada.{0,32}(?:qualquer|a\s+escolha\s+da\s+casa)|nao\s+tenho\s+preferencia/', $normalized) === 1;
+    }
+
+    /** @param array<string,mixed> $draft @param list<array<string,mixed>> $messages @return array<string,mixed> */
+    private function continueDraft(array $draft, string $intent, array $messages): array
+    {
+        if (! in_array($intent, ['ORDER_CONTINUE', 'ORDER_CONFIRMATION'], true)) {
+            return $draft;
+        }
+
+        $latest = collect($messages)
+            ->reverse()
+            ->first(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text');
+        $text = trim((string) data_get($latest, 'body', ''));
+        if ($text === '') {
+            return $draft;
+        }
+
+        $normalized = Str::of($text)->ascii()->lower()->squish()->toString();
+        $fulfillment = $draft['fulfillment'] ?? null;
+        $payment = $draft['payment_method'] ?? null;
+        $address = $draft['address'] ?? null;
+        if (preg_match('/\bpix\b/', $normalized) === 1) {
+            $payment = 'pix';
+        }
+        if (preg_match('/\b(rua|avenida|av\.?|travessa)\b/', $normalized) === 1) {
+            $fulfillment = 'delivery';
+            if (preg_match('/\b(?:rua|avenida|av\.?|travessa)\s+[^\n,]+(?:,?\s*\d+)?/iu', $text, $match) === 1) {
+                $address = trim($match[0]);
+            }
+        }
+
+        return [...$draft, 'fulfillment' => $fulfillment, 'payment_method' => $payment, 'address' => $address];
+    }
+
+    /** @return array{code:string,message:string}|null */
+    private function priceWarning(Product $product, string $text): ?array
+    {
+        $pattern = match ($product->menu_rule_code) {
+            'n8_tradicional' => '/\bn8(?:\s*(?:livre|tradicional))?\b.{0,24}?\b(\d{1,3})[,.](\d{2})\b/i',
+            'n9_tradicional' => '/\bn9(?:\s*(?:livre|tradicional))?\b.{0,24}?\b(\d{1,3})[,.](\d{2})\b/i',
+            default => null,
+        };
+        if ($pattern === null || preg_match($pattern, $text, $matches) !== 1) {
+            return null;
+        }
+
+        $informed = ((int) $matches[1] * 100) + (int) $matches[2];
+        if ($informed === (int) $product->base_price_cents) {
+            return null;
+        }
+
+        return ['code' => 'PRICE_MISMATCH', 'message' => 'O preço informado pelo cliente diverge do preço atual do cardápio.'];
     }
 }

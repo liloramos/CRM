@@ -62,7 +62,7 @@ type ConversationsPageProps = {
   selectedConversation?: Conversation
   onAcknowledgeAlert: (conversationId: string, alertId: string) => void
   onAnalyzeCopilot: (conversationId: string) => Promise<CopilotAnalysis>
-  onApplyCopilotProposal: (conversation: Conversation, proposal: CopilotOrderProposal) => boolean
+  onApplyCopilotProposal: (conversation: Conversation, proposal: CopilotOrderProposal, targetChoice: 'NEW_ORDER' | 'ACTIVE_ORDER') => boolean
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
   onCreateOrder: (conversationId: string) => Promise<void>
@@ -139,6 +139,7 @@ export function ConversationsPage({
   const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
   const [copilotAnalysisConversationId, setCopilotAnalysisConversationId] = useState<string | null>(null)
   const [copilotProposalApplied, setCopilotProposalApplied] = useState(false)
+  const [copilotTargetChoice, setCopilotTargetChoice] = useState<'NEW_ORDER' | 'ACTIVE_ORDER' | null>(null)
   const [isAnalyzingCopilot, setIsAnalyzingCopilot] = useState(false)
   const [editingCustomer, setEditingCustomer] = useState<CustomerSummary | null>(null)
   const [customerError, setCustomerError] = useState<string | null>(null)
@@ -1096,6 +1097,7 @@ export function ConversationsPage({
       || normalize(reply.body).includes(needle)
   })
   const visibleCopilotAnalysis = copilotAnalysisConversationId === selectedConversation?.id ? copilotAnalysis : null
+  const isCopilotWaitingForInbound = visibleCopilotAnalysis?.metadata?.no_new_inbound_message === true
 
   async function handleAnalyzeCopilot() {
     if (!selectedConversation || isAnalyzingCopilot) return
@@ -1105,6 +1107,7 @@ export function ConversationsPage({
       setCopilotAnalysis(await onAnalyzeCopilot(selectedConversation.id))
       setCopilotAnalysisConversationId(selectedConversation.id)
       setCopilotProposalApplied(false)
+      setCopilotTargetChoice(null)
     } catch {
       setLocalError('Nao foi possivel analisar a conversa agora.')
     } finally {
@@ -1121,7 +1124,10 @@ export function ConversationsPage({
   function handleApplyCopilotProposal() {
     if (!selectedConversation || !visibleCopilotAnalysis?.proposal?.can_apply) return
 
-    setCopilotProposalApplied(onApplyCopilotProposal(selectedConversation, visibleCopilotAnalysis.proposal))
+    const targetChoice = copilotTargetChoice ?? visibleCopilotAnalysis.proposal.target.default_choice
+    if (!targetChoice) return
+
+    setCopilotProposalApplied(onApplyCopilotProposal(selectedConversation, visibleCopilotAnalysis.proposal, targetChoice))
   }
 
   return (
@@ -1839,18 +1845,43 @@ export function ConversationsPage({
                   </>
                 ) : (
                   <div className="conversation-copilot-result">
+                    {isCopilotWaitingForInbound ? (
+                      <>
+                        <strong>Nenhuma nova mensagem para analisar.</strong>
+                        <p className="muted-text">Aguardando nova mensagem do cliente.</p>
+                        <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="ghost">Analisar novamente</Button>
+                      </>
+                    ) : (
+                      <>
                     <strong>{visibleCopilotAnalysis.proposal ? copilotApplyabilityLabel(visibleCopilotAnalysis.proposal.applyability) : visibleCopilotAnalysis.intent}</strong>
                     {(visibleCopilotAnalysis.proposal?.items ?? visibleCopilotAnalysis.draft_order.items).length ? <div className="conversation-copilot-result__section">
                       <span>Resumo</span>
-                      {(visibleCopilotAnalysis.proposal?.items ?? visibleCopilotAnalysis.draft_order.items).map((item, index) => <p key={`${item.menu_item_slug}-${index}`}>{item.quantity}x {'product_name' in item ? item.product_name : item.menu_item_slug}{proposalSelectionsLabel(item.selections)}{item.removed_components.length ? ` - Retirar: ${item.removed_components.join(', ')}` : ''}{item.item_notes ? ` - Obs: ${item.item_notes}` : ''}</p>)}
+                      {(visibleCopilotAnalysis.proposal?.items ?? visibleCopilotAnalysis.draft_order.items).map((item, index) => (
+                        <div className="conversation-copilot-item" key={`${item.menu_item_slug}-${index}`}>
+                          <small>Item {index + 1}{'applyability' in item ? ` - ${item.applyability === 'READY' ? 'Pronto' : 'Revisar'}` : ''}</small>
+                          <p>{item.quantity}x {'product_name' in item ? item.product_name : item.menu_item_slug}{proposalSelectionsLabel(item.selections)}{item.removed_components.length ? ` - Retirar: ${item.removed_components.join(', ')}` : ''}{item.item_notes ? ` - Obs: ${item.item_notes}` : ''}</p>
+                          {'missing_information' in item && item.missing_information.length > 0 ? <em>{item.missing_information.map((missing) => missing.message ?? `Falta: ${missing.label}`).join(' ')}</em> : null}
+                        </div>
+                      ))}
                     </div> : null}
                     {(visibleCopilotAnalysis.proposal?.missing_information ?? visibleCopilotAnalysis.missing_information).length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--missing"><span>Pendências</span>{(visibleCopilotAnalysis.proposal?.missing_information ?? visibleCopilotAnalysis.missing_information).map((missing) => <small key={missing.code}>{missing.message ?? `Falta: ${missing.label}`}</small>)}</div> : null}
                     {(visibleCopilotAnalysis.proposal?.warnings ?? visibleCopilotAnalysis.warnings).length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--warning"><span>Atenção</span>{(visibleCopilotAnalysis.proposal?.warnings ?? visibleCopilotAnalysis.warnings).map((warning) => <small key={`${warning.code}-${warning.message}`}>{warning.message}</small>)}</div> : null}
                     {visibleCopilotAnalysis.proposal?.blocking_reasons.length ? <div className="conversation-copilot-result__section conversation-copilot-result__section--warning"><span>Revisão necessária</span>{visibleCopilotAnalysis.proposal.blocking_reasons.map((reason) => <small key={reason}>{reason}</small>)}</div> : null}
-                    {visibleCopilotAnalysis.proposal?.can_apply ? <Button disabled={isActionBusy} onClick={handleApplyCopilotProposal} variant="primary">Aplicar ao rascunho</Button> : null}
+                    {visibleCopilotAnalysis.proposal?.target.requires_human_selection ? <div className="conversation-copilot-result__section">
+                      <span>Escolha onde aplicar</span>
+                      <small>Existe um pedido em andamento. A proposta continua apenas como rascunho local.</small>
+                      <div className="conversation-copilot-targets">
+                        {visibleCopilotAnalysis.proposal.target.choices.includes('NEW_ORDER') ? <Button onClick={() => setCopilotTargetChoice('NEW_ORDER')} variant={copilotTargetChoice === 'NEW_ORDER' ? 'primary' : 'secondary'}>Criar novo pedido</Button> : null}
+                        {visibleCopilotAnalysis.proposal.target.choices.includes('ACTIVE_ORDER') ? <Button onClick={() => setCopilotTargetChoice('ACTIVE_ORDER')} variant={copilotTargetChoice === 'ACTIVE_ORDER' ? 'primary' : 'secondary'}>{visibleCopilotAnalysis.proposal.target.active_order?.code ?? 'Pedido em andamento'}</Button> : null}
+                      </div>
+                      {copilotTargetChoice === 'ACTIVE_ORDER' && visibleCopilotAnalysis.proposal.target.active_order ? <div className="conversation-copilot-diff"><small>Antes</small><p>{visibleCopilotAnalysis.proposal.target.active_order.code}</p><small>Proposta</small><p>Adicionar os itens acima ao rascunho, sem substituir itens existentes.</p></div> : null}
+                    </div> : null}
+                    {visibleCopilotAnalysis.proposal?.can_apply ? <Button disabled={isActionBusy || (visibleCopilotAnalysis.proposal.target.requires_human_selection && !copilotTargetChoice)} onClick={handleApplyCopilotProposal} variant="primary">Preparar rascunho</Button> : null}
                     {copilotProposalApplied ? <small>Proposta aplicada ao rascunho. Revise antes de salvar.</small> : null}
                     {visibleCopilotAnalysis.suggested_reply ? <div className="conversation-copilot-result__section conversation-copilot-result__section--reply"><span>Resposta sugerida</span><p>{visibleCopilotAnalysis.suggested_reply}</p><Button onClick={handleUseCopilotReply} variant="secondary">Usar resposta</Button></div> : null}
                     <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="ghost">Analisar novamente</Button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

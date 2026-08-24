@@ -3,6 +3,7 @@
 namespace App\Services\Ai;
 
 use App\Models\Conversation;
+use Carbon\CarbonImmutable;
 
 class ConversationCopilotService
 {
@@ -11,7 +12,12 @@ class ConversationCopilotService
         private readonly ConversationCopilotPipeline $pipeline,
         private readonly ConversationCopilotNormalizer $normalizer,
         private readonly CopilotOrderProposalPresenter $proposals,
+        private readonly CopilotProposalDeltaGuard $deltas,
         private readonly CopilotSuggestedReplyGuard $suggestedReplies,
+        private readonly CopilotLatestMessageIntentResolver $latestIntent,
+        private readonly CopilotMenuReplyBuilder $menuReplies,
+        private readonly CopilotBusinessHoursReplyBuilder $businessHours,
+        private readonly CopilotCustomerFacingReplyBuilder $customerReplies,
     ) {}
 
     /** @return array<string, mixed> */
@@ -19,10 +25,51 @@ class ConversationCopilotService
     {
         $conversation->loadMissing(['company', 'customer', 'activeOrder']);
         $context = $this->contextBuilder->forConversation($conversation);
-        try {
-            $safe = $this->suggestedReplies->restrict($this->pipeline->analyze($conversation->company, $context)['safe'], $context);
+        if (! data_get($context, 'has_current_inbound_message', false)) {
+            $safe = $this->normalizer->normalize(
+                [
+                    'intent' => 'UNKNOWN',
+                    'summary' => 'Nenhuma nova mensagem para analisar.',
+                    'draft_order' => ['items' => [], 'fulfillment' => null, 'address' => '', 'payment_method' => ''],
+                    'missing_information' => [],
+                    'warnings' => [],
+                    'suggested_reply' => '',
+                ],
+                'internal',
+                ['reply_source' => 'no_new_inbound_message', 'no_new_inbound_message' => true],
+            )->toArray();
 
-            return [...$safe, 'proposal' => $this->proposals->present($conversation, $safe)];
+            $proposal = $this->proposals->present($conversation, $safe, $context);
+            $proposal['target'] = [
+                'state' => 'UNAVAILABLE',
+                'requires_human_selection' => false,
+                'choices' => [],
+                'default_choice' => null,
+                'active_order' => null,
+            ];
+            $proposal['blocking_reasons'] = ['Nenhuma nova mensagem para analisar.'];
+
+            return [...$safe, 'proposal' => $proposal];
+        }
+        $intent = $this->latestIntent->resolve($context);
+        $context['latest_intent'] = $intent;
+        try {
+            $safe = match ($intent) {
+                'MENU_REQUEST' => $this->deterministicAnalysis($this->menuReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']))),
+                'BUSINESS_HOURS_REQUEST' => $this->deterministicAnalysis($this->businessHours->build($conversation->company)),
+                'PAYMENT_QUESTION' => $this->deterministicAnalysis($this->customerReplies->paymentKey()),
+                'DELIVERY_QUESTION' => $this->deterministicAnalysis($this->customerReplies->deliveryFee()),
+                default => $this->pipeline->analyze($conversation->company, $context)['safe'],
+            };
+            // The resolver supplies the latest conversational intent, but a safety finalizer
+            // may deliberately downgrade an untrusted request to UNKNOWN.
+            if ((string) ($safe['intent'] ?? '') !== 'UNKNOWN') {
+                $safe['intent'] = $intent;
+            }
+            $safe = $this->deltas->restrict($conversation->company, $safe, $context);
+            $safe = $this->suggestedReplies->restrict($safe, $context);
+
+            return [...$safe, 'proposal' => $this->proposals->present($conversation, $safe, $context)];
         } catch (\Throwable $exception) {
             $safe = $this->normalizer->normalize(
                 ['intent' => 'UNKNOWN', 'warnings' => [['code' => 'PROVIDER_UNAVAILABLE', 'message' => 'Nao foi possivel analisar agora.']]],
@@ -32,5 +79,15 @@ class ConversationCopilotService
 
             return [...$safe, 'proposal' => $this->proposals->present($conversation, $safe)];
         }
+    }
+
+    /** @param array<string,mixed> $analysis @return array<string,mixed> */
+    private function deterministicAnalysis(array $analysis): array
+    {
+        return $this->normalizer->normalize(
+            $analysis,
+            'deterministic',
+            is_array($analysis['metadata'] ?? null) ? $analysis['metadata'] : [],
+        )->toArray();
     }
 }

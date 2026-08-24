@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\DailyMenuOptionOverride;
 use App\Models\Order;
+use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductOption;
@@ -135,31 +136,7 @@ class OrderOperationsController extends Controller
         $company = $this->resolveCompany($request);
         $this->assertOrderBelongsToCompany($order, $company);
 
-        $validated = $request->validate([
-            'product_id' => ['required', 'integer'],
-            'quantity' => ['required', 'integer', 'min:1', 'max:50'],
-            'item_notes' => ['nullable', 'string', 'max:1000'],
-            'beneficiary_name' => ['nullable', 'string', 'max:120'],
-            'options' => ['sometimes', 'array'],
-            'options.*.product_option_id' => ['required_with:options', 'integer'],
-            'options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
-            'structured_options' => ['sometimes', 'array'],
-            'structured_options.*.component_link_id' => ['nullable', 'integer'],
-            'structured_options.*.product_link_id' => ['nullable', 'integer'],
-            'structured_options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
-            'included_component_ids' => ['sometimes', 'array'],
-            'included_component_ids.*' => ['integer'],
-            'removed_component_ids' => ['sometimes', 'array'],
-            'removed_component_ids.*' => ['integer'],
-            'removed_group_codes' => ['sometimes', 'array'],
-            'removed_group_codes.*' => ['string', 'max:80'],
-            'meat_mode' => ['nullable', 'string', 'in:traditional,beef_only,none'],
-            'traditional_meat_component_ids' => ['sometimes', 'array'],
-            'traditional_meat_component_ids.*' => ['integer'],
-            'additions' => ['sometimes', 'array'],
-            'additions.*.code' => ['required_with:additions', 'string', 'max:80'],
-            'additions.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
-        ]);
+        $validated = $this->validatedItemInput($request);
 
         $product = Product::query()
             ->with('optionGroups')
@@ -184,6 +161,7 @@ class OrderOperationsController extends Controller
                         'included_component_ids' => $validated['included_component_ids'] ?? [],
                         'removed_component_ids' => $validated['removed_component_ids'] ?? [],
                         'removed_group_codes' => $validated['removed_group_codes'] ?? [],
+                        'daily_component_ids' => $validated['daily_component_ids'] ?? [],
                     ],
                 );
 
@@ -212,6 +190,8 @@ class OrderOperationsController extends Controller
             ], 422);
         }
 
+        $validated = $this->withCompositionSnapshot($validated);
+
         try {
             $orders->addItem($order, $product, $validated);
         } catch (DomainException $exception) {
@@ -223,6 +203,124 @@ class OrderOperationsController extends Controller
         return response()->json([
             'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
         ]);
+    }
+
+    public function updateItem(
+        Request $request,
+        Order $order,
+        OrderItem $item,
+        OrderWorkflowService $orders,
+        OrderItemSelectionValidator $selectionValidator,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+        if ((int) $item->order_id !== (int) $order->id) {
+            abort(404);
+        }
+
+        $validated = $this->validatedItemInput($request);
+        $product = Product::query()->with('optionGroups')->where('company_id', $company->id)->whereKey($validated['product_id'])->firstOrFail();
+
+        try {
+            $validated = $this->withCompositionSnapshot($this->validatedItemSelection(
+                $company,
+                $order,
+                $product,
+                $validated,
+                $selectionValidator,
+                data_get($item->preferences, 'composition_snapshot.daily_component_ids', []),
+            ));
+            $orders->updateItem($order, $item, $product, $validated, $request->user());
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        } catch (ValidationException $exception) {
+            return response()->json(['message' => collect($exception->errors())->flatten()->first() ?? 'Revise as escolhas do item.', 'errors' => $exception->errors()], 422);
+        }
+
+        return response()->json(['data' => $presenter->order($order->refresh()->load($this->orderRelations()))]);
+    }
+
+    public function removeItem(Request $request, Order $order, OrderItem $item, OrderWorkflowService $orders, OperationalCrmPresenter $presenter): JsonResponse
+    {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+        if ((int) $item->order_id !== (int) $order->id) {
+            abort(404);
+        }
+
+        try {
+            $orders->removeItem($order, $item, $request->user());
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $presenter->order($order->refresh()->load($this->orderRelations()))]);
+    }
+
+    /** @return array<string,mixed> */
+    private function validatedItemInput(Request $request): array
+    {
+        return $request->validate([
+            'product_id' => ['required', 'integer'], 'quantity' => ['required', 'integer', 'min:1', 'max:50'],
+            'item_notes' => ['nullable', 'string', 'max:1000'], 'beneficiary_name' => ['nullable', 'string', 'max:120'],
+            'options' => ['sometimes', 'array'], 'options.*.product_option_id' => ['required_with:options', 'integer'], 'options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            'structured_options' => ['sometimes', 'array'], 'structured_options.*.component_link_id' => ['nullable', 'integer'], 'structured_options.*.product_link_id' => ['nullable', 'integer'], 'structured_options.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
+            'included_component_ids' => ['sometimes', 'array'], 'included_component_ids.*' => ['integer'], 'removed_component_ids' => ['sometimes', 'array'], 'removed_component_ids.*' => ['integer'],
+            'removed_group_codes' => ['sometimes', 'array'], 'removed_group_codes.*' => ['string', 'max:80'],
+            'daily_component_ids' => ['sometimes', 'array'], 'daily_component_ids.*' => ['integer'],
+            'meat_mode' => ['nullable', 'string', 'in:traditional,beef_only,none'], 'traditional_meat_component_ids' => ['sometimes', 'array'], 'traditional_meat_component_ids.*' => ['integer'],
+            'additions' => ['sometimes', 'array'], 'additions.*.code' => ['required_with:additions', 'string', 'max:80'], 'additions.*.quantity' => ['sometimes', 'integer', 'min:1', 'max:10'],
+        ]);
+    }
+
+    /** @param array<string,mixed> $validated @return array<string,mixed> */
+    private function validatedItemSelection($company, Order $order, Product $product, array $validated, OrderItemSelectionValidator $selectionValidator, array $historicalDailyComponentIds = []): array
+    {
+        if ($product->optionGroups->isEmpty()) {
+            $validated['options'] = $this->validatedOptionRows((int) $company->id, $product, $validated['options'] ?? []);
+
+            return $validated;
+        }
+
+        $selection = $selectionValidator->validateStructuredSelections($company->loadMissing('setting'), $product, $this->orderDateForSelection($order, $company), $validated['structured_options'] ?? [], [
+            'meat_mode' => $validated['meat_mode'] ?? 'traditional',
+            'traditional_meat_component_ids' => $validated['traditional_meat_component_ids'] ?? [],
+            'extra_beef_quantity' => $this->additionQuantity($validated['additions'] ?? [], 'extra_beef'),
+        ], (int) $validated['quantity'], [
+            'included_component_ids' => $validated['included_component_ids'] ?? [],
+            'removed_component_ids' => $validated['removed_component_ids'] ?? [],
+            'removed_group_codes' => $validated['removed_group_codes'] ?? [],
+            'daily_component_ids' => $validated['daily_component_ids'] ?? [],
+            'historical_daily_component_ids' => $historicalDailyComponentIds,
+        ]);
+        $validated['options'] = $selection['options'];
+        foreach (['unit_price_cents', 'selected_components', 'removed_ingredients'] as $key) {
+            if (array_key_exists($key, $selection)) {
+                $validated[$key] = $selection[$key];
+            }
+        }
+
+        return $validated;
+    }
+
+    /** @param array<string,mixed> $validated @return array<string,mixed> */
+    private function withCompositionSnapshot(array $validated): array
+    {
+        $validated['preferences'] = [
+            'composition_snapshot' => [
+                'structured_options' => $validated['structured_options'] ?? [],
+                'included_component_ids' => $validated['included_component_ids'] ?? [],
+                'removed_component_ids' => $validated['removed_component_ids'] ?? [],
+                'removed_group_codes' => $validated['removed_group_codes'] ?? [],
+                'daily_component_ids' => $validated['daily_component_ids'] ?? [],
+                'meat_mode' => $validated['meat_mode'] ?? 'traditional',
+                'traditional_meat_component_ids' => $validated['traditional_meat_component_ids'] ?? [],
+                'additions' => $validated['additions'] ?? [],
+            ],
+        ];
+
+        return $validated;
     }
 
     /**
