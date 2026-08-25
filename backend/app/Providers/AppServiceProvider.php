@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Contracts\Ai\AiProviderInterface;
 use App\Contracts\Ai\ConversationCopilotProviderInterface;
+use App\Contracts\Delivery\DeliveryGeocodingProviderInterface;
+use App\Contracts\Delivery\DeliveryRouteProviderInterface;
 use App\Contracts\WhatsApp\WhatsAppProviderInterface;
 use App\Models\Permission;
 use App\Models\User;
@@ -11,6 +13,10 @@ use App\Services\Ai\Providers\FakeAiProvider;
 use App\Services\Ai\Providers\FakeConversationCopilotProvider;
 use App\Services\Ai\Providers\N8nAiProvider;
 use App\Services\Ai\Providers\OpenAiConversationCopilotProvider;
+use App\Services\Delivery\Providers\FakeDeliveryGeocodingProvider;
+use App\Services\Delivery\Providers\FakeDeliveryRouteProvider;
+use App\Services\Delivery\Providers\GoogleDeliveryGeocodingProvider;
+use App\Services\Delivery\Providers\GoogleDeliveryRouteProvider;
 use App\Services\WhatsApp\Providers\FakeWhatsAppProvider;
 use App\Services\WhatsApp\Providers\MetaCloudWhatsAppProvider;
 use Carbon\CarbonImmutable;
@@ -27,6 +33,16 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->bind(DeliveryGeocodingProviderInterface::class, function ($app): DeliveryGeocodingProviderInterface {
+            return config('chatbotcrm.delivery.maps.provider') === 'google'
+                ? $app->make(GoogleDeliveryGeocodingProvider::class)
+                : $app->make(FakeDeliveryGeocodingProvider::class);
+        });
+        $this->app->bind(DeliveryRouteProviderInterface::class, function ($app): DeliveryRouteProviderInterface {
+            return config('chatbotcrm.delivery.maps.provider') === 'google'
+                ? $app->make(GoogleDeliveryRouteProvider::class)
+                : $app->make(FakeDeliveryRouteProvider::class);
+        });
         $this->app->bind(ConversationCopilotProviderInterface::class, function ($app): ConversationCopilotProviderInterface {
             return config('chatbotcrm.ai.copilot.provider') === 'openai'
                 ? $app->make(OpenAiConversationCopilotProvider::class)

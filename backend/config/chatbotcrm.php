@@ -24,6 +24,16 @@ return [
         'allow_destructive_test_cleanup' => env('ALLOW_DESTRUCTIVE_TEST_CLEANUP', false),
     ],
 
+    'delivery' => [
+        'maps' => [
+            'provider' => env('DELIVERY_MAPS_PROVIDER', 'fake'),
+            'server_api_key' => env('DELIVERY_GOOGLE_SERVER_API_KEY'),
+            'geocoding_url' => env('DELIVERY_GOOGLE_GEOCODING_URL', 'https://maps.googleapis.com/maps/api/geocode/json'),
+            'routes_url' => env('DELIVERY_GOOGLE_ROUTES_URL', 'https://routes.googleapis.com/directions/v2:computeRoutes'),
+            'timeout_seconds' => (int) env('DELIVERY_MAPS_TIMEOUT_SECONDS', 8),
+        ],
+    ],
+
     'whatsapp' => [
         'provider' => $whatsappProvider,
         'demo_data_enabled' => env('DEMO_DATA_ENABLED', false),

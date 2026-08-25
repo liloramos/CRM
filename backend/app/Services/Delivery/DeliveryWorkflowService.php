@@ -48,9 +48,14 @@ class DeliveryWorkflowService
             $distanceKm = $this->resolveDistanceKm($attributes['distance_km'] ?? null);
             $this->assertDistanceAllowed($distanceKm, $setting);
 
-            $pricePerKmCents = (int) ($attributes['price_per_km_cents'] ?? ($setting?->price_per_km_cents ?? DeliverySetting::DEFAULT_PRICE_PER_KM_CENTS));
-            $surchargePercent = (float) ($attributes['surcharge_percent'] ?? ($setting?->surcharge_percent ?? DeliverySetting::DEFAULT_SURCHARGE_PERCENT));
-            $calculation = $this->calculateFee($distanceKm, $pricePerKmCents, $surchargePercent, $setting?->minimum_fee_cents);
+            $pricePerKmCents = (int) ($setting?->price_per_km_cents ?? DeliverySetting::DEFAULT_PRICE_PER_KM_CENTS);
+            $surchargePercent = (float) ($setting?->surcharge_percent ?? DeliverySetting::DEFAULT_SURCHARGE_PERCENT);
+            $calculation = $attributes['pricing_result'] ?? $this->calculateFee(
+                $distanceKm,
+                $pricePerKmCents,
+                $surchargePercent,
+                $setting?->minimum_fee_cents,
+            );
             $address = $this->resolveAddress($order, $attributes);
             $addressSnapshot = $this->addressSnapshot($address, $attributes['delivery_address'] ?? null);
 
@@ -386,6 +391,8 @@ class DeliveryWorkflowService
             'state' => $address->state,
             'country_code' => $address->country_code,
             'reference' => $address->reference,
+            'latitude' => $address->latitude !== null ? (float) $address->latitude : null,
+            'longitude' => $address->longitude !== null ? (float) $address->longitude : null,
         ];
     }
 

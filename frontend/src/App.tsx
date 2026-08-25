@@ -1750,7 +1750,7 @@ function App() {
           />
         )
       case 'entregas':
-        return <DeliveryPage deliveries={snapshot.deliveries} />
+        return <DeliveryPage />
       case 'pagamentos':
         return (
           <FinancePage

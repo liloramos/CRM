@@ -21,6 +21,7 @@ use App\Models\WhatsAppWebhookEvent;
 use App\Services\Conversations\ConversationAiService;
 use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\PaymentProofCandidateClassifier;
+use App\Services\Delivery\WhatsAppDeliveryLocationCapture;
 use App\Services\Payments\PaymentWorkflowService;
 use DomainException;
 use Illuminate\Http\UploadedFile;
@@ -45,6 +46,7 @@ class WhatsAppService
         private readonly WhatsAppInboundTrace $inboundTrace,
         private readonly WhatsAppPhoneResolver $phoneResolver,
         private readonly WhatsAppAudioNormalizer $audioNormalizer,
+        private readonly WhatsAppDeliveryLocationCapture $deliveryLocationCapture,
     ) {}
 
     /**
@@ -743,6 +745,7 @@ class WhatsAppService
 
         $media = $this->mediaStorage->storeIncomingMedia($company, $account, $message, $event, $incomingMessage);
         $this->updateConversationAfterInboundMessage($conversation, $message, $incomingMessage);
+        $this->deliveryLocationCapture->capture($conversation->refresh()->load('activeOrder'), $incomingMessage);
 
         if ($this->customerAskedForHuman($content)) {
             $this->alerts->open(

@@ -777,6 +777,47 @@ export type DeliveryTask = {
   routeLabel: string
 }
 
+export type DeliveryCoordinates = {
+  latitude: number
+  longitude: number
+}
+
+export type DeliveryMapTask = {
+  id: string
+  order_code: string
+  status: string
+  recipient: string | null
+  address: Record<string, unknown> | null
+  origin: DeliveryCoordinates | null
+  destination: DeliveryCoordinates | null
+  distance_meters: number | null
+  duration_seconds: number | null
+  encoded_polyline: string | null
+  calculated_fee_cents: number | null
+  final_fee_cents: number
+  quote_id: number | null
+}
+
+export type DeliveryDistanceBand = {
+  up_to_meters: number
+  fee_cents: number
+}
+
+export type DeliverySettings = {
+  id: number
+  company_id: number
+  is_active: boolean
+  calculation_mode: 'per_km' | 'distance_bands' | string
+  price_per_km_cents: number
+  minimum_fee_cents: number | null
+  maximum_distance_km: number | null
+  maps_provider: 'google' | 'fake' | 'none' | string
+  provider_options: {
+    origin?: DeliveryCoordinates & { address?: string }
+    distance_bands?: DeliveryDistanceBand[]
+  } | null
+}
+
 export type FinanceEntry = {
   id: string
   orderId: string

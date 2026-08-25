@@ -35,6 +35,10 @@ import type {
   DailyMenuComponent,
   DailyMenuSectionKey,
   DailyStructuredMenu,
+  DeliveryCoordinates,
+  DeliveryDistanceBand,
+  DeliveryMapTask,
+  DeliverySettings,
   EffectiveAvailabilityStatus,
   MenuOption,
   MenuComponentTypeKey,
@@ -674,6 +678,63 @@ export type FulfillmentAction = 'ready' | 'start-delivery' | 'delivered' | 'pick
 
 export async function advanceOrderFulfillment(orderId: string, action: FulfillmentAction) {
   return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/fulfillment/${action}`, {
+    method: 'POST',
+  })
+}
+
+export async function getDeliveryTasks(): Promise<DeliveryMapTask[]> {
+  const response = await requestJson<ApiEnvelope<DeliveryMapTask[]>>('/api/app/deliveries')
+
+  return response.data
+}
+
+export async function getDeliverySettings(): Promise<DeliverySettings> {
+  const response = await requestJson<ApiEnvelope<DeliverySettings>>('/api/app/delivery-settings')
+
+  return response.data
+}
+
+export type UpdateDeliverySettingsPayload = {
+  is_active?: boolean
+  maps_provider?: 'google' | 'fake' | 'none'
+  pricing_mode: 'per_km' | 'distance_bands'
+  rate_per_km_cents?: number
+  minimum_fee_cents?: number | null
+  maximum_distance_km?: number | null
+  origin: { address?: string; latitude: number; longitude: number }
+  distance_bands?: DeliveryDistanceBand[]
+}
+
+export async function updateDeliverySettings(payload: UpdateDeliverySettingsPayload): Promise<DeliverySettings> {
+  const response = await requestJson<ApiEnvelope<DeliverySettings>>('/api/app/delivery-settings', {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function recalculateDeliveryRoute(orderId: string) {
+  return requestJson<ApiEnvelope<unknown>>(`/api/app/orders/${orderId}/delivery/recalculate`, { method: 'POST' })
+}
+
+export async function setDeliveryCoordinates(orderId: string, coordinates: DeliveryCoordinates) {
+  return requestJson<ApiEnvelope<unknown>>(`/api/app/orders/${orderId}/delivery/coordinates`, {
+    body: JSON.stringify(coordinates),
+    method: 'POST',
+  })
+}
+
+export async function geocodeDeliveryAddress(orderId: string, address: string) {
+  return requestJson<ApiEnvelope<unknown>>(`/api/app/orders/${orderId}/delivery/geocode`, {
+    body: JSON.stringify({ address }),
+    method: 'POST',
+  })
+}
+
+export async function overrideDeliveryFee(orderId: string, finalFeeCents: number, reason?: string) {
+  return requestJson<ApiEnvelope<unknown>>(`/api/app/orders/${orderId}/delivery/fee-override`, {
+    body: JSON.stringify({ final_fee_cents: finalFeeCents, reason }),
     method: 'POST',
   })
 }

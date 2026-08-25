@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\CounterSaleController;
 use App\Http\Controllers\Api\CustomerOperationsController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
+use App\Http\Controllers\Api\DeliveryOperationsController;
 use App\Http\Controllers\Api\MenuComponentAdminController;
 use App\Http\Controllers\Api\MenuComponentAvailabilityController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
@@ -105,6 +106,15 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('customers', [CustomerOperationsController::class, 'index'])->name('customers.index');
         Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
         Route::patch('customers/{customer}', [CustomerOperationsController::class, 'update'])->name('customers.update');
+        Route::get('deliveries', [DeliveryOperationsController::class, 'index'])
+            ->middleware('permission:orders.view')
+            ->name('deliveries.index');
+        Route::get('delivery-settings', [DeliveryOperationsController::class, 'settings'])
+            ->middleware('permission:orders.view')
+            ->name('delivery-settings.show');
+        Route::patch('delivery-settings', [DeliveryOperationsController::class, 'updateSettings'])
+            ->middleware('permission:orders.manage')
+            ->name('delivery-settings.update');
         Route::get('orders', [OrderOperationsController::class, 'index'])->name('orders.index');
         Route::get('counter-sales', [CounterSaleController::class, 'index'])
             ->middleware('permission:orders.view')
@@ -145,6 +155,14 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('orders/{order}/fulfillment/{action}', [OrderOperationsController::class, 'advanceFulfillment'])
             ->whereIn('action', ['ready', 'start-delivery', 'delivered', 'picked-up'])
             ->name('orders.fulfillment.advance');
+        Route::post('orders/{order}/delivery/coordinates', [DeliveryOperationsController::class, 'setCoordinates'])
+            ->middleware('permission:orders.manage')->name('orders.delivery.coordinates');
+        Route::post('orders/{order}/delivery/geocode', [DeliveryOperationsController::class, 'geocodeAddress'])
+            ->middleware('permission:orders.manage')->name('orders.delivery.geocode');
+        Route::post('orders/{order}/delivery/recalculate', [DeliveryOperationsController::class, 'recalculate'])
+            ->middleware('permission:orders.manage')->name('orders.delivery.recalculate');
+        Route::post('orders/{order}/delivery/fee-override', [DeliveryOperationsController::class, 'overrideFee'])
+            ->middleware('permission:orders.manage')->name('orders.delivery.fee-override');
         Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
         Route::get('conversation-quick-replies', [ConversationConfigurationController::class, 'quickReplies'])
             ->middleware('permission:whatsapp.view')
