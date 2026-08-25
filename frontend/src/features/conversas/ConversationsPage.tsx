@@ -66,6 +66,7 @@ type ConversationsPageProps = {
   onApplyCopilotProposal: (conversation: Conversation, proposal: CopilotOrderProposal, targetChoice: 'NEW_ORDER' | 'ACTIVE_ORDER') => boolean
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
   onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
+  onClearConversation: () => void
   onCreateOrder: (conversationId: string) => Promise<void>
   onAdvanceOrder: (orderId: string, action: FulfillmentAction) => Promise<void>
   onOpenOrders: () => void
@@ -96,6 +97,7 @@ export function ConversationsPage({
   onApplyCopilotProposal,
   onApprovePayment,
   onChangeMode,
+  onClearConversation,
   onCreateOrder,
   onAdvanceOrder,
   onOpenOrders,
@@ -724,6 +726,56 @@ export function ConversationsPage({
       document.removeEventListener('keydown', handleQuickReplyKeyDown)
     }
   }, [isQuickReplyOpen])
+
+  const hasOpenEscapeContext = isAttachmentMenuOpen
+    || isContextOpen
+    || isStatusLegendOpen
+    || isQuickReplyOpen
+    || isEmojiPickerOpen
+    || isStickerPickerOpen
+    || isConfigurationOpen
+    || editingCustomer !== null
+    || cameraState !== 'closed'
+  const selectedConversationId = selectedConversation?.id
+
+  useEffect(() => {
+    function handleConversationEscape(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || event.defaultPrevented) {
+        return
+      }
+
+      if (conversationMenuOpenId !== null) {
+        setConversationMenuOpenId(null)
+        return
+      }
+
+      if (isPinnedMessagesOpen) {
+        setIsPinnedMessagesOpen(false)
+        return
+      }
+
+      if (hasOpenEscapeContext) {
+        return
+      }
+
+      if (document.querySelector('[aria-modal="true"], [role="dialog"], [role="menu"], [role="listbox"]')) {
+        return
+      }
+
+      if (selectedConversationId) {
+        onClearConversation()
+      }
+    }
+
+    window.addEventListener('keydown', handleConversationEscape)
+    return () => window.removeEventListener('keydown', handleConversationEscape)
+  }, [
+    conversationMenuOpenId,
+    hasOpenEscapeContext,
+    isPinnedMessagesOpen,
+    onClearConversation,
+    selectedConversationId,
+  ])
 
   useLayoutEffect(() => {
     const textarea = composerRef.current
@@ -1674,7 +1726,7 @@ export function ConversationsPage({
               </form>
             </>
           ) : (
-            <EmptyState description="Selecione uma conversa para iniciar o atendimento." title="Nenhuma conversa selecionada" />
+            <EmptyState description="Escolha uma conversa na lista ao lado para visualizar as mensagens." title="Selecione uma conversa" />
           )}
         </Card>
 

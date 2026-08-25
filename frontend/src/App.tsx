@@ -189,6 +189,18 @@ function App() {
   const [bulkDeleteOrderIds, setBulkDeleteOrderIds] = useState<string[]>([])
   const [blockedOrderDeletions, setBlockedOrderDeletions] = useState<BlockedOrderDeletion[]>([])
 
+  const clearSelectedConversation = useCallback(() => {
+    setSelectedConversationId(null)
+  }, [])
+
+  const handleNavigation = useCallback((route: RouteKey) => {
+    if (route === 'conversas') {
+      clearSelectedConversation()
+    }
+
+    setActiveRoute(route)
+  }, [clearSelectedConversation])
+
   const loadSnapshot = useCallback(async () => {
     setIsLoadingSnapshot(true)
     setSnapshotError(null)
@@ -207,7 +219,6 @@ function App() {
 
         return firstActiveOrder?.id ?? null
       })
-      setSelectedConversationId((current) => current ?? response.snapshot.conversations[0]?.id ?? null)
       setSelectedProductId((current) => current || response.snapshot.products[0]?.id || '')
     } catch (error) {
       setSnapshotError(describeApiError(error, 'Não foi possível atualizar o painel.'))
@@ -323,7 +334,7 @@ function App() {
           return current
         }
 
-        return response.conversations[0]?.id ?? (incremental ? current : null)
+        return null
       })
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) {
@@ -490,7 +501,7 @@ function App() {
       return undefined
     }
 
-    return snapshot.conversations.find((conversation) => conversation.id === selectedConversationId) ?? snapshot.conversations[0]
+    return snapshot.conversations.find((conversation) => conversation.id === selectedConversationId)
   }, [selectedConversationId, snapshot])
   const selectedConversationReadId = selectedConversation?.id
   const selectedConversationUnread = selectedConversation?.unread ?? 0
@@ -1654,7 +1665,7 @@ function App() {
             financeEntries={snapshot.financeEntries}
             financialSummary={snapshot.financialSummary}
             isLoading={isLoadingSnapshot}
-            onNavigate={setActiveRoute}
+            onNavigate={handleNavigation}
             onNewOrder={() => void handleNewOrder()}
             onRetry={loadSnapshot}
             orders={snapshot.orders}
@@ -1677,6 +1688,7 @@ function App() {
             onAcknowledgeAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'acknowledge')}
             onApprovePayment={handleApproveConversationPayment}
             onChangeMode={handleConversationModeChange}
+            onClearConversation={clearSelectedConversation}
             onCreateOrder={handleCreateConversationOrder}
             onAdvanceOrder={handleAdvanceOrderFulfillment}
             onOpenOrders={() => setActiveRoute('pedidos')}
@@ -1788,15 +1800,15 @@ function App() {
       case 'relatorios':
         return <ReportsPage />
       case 'whatsapp':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="whatsapp" />
+        return <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="whatsapp" />
       case 'ia':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="ia" />
+        return <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="ia" />
       case 'perfil':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="perfil" />
+        return <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="perfil" />
       case 'configuracoes':
       default:
         return (
-          <SettingsPage integrations={snapshot.integrations} onNavigate={setActiveRoute} onOpenModal={openModal} variant="configuracoes" />
+          <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="configuracoes" />
         )
     }
   }
@@ -1829,7 +1841,7 @@ function App() {
     <AppShell
       activeRoute={activeRoute}
       onLogout={() => void logout()}
-      onNavigate={setActiveRoute}
+      onNavigate={handleNavigation}
       user={user}
     >
       {renderPage()}

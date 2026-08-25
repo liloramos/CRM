@@ -8,10 +8,12 @@
   --dashboard-tone-info: #38bdf8;
   --dashboard-tone-manual: #a78bfa;
   --dashboard-tone-neutral: #94a3b8;
+  height: 100vh;
   height: 100dvh;
-  min-height: 100dvh;
+  min-height: 0;
   display: grid;
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(255, 179, 0, 0.05), transparent 280px),
     var(--color-bg);
@@ -22,18 +24,43 @@
   grid-template-columns: var(--sidebar-collapsed-width) minmax(0, 1fr);
 }
 
-.app-shell:has(.conversation-page) {
-  height: 100dvh;
-  min-height: 100dvh;
-}
-
 .app-shell__content {
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
   min-width: 0;
   flex: 1 1 0;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--color-muted) transparent;
+  scrollbar-width: thin;
+}
+
+.app-shell__content::-webkit-scrollbar {
+  width: 9px;
+}
+
+.app-shell__content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-shell__content::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--color-muted);
+  background-clip: padding-box;
+}
+
+.app-shell__content::-webkit-scrollbar-thumb:hover {
+  background: var(--color-brand);
+  background-clip: padding-box;
+}
+
+.app-shell__content::-webkit-scrollbar-thumb:active {
+  background: var(--color-brand-2);
+  background-clip: padding-box;
 }
 
 .app-shell__content:has(.conversation-page) {
@@ -56,7 +83,7 @@
   top: 0;
   z-index: 8;
   isolation: isolate;
-  height: 100dvh;
+  height: 100%;
   min-height: 0;
   padding: 24px 18px;
   display: flex;
@@ -75,6 +102,7 @@
 }
 
 .sol-logo {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -288,6 +316,7 @@
 }
 
 .sidebar__footer {
+  flex: 0 0 auto;
   margin-top: auto;
   display: grid;
   gap: 10px;
