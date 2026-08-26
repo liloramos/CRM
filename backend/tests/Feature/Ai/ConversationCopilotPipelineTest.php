@@ -57,6 +57,33 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->assertContains('UNGROUNDED_REMOVAL', array_column($safe['warnings'], 'code'));
     }
 
+    public function test_new_order_does_not_inherit_a_removal_grounded_only_in_history(): void
+    {
+        $company = $this->seedRestaurant();
+        $date = CarbonImmutable::parse('2026-08-22');
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco'],
+                'removed_components' => ['salada'],
+                'notes' => '',
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze($company, app(ConversationCopilotContextBuilder::class)->forMessages($company, [
+            ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero uma N8 de 16 com porco sem salada.'],
+            ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero uma N8 de 16 com porco.'],
+        ], null, $date), $date)['safe'];
+
+        $this->assertSame([], $safe['draft_order']['items'][0]['removed_components']);
+        $this->assertSame([], $safe['missing_information']);
+        $this->assertNotContains('UNGROUNDED_REMOVAL', array_column($safe['warnings'], 'code'));
+    }
+
     public function test_openai_shaped_n8_and_n9_beef_results_keep_their_meat_modes(): void
     {
         $company = $this->seedRestaurant();

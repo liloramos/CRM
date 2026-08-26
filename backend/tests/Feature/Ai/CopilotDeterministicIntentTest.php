@@ -219,6 +219,39 @@ class CopilotDeterministicIntentTest extends TestCase
         }
     }
 
+    public function test_removal_follow_up_keeps_the_current_order_turn_grounded(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-22 15:00:00');
+        try {
+            $company = $this->seededCompany();
+            $conversation = $this->conversation($company);
+            foreach (['Quero uma N5 de porco.', 'Sem salada.'] as $body) {
+                Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => $body, 'type' => 'text', 'received_at' => now()]);
+            }
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'confidence' => 0.9,
+                'draft_order' => ['items' => [[
+                    'menu_item_slug' => 'n5',
+                    'quantity' => 1,
+                    'selections' => ['meat' => 'porco'],
+                    'removed_components' => ['salada'],
+                ]], 'fulfillment' => 'pickup'],
+                'missing_information' => [],
+                'warnings' => [],
+                'suggested_reply' => 'Resumo do pedido.',
+            ]));
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+            $this->assertSame('ORDER_CONTINUE', $result['intent']);
+            $this->assertContains('Sem Salada', $result['draft_order']['items'][0]['removed_components']);
+            $this->assertNotContains('UNGROUNDED_REMOVAL', array_column($result['warnings'], 'code'));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_menu_request_overrides_an_incomplete_prior_n8_without_calling_the_provider(): void
     {
         $company = $this->seededCompany();

@@ -63,6 +63,11 @@ final class CopilotLatestMessageIntentResolver
             return 'ORDER_CONTINUE';
         }
 
+        if ($this->hasCurrentPendingOrder($context)
+            && preg_match('/^sem\s+\S+/', $text) === 1) {
+            return 'ORDER_CONTINUE';
+        }
+
         if (preg_match('/\b(e\s+tambem|tambem|mais\s+uma|com\s+isso)\b/', $text) === 1) {
             return 'ORDER_CONTINUE';
         }
