@@ -11,9 +11,12 @@ use App\Models\OperatingHour;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Ai\ConversationCopilotService;
+use App\Services\Ai\CopilotAutomationAuthorityPolicy;
 use App\Services\Ai\CopilotBusinessHoursReplyBuilder;
+use App\Services\Ai\CopilotLatestMessageIntentResolver;
 use App\Services\Ai\CopilotProductGroundingGuard;
 use App\Services\Ai\CopilotResolvedProductConfigurationService;
+use App\Services\Ai\Providers\FakeConversationCopilotProvider;
 use App\Services\Menu\DailyStructuredMenuService;
 use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\OrderWorkflowService;
@@ -25,6 +28,161 @@ use Tests\TestCase;
 class CopilotDeterministicIntentTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_product_information_is_deterministic_after_history_and_an_active_order(): void
+    {
+        $company = $this->seededCompany();
+        $conversation = $this->conversation($company);
+        Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quero uma N8.', 'type' => 'text', 'received_at' => now()->subMinute()]);
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['conversation_id' => $conversation->id, 'payer_customer_id' => $conversation->customer_id]);
+        $conversation->forceFill(['active_order_id' => $order->id])->save();
+        Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quanto custa a N8?', 'type' => 'text', 'received_at' => now()]);
+        $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+        {
+            public function name(): string
+            {
+                return 'test';
+            }
+
+            public function analyze(array $context): array
+            {
+                throw new \LogicException('Provider must not be called for PRODUCT_CLARIFICATION.');
+            }
+        });
+
+        $result = app(ConversationCopilotService::class)->analyze($conversation->fresh());
+        $decision = app(CopilotAutomationAuthorityPolicy::class)->decide(
+            $conversation->fresh()->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]),
+            $result,
+            CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW,
+            true,
+            'Quanto custa a N8?',
+        );
+
+        $this->assertSame('PRODUCT_CLARIFICATION', $result['intent']);
+        $this->assertSame([], $result['draft_order']['items']);
+        $this->assertStringContainsString('R$ 16,00', $result['suggested_reply']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, $decision['decision']);
+        $this->assertSame('send_grounded_reply', $decision['action']);
+    }
+
+    public function test_price_availability_and_composition_questions_are_not_order_requests(): void
+    {
+        $resolver = app(CopilotLatestMessageIntentResolver::class);
+
+        foreach ([
+            'Quanto custa a N8?',
+            'Qual o valor da N8?',
+            'Qual o preco da N9?',
+            'Quanto e a separadinha?',
+            'Tem N8?',
+            'Tem suco de laranja?',
+            'Tem Coca Zero?',
+            'O que vem na N8?',
+        ] as $message) {
+            $this->assertSame('PRODUCT_CLARIFICATION', $resolver->resolve(['messages' => [['direction' => 'inbound', 'type' => 'text', 'body' => $message]]]), $message);
+        }
+
+        foreach (['Quero uma N8', 'Me ve uma N8', 'Pode fazer uma N8', 'Vou querer uma N8', 'Adiciona uma Coca'] as $message) {
+            $this->assertSame('ORDER_CREATE', $resolver->resolve(['messages' => [['direction' => 'inbound', 'type' => 'text', 'body' => $message]]]), $message);
+        }
+    }
+
+    public function test_product_availability_uses_the_catalog_component_and_never_calls_the_provider(): void
+    {
+        $company = $this->seededCompany();
+        $conversation = $this->conversation($company);
+        Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Tem suco de laranja?', 'type' => 'text', 'received_at' => now()]);
+        $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+        {
+            public function name(): string
+            {
+                return 'test';
+            }
+
+            public function analyze(array $context): array
+            {
+                throw new \LogicException('Provider must not be called for PRODUCT_CLARIFICATION.');
+            }
+        });
+
+        $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+        $this->assertSame('PRODUCT_CLARIFICATION', $result['intent']);
+        $this->assertSame('product_catalog', $result['metadata']['reply_source']);
+        $this->assertStringContainsString('Laranja', $result['suggested_reply']);
+        $this->assertSame([], $result['draft_order']['items']);
+    }
+
+    public function test_n8_with_two_unambiguous_daily_meats_is_a_safe_candidate(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-22 15:00:00');
+        try {
+            $company = $this->seededCompany();
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quero uma N8 de 16 com frango e porco.', 'type' => 'text', 'received_at' => now()]);
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'confidence' => 0.9,
+                'draft_order' => ['items' => [['menu_item_slug' => 'n8', 'quantity' => 1, 'selections' => []]], 'fulfillment' => 'pickup'],
+                'missing_information' => [],
+                'warnings' => [],
+                'suggested_reply' => 'Resumo do pedido.',
+            ]));
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+            $decision = app(CopilotAutomationAuthorityPolicy::class)->decide(
+                $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]),
+                $result,
+                CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE,
+                true,
+                'Quero uma N8 de 16 com frango e porco.',
+            );
+
+            $this->assertSame('ORDER_CREATE', $result['intent']);
+            $this->assertSame([], $result['missing_information']);
+            $this->assertSame([], $result['warnings']);
+            $meats = $result['draft_order']['items'][0]['selections']['meats'];
+            $this->assertCount(2, $meats);
+            $this->assertContains('Porco', $meats);
+            $this->assertTrue(collect($meats)->contains(fn (string $meat): bool => str_contains(mb_strtolower($meat), 'frango')));
+            $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_ACTION, $decision['decision']);
+            $this->assertSame('stage_new_order', $decision['action']);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_n8_meat_follow_up_keeps_the_current_order_turn_grounded_for_review(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-22 15:00:00');
+        try {
+            $company = $this->seededCompany();
+            $conversation = $this->conversation($company);
+            foreach (['Quero uma N8 de 16.', 'Com frango e porco.'] as $body) {
+                Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => $body, 'type' => 'text', 'received_at' => now()]);
+            }
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'confidence' => 0.9,
+                'draft_order' => ['items' => [['menu_item_slug' => 'n8', 'quantity' => 1, 'selections' => []]], 'fulfillment' => 'pickup'],
+                'missing_information' => [],
+                'warnings' => [],
+                'suggested_reply' => 'Resumo do pedido.',
+            ]));
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+            $this->assertSame('ORDER_CONTINUE', $result['intent']);
+            $this->assertSame([], $result['missing_information']);
+            $this->assertSame([], $result['warnings']);
+            $this->assertCount(2, $result['draft_order']['items'][0]['selections']['meats']);
+            $this->assertTrue(collect($result['draft_order']['items'][0]['selections']['meats'])->contains(fn (string $meat): bool => str_contains(mb_strtolower($meat), 'frango')));
+            $this->assertContains('Porco', $result['draft_order']['items'][0]['selections']['meats']);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
 
     public function test_menu_request_overrides_an_incomplete_prior_n8_without_calling_the_provider(): void
     {

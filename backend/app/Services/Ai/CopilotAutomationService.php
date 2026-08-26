@@ -302,7 +302,10 @@ final class CopilotAutomationService
                 'target_state' => data_get($analysis, 'proposal.target.state'),
                 'guarded_reply_present' => trim((string) ($analysis['suggested_reply'] ?? '')) !== '',
                 'guard_results' => [
+                    // Analysis is intentionally conservative. The policy decision above,
+                    // not this telemetry field, controls whether a human action is required.
                     'requires_human_review' => (bool) ($analysis['requires_human_review'] ?? true),
+                    'policy_requires_human_review' => (bool) ($decision['requires_human_review'] ?? false),
                     'missing_information_count' => count((array) ($analysis['missing_information'] ?? [])),
                     'warnings_count' => count((array) ($analysis['warnings'] ?? [])),
                 ],

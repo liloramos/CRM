@@ -29,6 +29,51 @@ class CopilotMenuAliasResolver
             })->first();
     }
 
+    public function resolveFromText(Company $company, string $text): ?Product
+    {
+        $text = $this->key($text);
+        if ($text === '') {
+            return null;
+        }
+
+        $aliases = collect($this->aliases())
+            ->filter(fn (string $slug, string $alias): bool => str_contains($text, $alias))
+            ->sortByDesc(fn (string $slug, string $alias): int => strlen($alias));
+
+        foreach ($aliases as $alias => $slug) {
+            $product = $this->resolve($company, null, (string) $alias);
+            if ($product?->is_active) {
+                return $product;
+            }
+        }
+
+        return $this->eligibility->apply(Product::query())
+            ->where('company_id', $company->id)
+            ->where('is_active', true)
+            ->get()
+            ->map(function (Product $product): array {
+                $name = $this->key((string) $product->name);
+
+                return [
+                    'product' => $product,
+                    'identifiers' => array_values(array_unique(array_filter([
+                        $this->key((string) $product->slug),
+                        $name,
+                        preg_replace('/(?:\d+(?:ml|l)|lata)$/', '', $name),
+                    ]))),
+                ];
+            })
+            ->flatMap(function (array $candidate) use ($text): array {
+                return collect($candidate['identifiers'])
+                    ->filter(fn (string $identifier): bool => strlen($identifier) > 2 && str_contains($text, $identifier))
+                    ->map(fn (string $identifier): array => ['product' => $candidate['product'], 'length' => strlen($identifier)])
+                    ->all();
+            })
+            ->sortByDesc('length')
+            ->pluck('product')
+            ->first();
+    }
+
     /** @param list<array<string,mixed>> $messages */
     public function isExplicitlyReferenced(Product $product, array $messages): bool
     {
@@ -86,6 +131,8 @@ class CopilotMenuAliasResolver
             'guaranalata' => 'guarana-lata',
             'cocacolazerolata' => 'coca-cola-zero-lata',
             'cocazerolata' => 'coca-cola-zero-lata',
+            'cocazero' => 'coca-cola-zero-lata',
+            'cocacolazero' => 'coca-cola-zero-lata',
             'spritezero' => 'sprite-zero',
             'mineiro600' => 'mineiro-600ml',
             'mineiro600ml' => 'mineiro-600ml',

@@ -16,6 +16,7 @@ class ConversationCopilotService
         private readonly CopilotSuggestedReplyGuard $suggestedReplies,
         private readonly CopilotLatestMessageIntentResolver $latestIntent,
         private readonly CopilotMenuReplyBuilder $menuReplies,
+        private readonly CopilotProductClarificationReplyBuilder $productReplies,
         private readonly CopilotBusinessHoursReplyBuilder $businessHours,
         private readonly CopilotCustomerFacingReplyBuilder $customerReplies,
     ) {}
@@ -56,6 +57,7 @@ class ConversationCopilotService
         try {
             $safe = match ($intent) {
                 'MENU_REQUEST' => $this->deterministicAnalysis($this->menuReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']))),
+                'PRODUCT_CLARIFICATION' => $this->deterministicAnalysis($this->productReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']), (string) data_get($context, 'latest_message.body', ''))),
                 'BUSINESS_HOURS_REQUEST' => $this->deterministicAnalysis($this->businessHours->build($conversation->company)),
                 'PAYMENT_QUESTION' => $this->deterministicAnalysis($this->customerReplies->paymentKey()),
                 'DELIVERY_QUESTION' => $this->deterministicAnalysis($this->customerReplies->deliveryFee()),

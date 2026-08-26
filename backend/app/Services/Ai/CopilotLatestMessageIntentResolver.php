@@ -31,6 +31,10 @@ final class CopilotLatestMessageIntentResolver
             return 'DELIVERY_QUESTION';
         }
 
+        if ($this->isProductInformationRequest($text)) {
+            return 'PRODUCT_CLARIFICATION';
+        }
+
         if (preg_match('/\b(troca|troque|alter[ae]|muda|mude|substitui[ar]?|tir[ae]|remove[ar]?)\b/', $text) === 1) {
             return 'ORDER_CHANGE';
         }
@@ -40,7 +44,7 @@ final class CopilotLatestMessageIntentResolver
             return 'ORDER_CHANGE';
         }
 
-        if (preg_match('/\b(n\s*[- ]?\s*(?:5|8|9)|marmit(?:a|ex)|pedido|quero|queria|gostaria|me\s+ve)\b/', $text) === 1) {
+        if (preg_match('/\b(n\s*[- ]?\s*(?:5|8|9)|marmit(?:a|ex)|pedido|quero|queria|gostaria|me\s+ve|adiciona)\b/', $text) === 1) {
             return 'ORDER_CREATE';
         }
 
@@ -54,11 +58,21 @@ final class CopilotLatestMessageIntentResolver
             return 'ORDER_CONTINUE';
         }
 
+        if ($this->hasCurrentPendingOrder($context)
+            && preg_match('/^(?:com\s+)?(?:frango|porco|almondega|bife)\b/', $text) === 1) {
+            return 'ORDER_CONTINUE';
+        }
+
         if (preg_match('/\b(e\s+tambem|tambem|mais\s+uma|com\s+isso)\b/', $text) === 1) {
             return 'ORDER_CONTINUE';
         }
 
         return 'GENERAL_MESSAGE';
+    }
+
+    private function isProductInformationRequest(string $text): bool
+    {
+        return preg_match('/\b(quanto\s+(?:custa|e)|qual\s+(?:o\s+)?(?:valor|preco)|(?:tem|vende|possui)\s+.+|o\s+que\s+vem)\b/', $text) === 1;
     }
 
     /** @param array<string,mixed> $context */

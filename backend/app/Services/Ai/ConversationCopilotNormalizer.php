@@ -15,7 +15,7 @@ class ConversationCopilotNormalizer
     /** @param array<string,mixed> $raw */
     public function normalize(array $raw, string $provider, array $metadata = []): CopilotAnalysis
     {
-        $intents = ['GREETING', 'MENU_REQUEST', 'BUSINESS_HOURS_REQUEST', 'ORDER_CREATE', 'ORDER_CONTINUE', 'ORDER_CONFIRMATION', 'ORDER_CHANGE', 'ORDER_STATUS', 'PAYMENT_QUESTION', 'DELIVERY_QUESTION', 'GENERAL_QUESTION', 'GENERAL_MESSAGE', 'HUMAN_REQUEST', 'UNKNOWN'];
+        $intents = ['GREETING', 'MENU_REQUEST', 'PRODUCT_CLARIFICATION', 'BUSINESS_HOURS_REQUEST', 'ORDER_CREATE', 'ORDER_CONTINUE', 'ORDER_CONFIRMATION', 'ORDER_CHANGE', 'ORDER_STATUS', 'PAYMENT_QUESTION', 'DELIVERY_QUESTION', 'GENERAL_QUESTION', 'GENERAL_MESSAGE', 'HUMAN_REQUEST', 'UNKNOWN'];
         $intent = strtoupper((string) ($raw['intent'] ?? 'UNKNOWN'));
         $warnings = collect($raw['warnings'] ?? [])->map(fn ($value) => ['code' => is_array($value) ? (string) ($value['code'] ?? 'COPILOT_WARNING') : 'COPILOT_WARNING', 'message' => $this->text(is_array($value) ? ($value['message'] ?? '') : $value, 240)])->filter(fn ($value) => $value['message'] !== '')->values()->all();
         $items = collect(data_get($raw, 'draft_order.items', []))->filter(fn (mixed $item): bool => is_array($item))->map(function (array $item) use (&$warnings): array {

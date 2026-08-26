@@ -117,7 +117,8 @@ final class CopilotAutomationAuthorityPolicy
             return true;
         }
 
-        return ($proposal['target']['state'] ?? null) === 'UNRESOLVED';
+        return in_array($intent, ['ORDER_CREATE', 'ORDER_CONTINUE', 'ORDER_CONFIRMATION', 'ORDER_CHANGE'], true)
+            && ($proposal['target']['state'] ?? null) === 'UNRESOLVED';
     }
 
     private function isFinancialOrAdministrative(string $intent, array $analysis, string $inboundContent): bool

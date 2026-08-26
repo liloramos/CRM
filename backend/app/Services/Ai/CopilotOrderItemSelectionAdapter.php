@@ -196,6 +196,13 @@ class CopilotOrderItemSelectionAdapter
 
         $meats = collect($selections['meats'] ?? $selections['meat'] ?? [])
             ->filter(fn (mixed $meat): bool => is_string($meat) && $meat !== '')
+            ->map(function (string $meat) use ($company, $product, $date): string {
+                $component = $this->resolveDailyMeat($company, $product, $date, $meat);
+
+                return $component instanceof MenuComponent
+                    ? (string) ($component->display_name ?: $component->name)
+                    : $meat;
+            })
             ->values()
             ->all();
         foreach ($this->dailyMeatCandidates($company, $product, $date) as $component) {
@@ -205,6 +212,21 @@ class CopilotOrderItemSelectionAdapter
                 if (! collect($meats)->contains(fn (string $meat): bool => $this->key($meat) === $this->key($name))) {
                     $meats[] = $name;
                 }
+            }
+        }
+        foreach (['frango', 'porco', 'almondega'] as $reference) {
+            if (! str_contains($text, $reference)) {
+                continue;
+            }
+
+            $component = $this->resolveDailyMeat($company, $product, $date, $reference);
+            if (! $component instanceof MenuComponent) {
+                continue;
+            }
+
+            $name = (string) ($component->display_name ?: $component->name);
+            if (! collect($meats)->contains(fn (string $meat): bool => $this->key($meat) === $this->key($name))) {
+                $meats[] = $name;
             }
         }
 
