@@ -23,6 +23,7 @@ class CopilotOrderDraftValidator
         private readonly CopilotProductGroundingGuard $products,
         private readonly CopilotIntentGroundingGuard $intents,
         private readonly CopilotProductEligibility $eligibility,
+        private readonly CopilotRemovalGroundingGuard $removals,
     ) {}
 
     /** @param array<string,mixed> $context */
@@ -46,12 +47,19 @@ class CopilotOrderDraftValidator
             );
         }
         $selectionMessages = $this->selectionMessages($context, $latestIntent);
+        $discardHistoricalRemovals = $latestIntent === 'ORDER_CREATE' && data_get($context, 'active_order') === null;
+        $historicalMessages = $discardHistoricalRemovals
+            ? $this->historicalInboundMessages(data_get($context, 'messages', []))
+            : [];
         $warnings = $analysis->warnings;
         $invalidQuantityDiscarded = false;
         $ungroundedProductDiscarded = false;
         $proposedItems = $analysis->draftOrder['items'] ?? [];
         $discardedN8Indexes = [];
-        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
+        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $discardHistoricalRemovals, $historicalMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
+            if ($discardHistoricalRemovals) {
+                $item = $this->withoutHistoricalOnlyRemovals($item, $selectionMessages, $historicalMessages);
+            }
             $quantity = filter_var($item['quantity'] ?? null, FILTER_VALIDATE_INT);
             if ($quantity === false || $quantity < 1 || $quantity > 50) {
                 $warnings[] = ['code' => 'INVALID_QUANTITY', 'message' => 'A quantidade sugerida nao e valida.', 'item_index' => $index];
@@ -328,6 +336,57 @@ class CopilotOrderDraftValidator
         foreach (array_reverse($messages) as $message) {
             if (($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text') {
                 return [$message];
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Keep a fresh order from inheriting a removal that the provider only saw in an older turn.
+     * Unknown removals stay intact so the selection adapter can still report them for human review.
+     *
+     * @param  array<string,mixed>  $item
+     * @param  list<array<string,mixed>>  $currentMessages
+     * @param  list<array<string,mixed>>  $historicalMessages
+     * @return array<string,mixed>
+     */
+    private function withoutHistoricalOnlyRemovals(array $item, array $currentMessages, array $historicalMessages): array
+    {
+        $removedComponents = $item['removed_components'] ?? [];
+        if (! is_array($removedComponents) || $historicalMessages === []) {
+            return $item;
+        }
+
+        $item['removed_components'] = array_values(array_filter($removedComponents, function (mixed $removed) use ($currentMessages, $historicalMessages): bool {
+            if (! is_string($removed) || trim($removed) === '') {
+                return true;
+            }
+
+            return $this->removals->isGrounded($removed, $currentMessages)
+                || ! $this->removals->isGrounded($removed, $historicalMessages);
+        }));
+
+        return $item;
+    }
+
+    /** @param mixed $messages @return list<array<string,mixed>> */
+    private function historicalInboundMessages(mixed $messages): array
+    {
+        if (! is_array($messages)) {
+            return [];
+        }
+
+        $messages = array_values($messages);
+        for ($index = count($messages) - 1; $index >= 0; $index--) {
+            $message = $messages[$index];
+            if (($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text') {
+                return array_values(array_filter(
+                    array_slice($messages, 0, $index),
+                    fn (mixed $candidate): bool => is_array($candidate)
+                        && ($candidate['direction'] ?? null) === 'inbound'
+                        && ($candidate['type'] ?? 'text') === 'text',
+                ));
             }
         }
 
