@@ -108,7 +108,7 @@ export function DeliveryPage() {
     <div className="delivery-command-center">
       {message ? <p className="delivery-feedback" role="status">{message}</p> : null}
       <section className="delivery-map-panel" aria-label="Mapa operacional de entregas">
-        <DeliveryMap isSaving={saving} onUseDestination={useSearchedDestination} selected={selected} tasks={tasks} />
+        <DeliveryMap isSaving={saving} onUseDestination={useSearchedDestination} origin={validOrigin(settings?.provider_options?.origin)} selected={selected} tasks={tasks} />
         <div className="delivery-map-panel__legend"><span><i className="delivery-map-panel__marker delivery-map-panel__marker--origin" />Restaurante</span><span><i className="delivery-map-panel__marker" />Entrega ativa</span></div>
       </section>
       <aside className="delivery-queue-panel">
@@ -133,6 +133,17 @@ type SearchedPlace = {
   name: string
 }
 
+type DeliveryOrigin = GoogleLatLng | null
+
+function validOrigin(origin: NonNullable<DeliverySettings['provider_options']>['origin'] | undefined): DeliveryOrigin {
+  if (!origin || !Number.isFinite(origin.latitude) || !Number.isFinite(origin.longitude)
+    || origin.latitude < -90 || origin.latitude > 90 || origin.longitude < -180 || origin.longitude > 180) {
+    return null
+  }
+
+  return { lat: origin.latitude, lng: origin.longitude }
+}
+
 function toSearchedPlace(place: GoogleTextSearchPlace): SearchedPlace | null {
   if (!place.location) return null
   const displayName = typeof place.displayName === 'string' ? place.displayName : place.displayName?.text
@@ -148,11 +159,13 @@ function toSearchedPlace(place: GoogleTextSearchPlace): SearchedPlace | null {
 function DeliveryMap({
   isSaving,
   onUseDestination,
+  origin,
   selected,
   tasks,
 }: {
   isSaving: boolean
   onUseDestination: (coordinates: GoogleLatLng) => Promise<boolean>
+  origin: DeliveryOrigin
   selected: DeliveryMapTask | null
   tasks: DeliveryMapTask[]
 }) {
@@ -161,6 +174,7 @@ function DeliveryMap({
   const markers = useRef<GoogleMarker[]>([])
   const routeLine = useRef<GooglePolyline | null>(null)
   const searchMarker = useRef<GoogleMarker | null>(null)
+  const centeredOriginKey = useRef<string | null>(null)
   const [maps, setMaps] = useState<GoogleMapsApi | null>(window.google?.maps ?? null)
   const [mapInstance, setMapInstance] = useState<GoogleMap | null>(null)
   const [mapUnavailable, setMapUnavailable] = useState(false)
@@ -183,7 +197,7 @@ function DeliveryMap({
 
   useEffect(() => {
     if (!maps || !container.current) return
-    const nextMap = map.current ?? new maps.Map(container.current, { center: { lat: -23.5505, lng: -46.6333 }, disableDefaultUI: true, zoom: 12 })
+    const nextMap = map.current ?? new maps.Map(container.current, { center: origin ?? { lat: -23.5505, lng: -46.6333 }, disableDefaultUI: true, zoom: origin ? 15 : 12 })
     if (!map.current) setMapInstance(nextMap)
     map.current = nextMap
     markers.current.forEach((marker) => marker.setMap(null)); markers.current = []
@@ -191,10 +205,40 @@ function DeliveryMap({
     const bounds = new maps.LatLngBounds()
     const visible = tasks.filter((task) => task.destination)
     visible.forEach((task) => { const marker = new maps.Marker({ map: nextMap, position: { lat: task.destination!.latitude, lng: task.destination!.longitude }, title: task.order_code }); markers.current.push(marker); bounds.extend(marker.getPosition()) })
-    if (selected?.origin) { const origin = { lat: selected.origin.latitude, lng: selected.origin.longitude }; const originMarker = new maps.Marker({ map: nextMap, position: origin, title: 'Restaurante' }); markers.current.push(originMarker); bounds.extend(origin) }
+    const restaurantOrigin = origin ?? (selected?.origin ? { lat: selected.origin.latitude, lng: selected.origin.longitude } : null)
+    if (restaurantOrigin) {
+      const originMarker = new maps.Marker({
+        map: nextMap,
+        position: restaurantOrigin,
+        title: 'Restaurante',
+        icon: {
+          path: 'M 0,-10 C -5,-10 -8,-6 -8,-1 C -8,4 0,11 0,11 C 0,11 8,4 8,-1 C 8,-6 5,-10 0,-10 Z',
+          fillColor: '#47b881',
+          fillOpacity: 1,
+          strokeColor: '#10211b',
+          strokeWeight: 1,
+          scale: 1,
+        },
+      } as unknown as { map: GoogleMap; position: GoogleLatLng; title: string });
+      markers.current.push(originMarker)
+      bounds.extend(restaurantOrigin)
+    }
     if (selected?.encoded_polyline && maps.geometry?.encoding) { const path = maps.geometry.encoding.decodePath(selected.encoded_polyline); routeLine.current = new maps.Polyline({ map: nextMap, path, strokeColor: '#f0a43a', strokeOpacity: .9, strokeWeight: 5 }); path.forEach((point) => bounds.extend(point)) }
     if (visible.length) nextMap.fitBounds(bounds, 48)
-  }, [maps, selected, tasks])
+  }, [maps, origin, selected, tasks])
+
+  useEffect(() => {
+    if (!mapInstance || !origin) return
+
+    const originKey = `${origin.lat}:${origin.lng}`
+    if (centeredOriginKey.current === originKey) return
+    centeredOriginKey.current = originKey
+
+    if (!selected && !searchedPlace) {
+      mapInstance.setCenter(origin)
+      mapInstance.setZoom(15)
+    }
+  }, [mapInstance, origin, searchedPlace, selected])
 
   useEffect(() => {
     if (!maps || !mapInstance) return
