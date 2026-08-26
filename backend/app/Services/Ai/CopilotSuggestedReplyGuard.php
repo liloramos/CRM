@@ -14,7 +14,7 @@ final class CopilotSuggestedReplyGuard
     /** @param array<string,mixed> $safe @param array<string,mixed> $context @return array<string,mixed> */
     public function restrict(array $safe, array $context): array
     {
-        if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy'], true)) {
+        if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'product_catalog', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy'], true)) {
             return [...$safe, 'clarification' => null];
         }
         $clarification = $this->clarifications->forSafe($safe, $context);

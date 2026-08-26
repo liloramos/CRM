@@ -100,6 +100,7 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame('MENU_REQUEST', data_get($event?->payload, 'intent'));
         $this->assertSame('requires_human_review', data_get($event?->payload, 'safe_result_status'));
         $this->assertTrue((bool) data_get($event?->payload, 'guard_results.requires_human_review'));
+        $this->assertFalse((bool) data_get($event?->payload, 'guard_results.policy_requires_human_review'));
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
         $this->assertSame(0, Order::count());
     }

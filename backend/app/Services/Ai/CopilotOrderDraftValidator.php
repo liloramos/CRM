@@ -31,7 +31,7 @@ class CopilotOrderDraftValidator
         $date ??= CarbonImmutable::today();
         $latestIntent = (string) data_get($context, 'latest_intent', $analysis->intent);
         if (array_key_exists('latest_intent', $context)
-            && in_array($latestIntent, ['MENU_REQUEST', 'BUSINESS_HOURS_REQUEST', 'GENERAL_MESSAGE'], true)
+            && in_array($latestIntent, ['MENU_REQUEST', 'PRODUCT_CLARIFICATION', 'BUSINESS_HOURS_REQUEST', 'GENERAL_MESSAGE'], true)
             && empty($analysis->draftOrder['items'] ?? [])) {
             return new CopilotAnalysis(
                 $latestIntent,

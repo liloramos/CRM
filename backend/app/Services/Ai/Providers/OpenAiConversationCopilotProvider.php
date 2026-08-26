@@ -209,7 +209,7 @@ class OpenAiConversationCopilotProvider implements ConversationCopilotProviderIn
             'additionalProperties' => false,
             'required' => ['intent', 'confidence', 'summary', 'draft_order', 'missing_information', 'warnings', 'suggested_reply', 'requires_human_review'],
             'properties' => [
-                'intent' => ['type' => 'string', 'enum' => ['GREETING', 'MENU_REQUEST', 'ORDER_CREATE', 'ORDER_CHANGE', 'ORDER_STATUS', 'PAYMENT_QUESTION', 'DELIVERY_QUESTION', 'GENERAL_QUESTION', 'HUMAN_REQUEST', 'UNKNOWN']],
+                'intent' => ['type' => 'string', 'enum' => ['GREETING', 'MENU_REQUEST', 'PRODUCT_CLARIFICATION', 'ORDER_CREATE', 'ORDER_CHANGE', 'ORDER_STATUS', 'PAYMENT_QUESTION', 'DELIVERY_QUESTION', 'GENERAL_QUESTION', 'HUMAN_REQUEST', 'UNKNOWN']],
                 'confidence' => ['type' => 'number'],
                 'summary' => ['type' => ['string', 'null']],
                 'draft_order' => [
