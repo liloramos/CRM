@@ -573,7 +573,7 @@ class WhatsAppProviderTest extends TestCase
         ]);
     }
 
-    public function test_conversations_api_lists_messages_and_manual_reply_switches_to_manual_mode(): void
+    public function test_conversations_api_persists_and_presents_manual_and_automatic_modes(): void
     {
         $company = $this->prepareWhatsApp(withRoles: true);
         $customer = Customer::query()->create([
@@ -626,6 +626,20 @@ class WhatsAppProviderTest extends TestCase
         $this->assertDatabaseHas('conversations', [
             'id' => $conversation->id,
             'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/mode", [
+                'mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
+                'reason' => 'Atendimento automático reativado.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.automationMode', Conversation::AUTOMATION_MODE_AUTOMATIC)
+            ->assertJsonPath('data.mode', 'ia');
+
+        $this->assertDatabaseHas('conversations', [
+            'id' => $conversation->id,
+            'automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
         ]);
     }
 

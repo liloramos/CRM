@@ -383,6 +383,7 @@ export function ConversationsPage({
   const review = selectedConversation?.paymentReview ?? null
   const defaultPaymentAmount = review?.amountCents ? review.amountCents / 100 : review?.expectedTotal
   const selectedIsManual = selectedConversation ? isManualConversation(selectedConversation) : false
+  const selectedIsAutomatic = selectedConversation ? isAutomaticConversation(selectedConversation) : false
 
   const filterItems: Array<{ key: ConversationFilter; label: string; count: number }> = [
     { key: 'all', label: 'Todas', count: conversations.length },
@@ -929,7 +930,7 @@ export function ConversationsPage({
 
     const confirmed = window.confirm('Devolver esta conversa para o atendimento automático?')
     if (confirmed) {
-      void onChangeMode(selectedConversation.id, 'assisted')
+      void onChangeMode(selectedConversation.id, 'automatic')
     }
   }
 
@@ -1387,7 +1388,7 @@ export function ConversationsPage({
                     <div className="chat-heading__meta">
                       <span>{selectedConversation.customer.phoneLabel || 'Sem telefone cadastrado'}</span>
                       <span>{operationalStatusFor(selectedConversation).label}</span>
-                      {!selectedIsManual ? <span>{automationRolloutLabel(selectedConversation.automationRollout)}</span> : null}
+                      <span>{automationModeLabel(selectedConversation)}</span>
                       {selectedConversation.assignedUser ? <span>Responsável: {selectedConversation.assignedUser.name}</span> : null}
                     </div>
                   </div>
@@ -1396,9 +1397,9 @@ export function ConversationsPage({
                 <div className="conversation-mode-actions">
                   <div className="conversation-mode-segment" aria-label="Modo de atendimento">
                     <button
-                      aria-pressed={!selectedIsManual}
-                      className={!selectedIsManual ? 'is-active' : ''}
-                      disabled={isActionBusy || !selectedIsManual}
+                      aria-pressed={selectedIsAutomatic}
+                      className={selectedIsAutomatic ? 'is-active' : ''}
+                      disabled={isActionBusy || selectedIsAutomatic}
                       onClick={handleReturnToAutomatic}
                       type="button"
                     >
@@ -1467,7 +1468,7 @@ export function ConversationsPage({
                     <IconButton icon="close" label="Cancelar resposta" onClick={() => setReplyingTo(null)} />
                   </div>
                 ) : null}
-                {!selectedIsManual ? (
+                {selectedIsAutomatic ? (
                   <p className="conversation-automation-note">
                     A conversa está no automático. Ao enviar uma resposta manual, o atendimento passa para a equipe.
                   </p>
@@ -2638,21 +2639,35 @@ function formatRecordingDuration(seconds: number): string {
 }
 
 function isManualConversation(conversation: Conversation): boolean {
-  return conversation.automationMode === 'manual' || conversation.mode === 'manual'
+  return conversationAutomationMode(conversation) === 'manual'
 }
 
 function isAutomaticConversation(conversation: Conversation): boolean {
-  return !isManualConversation(conversation)
+  return conversationAutomationMode(conversation) === 'automatic'
 }
 
-function automationRolloutLabel(rollout?: Conversation['automationRollout']): string {
+function conversationAutomationMode(conversation: Conversation): NonNullable<Conversation['automationMode']> {
+  return conversation.automationMode ?? (conversation.mode === 'manual' ? 'manual' : 'assisted')
+}
+
+function automationModeLabel(conversation: Conversation): string {
+  const mode = conversationAutomationMode(conversation)
+
+  if (mode === 'manual') {
+    return 'Manual'
+  }
+
+  if (mode === 'assisted') {
+    return 'IA assistida'
+  }
+
   const labels: Record<NonNullable<Conversation['automationRollout']>, string> = {
     disabled: 'Automático • Acompanhado',
     shadow: 'Automático • Em observação',
     act_safe: 'Automático • Ativo',
   }
 
-  return labels[rollout ?? 'disabled']
+  return labels[conversation.automationRollout ?? 'disabled']
 }
 
 function hasOpenAlerts(conversation: Conversation): boolean {

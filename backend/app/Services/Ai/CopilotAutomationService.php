@@ -307,6 +307,9 @@ final class CopilotAutomationService
                     'warnings_count' => count((array) ($analysis['warnings'] ?? [])),
                 ],
             ],
+            'response_payload' => [
+                'execution_result' => 'not_executed',
+            ],
             'processed_at' => now(),
         ]);
     }
