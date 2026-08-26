@@ -153,6 +153,41 @@ class CopilotDeterministicIntentTest extends TestCase
         }
     }
 
+    public function test_ambiguous_daily_meat_keeps_the_n8_order_for_human_review_with_an_explicit_warning(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-26 15:00:00');
+        try {
+            $company = $this->seededCompany();
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quero uma N8 de 16 com frango e porco.', 'type' => 'text', 'received_at' => now()]);
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'confidence' => 0.9,
+                'draft_order' => ['items' => [['menu_item_slug' => 'n8', 'quantity' => 1, 'selections' => ['meats' => ['frango', 'porco']]]], 'fulfillment' => 'pickup'],
+                'missing_information' => [],
+                'warnings' => [],
+                'suggested_reply' => 'Resumo do pedido.',
+            ]));
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+            $decision = app(CopilotAutomationAuthorityPolicy::class)->decide(
+                $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]),
+                $result,
+                CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW,
+                true,
+                'Quero uma N8 de 16 com frango e porco.',
+            );
+
+            $this->assertSame('ORDER_CREATE', $result['intent']);
+            $this->assertSame([], $result['missing_information']);
+            $this->assertContains('UNRESOLVED_MEAT', array_column($result['warnings'], 'code'));
+            $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $decision['decision']);
+            $this->assertTrue($decision['requires_human_review']);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_n8_meat_follow_up_keeps_the_current_order_turn_grounded_for_review(): void
     {
         CarbonImmutable::setTestNow('2026-08-22 15:00:00');

@@ -308,6 +308,8 @@ final class CopilotAutomationService
                     'policy_requires_human_review' => (bool) ($decision['requires_human_review'] ?? false),
                     'missing_information_count' => count((array) ($analysis['missing_information'] ?? [])),
                     'warnings_count' => count((array) ($analysis['warnings'] ?? [])),
+                    'missing_information_codes' => $this->codes((array) ($analysis['missing_information'] ?? [])),
+                    'warning_codes' => $this->codes((array) ($analysis['warnings'] ?? [])),
                 ],
             ],
             'response_payload' => [
@@ -315,6 +317,15 @@ final class CopilotAutomationService
             ],
             'processed_at' => now(),
         ]);
+    }
+
+    /** @param list<array<string,mixed>> $entries @return list<string> */
+    private function codes(array $entries): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn (array $entry): string => trim((string) ($entry['code'] ?? '')),
+            $entries,
+        ))));
     }
 
     private function markSkipped(AutomationEvent $event, string $reasonCode): AutomationEvent
