@@ -19,6 +19,8 @@ class AutomationEvent extends Model
 
     public const TYPE_N8N_DISPATCH = 'n8n_dispatch';
 
+    public const TYPE_COPILOT_AUTOMATION_DECISION = 'copilot_automation_decision';
+
     public const STATUS_RECORDED = 'recorded';
 
     public const STATUS_SKIPPED = 'skipped';

@@ -64,6 +64,7 @@ class AiAutomationService
             $attributes = [
                 'automation_mode' => $mode,
                 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+                'automation_version' => ((int) $conversation->automation_version) + 1,
                 'human_review_required' => false,
                 'manual_takeover_reason' => null,
                 'manual_takeover_at' => null,
@@ -113,6 +114,7 @@ class AiAutomationService
             $conversation->forceFill([
                 'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
                 'automation_status' => Conversation::AUTOMATION_STATUS_FALLBACK_REQUIRED,
+                'automation_version' => ((int) $conversation->automation_version) + 1,
                 'human_review_required' => true,
                 'manual_takeover_reason' => $reason,
                 'manual_takeover_at' => now(),

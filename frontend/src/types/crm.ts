@@ -297,6 +297,7 @@ export type Conversation = {
   automationMode?: 'assisted' | 'automatic' | 'manual'
   automationStatus?: string
   automationVersion?: number
+  automationRollout?: 'disabled' | 'shadow' | 'act_safe'
   unread: number
   statusLabel: string
   operationalStatus?: ConversationOperationalStatus

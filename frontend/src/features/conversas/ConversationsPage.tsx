@@ -1387,6 +1387,7 @@ export function ConversationsPage({
                     <div className="chat-heading__meta">
                       <span>{selectedConversation.customer.phoneLabel || 'Sem telefone cadastrado'}</span>
                       <span>{operationalStatusFor(selectedConversation).label}</span>
+                      {!selectedIsManual ? <span>{automationRolloutLabel(selectedConversation.automationRollout)}</span> : null}
                       {selectedConversation.assignedUser ? <span>Responsável: {selectedConversation.assignedUser.name}</span> : null}
                     </div>
                   </div>
@@ -2642,6 +2643,16 @@ function isManualConversation(conversation: Conversation): boolean {
 
 function isAutomaticConversation(conversation: Conversation): boolean {
   return !isManualConversation(conversation)
+}
+
+function automationRolloutLabel(rollout?: Conversation['automationRollout']): string {
+  const labels: Record<NonNullable<Conversation['automationRollout']>, string> = {
+    disabled: 'Automático • Acompanhado',
+    shadow: 'Automático • Em observação',
+    act_safe: 'Automático • Ativo',
+  }
+
+  return labels[rollout ?? 'disabled']
 }
 
 function hasOpenAlerts(conversation: Conversation): boolean {
