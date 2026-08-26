@@ -20,6 +20,7 @@ use App\Services\Ai\CopilotAutomationService;
 use App\Services\Ai\CopilotAutomationSettings;
 use App\Services\Ai\Providers\FakeConversationCopilotProvider;
 use App\Services\Conversations\ConversationAiService;
+use App\Services\Conversations\ConversationWorkflowService;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppService;
 use Database\Seeders\WhatsAppSeeder;
@@ -99,6 +100,40 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame('MENU_REQUEST', data_get($event?->payload, 'intent'));
         $this->assertSame('requires_human_review', data_get($event?->payload, 'safe_result_status'));
         $this->assertTrue((bool) data_get($event?->payload, 'guard_results.requires_human_review'));
+        $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame(0, Order::count());
+    }
+
+    public function test_switching_from_manual_to_automatic_enables_the_next_inbound_shadow_analysis(): void
+    {
+        [$company, $conversation] = $this->conversationWithInbound('mensagem anterior');
+        $this->enableActSafe($company, CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW);
+
+        $workflow = app(ConversationWorkflowService::class);
+        $conversation = $workflow->switchMode($conversation, Conversation::AUTOMATION_MODE_MANUAL);
+        $conversation = $workflow->switchMode($conversation, Conversation::AUTOMATION_MODE_AUTOMATIC);
+        $message = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'sender_type' => 'customer',
+            'direction' => 'inbound',
+            'content' => 'qual é o cardápio?',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.shadow-after-toggle.'.uniqid(),
+            'received_at' => now(),
+        ]);
+        $this->app->instance(ConversationCopilotService::class, $this->copilotReturning($this->safeReplyAnalysis()));
+
+        $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame(Conversation::AUTOMATION_MODE_AUTOMATIC, $conversation->fresh()->automation_mode);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW, data_get($event?->payload, 'rollout'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($event?->payload, 'decision'));
+        $this->assertSame('MENU_REQUEST', data_get($event?->payload, 'intent'));
+        $this->assertNotContains('conversation_manual_mode', data_get($event?->payload, 'reason_codes'));
+        $this->assertNotContains('conversation_not_automatic', data_get($event?->payload, 'reason_codes'));
+        $this->assertSame('not_executed', data_get($event?->response_payload, 'execution_result'));
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
         $this->assertSame(0, Order::count());
     }
