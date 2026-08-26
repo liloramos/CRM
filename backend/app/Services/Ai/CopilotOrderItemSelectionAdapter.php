@@ -166,6 +166,9 @@ class CopilotOrderItemSelectionAdapter
                 'removed_components' => $validated['removed_ingredients'] ?? [],
                 'resolved_selections' => $validated['selected_components'] ?? [],
                 'unit_price_cents' => $validated['unit_price_cents'] ?? $product->base_price_cents,
+                // This is server-produced output from OrderItemSelectionValidator. It is
+                // consumed only by the ACT_SAFE order stager, never by provider output.
+                'validated_order_options' => $validated['options'] ?? [],
             ],
             'warnings' => $this->dedupeWarnings($warnings),
         ];

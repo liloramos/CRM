@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\WhatsAppMediaFile;
+use App\Services\Ai\CopilotAutomationSettings;
 use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\CustomerActiveOrderResolver;
 use Illuminate\Support\Collection;
@@ -19,6 +20,7 @@ class ConversationPresenter
         private readonly OperationalCrmPresenter $operational,
         private readonly ConversationOperationalStatusResolver $operationalStatus,
         private readonly CustomerActiveOrderResolver $activeOrders,
+        private readonly CopilotAutomationSettings $copilotAutomation,
     ) {}
 
     /**
@@ -67,6 +69,7 @@ class ConversationPresenter
             'automationMode' => $conversation->automation_mode,
             'automationStatus' => $conversation->automation_status,
             'automationVersion' => (int) ($conversation->automation_version ?? 0),
+            'automationRollout' => $this->copilotAutomation->rolloutFor($conversation->company),
             'unread' => (int) ($conversation->unread_count ?? 0),
             'statusLabel' => $operationalStatus['label'],
             'operationalStatus' => $operationalStatus,

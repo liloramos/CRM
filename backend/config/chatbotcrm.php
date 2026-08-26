@@ -67,6 +67,10 @@ return [
         'copilot' => [
             'provider' => env('AI_COPILOT_PROVIDER', 'fake'),
             'message_window' => env('AI_COPILOT_MESSAGE_WINDOW', 12),
+            // This is intentionally off by default. A company must also opt in through
+            // its existing AI automation settings before ACT_SAFE can execute anything.
+            'act_safe_enabled' => env('AI_COPILOT_ACT_SAFE_ENABLED', false),
+            'default_rollout' => env('AI_COPILOT_DEFAULT_ROLLOUT', 'disabled'),
         ],
         'openai' => [
             'api_key' => env('OPENAI_API_KEY'),
