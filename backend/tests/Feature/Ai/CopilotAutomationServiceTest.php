@@ -105,6 +105,29 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
+    public function test_shadow_event_records_sanitized_warning_and_missing_information_codes(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('pedido de teste');
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company, CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW);
+        $analysis = [
+            'intent' => 'ORDER_CREATE',
+            'suggested_reply' => 'Resumo do pedido.',
+            'draft_order' => ['fulfillment' => 'pickup', 'items' => []],
+            'missing_information' => [['code' => 'CARNE', 'label' => 'Carnes']],
+            'warnings' => [['code' => 'UNRESOLVED_MEAT', 'message' => 'Uma carne sugerida nao pertence de forma inequivoca ao produto.']],
+            'proposal' => ['target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false]],
+        ];
+        $this->app->instance(ConversationCopilotService::class, $this->copilotReturning($analysis));
+
+        $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame(['UNRESOLVED_MEAT'], data_get($event?->payload, 'guard_results.warning_codes'));
+        $this->assertSame(['CARNE'], data_get($event?->payload, 'guard_results.missing_information_codes'));
+        $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame(0, Order::count());
+    }
+
     public function test_switching_from_manual_to_automatic_enables_the_next_inbound_shadow_analysis(): void
     {
         [$company, $conversation] = $this->conversationWithInbound('mensagem anterior');
