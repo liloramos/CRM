@@ -1177,8 +1177,7 @@ function App() {
     }
   }
 
-  async function handleConversationModeChange(conversationId: string, mode: 'assisted' | 'automatic' | 'manual') {
-    setIsActionBusy(true)
+  async function handleConversationModeChange(conversationId: string, mode: 'assisted' | 'automatic' | 'manual'): Promise<Conversation> {
     setConversationError(null)
 
     try {
@@ -1191,10 +1190,10 @@ function App() {
       })
       replaceConversation(conversation)
       void loadConversations(true)
+      return conversation
     } catch (error) {
       setConversationError(error instanceof Error ? error.message : 'Não foi possível alterar o modo da conversa.')
-    } finally {
-      setIsActionBusy(false)
+      throw error
     }
   }
 

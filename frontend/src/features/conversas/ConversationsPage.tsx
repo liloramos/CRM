@@ -65,7 +65,7 @@ type ConversationsPageProps = {
   onAnalyzeCopilot: (conversationId: string) => Promise<CopilotAnalysis>
   onApplyCopilotProposal: (conversation: Conversation, proposal: CopilotOrderProposal, targetChoice: 'NEW_ORDER' | 'ACTIVE_ORDER') => boolean
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
-  onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<void> | void
+  onChangeMode: (conversationId: string, mode: 'assisted' | 'automatic' | 'manual') => Promise<Conversation>
   onClearConversation: () => void
   onCreateOrder: (conversationId: string) => Promise<void>
   onAdvanceOrder: (orderId: string, action: FulfillmentAction) => Promise<void>
@@ -123,6 +123,7 @@ export function ConversationsPage({
   const [attachment, setAttachment] = useState<{ file: File; type: 'image' | 'video' | 'document' | 'audio' | 'sticker' } | null>(null)
   const [isAttachmentMenuOpen, setIsAttachmentMenuOpen] = useState(false)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  const modeChangePendingRef = useRef(false)
   const videoInputRef = useRef<HTMLInputElement>(null)
   const documentInputRef = useRef<HTMLInputElement>(null)
   const audioInputRef = useRef<HTMLInputElement>(null)
@@ -140,6 +141,7 @@ export function ConversationsPage({
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentRejectReason, setPaymentRejectReason] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
+  const [modeChangePending, setModeChangePending] = useState<'automatic' | 'manual' | null>(null)
   const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
   const [copilotAnalysisConversationId, setCopilotAnalysisConversationId] = useState<string | null>(null)
   const [copilotProposalApplied, setCopilotProposalApplied] = useState(false)
@@ -384,6 +386,7 @@ export function ConversationsPage({
   const defaultPaymentAmount = review?.amountCents ? review.amountCents / 100 : review?.expectedTotal
   const selectedIsManual = selectedConversation ? isManualConversation(selectedConversation) : false
   const selectedIsAutomatic = selectedConversation ? isAutomaticConversation(selectedConversation) : false
+  const isModeChanging = modeChangePending !== null
 
   const filterItems: Array<{ key: ConversationFilter; label: string; count: number }> = [
     { key: 'all', label: 'Todas', count: conversations.length },
@@ -923,14 +926,29 @@ export function ConversationsPage({
     setPaymentRejectReason('')
   }
 
-  function handleReturnToAutomatic() {
-    if (!selectedConversation) {
+  async function handleModeChange(mode: 'automatic' | 'manual', requiresConfirmation = false) {
+    if (!selectedConversation || modeChangePendingRef.current) {
       return
     }
 
-    const confirmed = window.confirm('Devolver esta conversa para o atendimento automático?')
-    if (confirmed) {
-      void onChangeMode(selectedConversation.id, 'automatic')
+    if ((mode === 'automatic' && selectedIsAutomatic) || (mode === 'manual' && selectedIsManual)) {
+      return
+    }
+
+    if (requiresConfirmation && !window.confirm('Devolver esta conversa para o atendimento automático?')) {
+      return
+    }
+
+    modeChangePendingRef.current = true
+    setModeChangePending(mode)
+
+    try {
+      await onChangeMode(selectedConversation.id, mode)
+    } catch {
+      // The parent publishes the operational error through the conversation alert region.
+    } finally {
+      modeChangePendingRef.current = false
+      setModeChangePending(null)
     }
   }
 
@@ -1399,20 +1417,22 @@ export function ConversationsPage({
                     <button
                       aria-pressed={selectedIsAutomatic}
                       className={selectedIsAutomatic ? 'is-active' : ''}
-                      disabled={isActionBusy || selectedIsAutomatic}
-                      onClick={handleReturnToAutomatic}
+                      aria-busy={modeChangePending === 'automatic'}
+                      disabled={isModeChanging || selectedIsAutomatic}
+                      onClick={() => void handleModeChange('automatic', true)}
                       type="button"
                     >
-                      Automático
+                      {modeChangePending === 'automatic' ? 'Ativando...' : 'Automático'}
                     </button>
                     <button
                       aria-pressed={selectedIsManual}
                       className={selectedIsManual ? 'is-active' : ''}
-                      disabled={isActionBusy || selectedIsManual}
-                      onClick={() => void onChangeMode(selectedConversation.id, 'manual')}
+                      aria-busy={modeChangePending === 'manual'}
+                      disabled={isModeChanging || selectedIsManual}
+                      onClick={() => void handleModeChange('manual')}
                       type="button"
                     >
-                      Manual
+                      {modeChangePending === 'manual' ? 'Assumindo...' : 'Manual'}
                     </button>
                   </div>
                   <Button className="conversation-context-toggle" onClick={handleOpenContext} size="sm" variant="secondary">
