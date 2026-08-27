@@ -68,7 +68,11 @@ final class CopilotAutomationAuthorityPolicy
         }
 
         if ($this->requiresHumanReview($intent, $analysis, $proposal)) {
-            return $this->decision($rollout, self::DECISION_HUMAN_REVIEW, ['ambiguous_or_unsupported_request']);
+            return $this->decision(
+                $rollout,
+                self::DECISION_HUMAN_REVIEW,
+                [$intent === 'ORDER_CONTINUE' ? 'order_continue_requires_human_review' : 'ambiguous_or_unsupported_request'],
+            );
         }
 
         $candidate = $this->candidate($intent, $analysis, $proposal);

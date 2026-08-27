@@ -125,6 +125,8 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame($options[0]['id'], data_get($resolvedEvent?->payload, 'clarification_matched_option_id'));
         $this->assertNotContains('AMBIGUOUS_MEAT', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
         $this->assertNotContains('DOMAIN_SELECTION_REJECTED', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, data_get($resolvedEvent?->payload, 'decision'));
+        $this->assertSame(['order_continue_requires_human_review'], data_get($resolvedEvent?->payload, 'reason_codes'));
         $this->assertSame('not_executed', data_get($resolvedEvent?->response_payload, 'execution_result'));
         $this->assertSame(1, $provider->calls);
         $this->assertSame(0, Order::count());
@@ -185,6 +187,26 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertNotContains('DOMAIN_SELECTION_REJECTED', array_column($analysis['warnings'], 'code'));
         $this->assertSame('resolved', data_get($analysis, 'metadata.clarification_continuity.resolution'));
         $this->assertSame($options[1]['id'], data_get($analysis, 'metadata.clarification_continuity.matched_option_id'));
+    }
+
+    public function test_a_resolved_ordinal_does_not_recover_a_second_meat_from_the_ambiguous_source_turn(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-27 15:00:00');
+        [$company, $conversation, $options] = $this->scenario();
+
+        $this->assertSame(['Frango ao molho', 'Filé de frango'], array_column($options, 'name'));
+        $source = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
+        $this->pendingClarification($conversation, $source, $options);
+        $this->inbound($conversation, 'a segunda');
+        $this->providerReturnsNoItems();
+
+        $analysis = app(ConversationCopilotService::class)->analyze($conversation->fresh());
+
+        $this->assertSame('ORDER_CONTINUE', $analysis['intent']);
+        $this->assertSame([$options[1]['name']], data_get($analysis, 'draft_order.items.0.selections.meats'));
+        $this->assertNotContains('AMBIGUOUS_MEAT', array_column($analysis['warnings'], 'code'));
+        $this->assertNotContains('DOMAIN_SELECTION_REJECTED', array_column($analysis['warnings'], 'code'));
+        $this->assertSame('resolved', data_get($analysis, 'metadata.clarification_continuity.resolution'));
     }
 
     public function test_an_invalid_reply_keeps_the_clarification_open_without_creating_a_selection(): void
