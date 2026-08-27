@@ -47,8 +47,8 @@ class CopilotOrderDraftValidator
             );
         }
         $selectionMessages = $this->selectionMessages($context, $latestIntent);
-        $discardHistoricalRemovals = $latestIntent === 'ORDER_CREATE' && data_get($context, 'active_order') === null;
-        $historicalMessages = $discardHistoricalRemovals
+        $applyNewOrderHistoryBoundary = $latestIntent === 'ORDER_CREATE' && data_get($context, 'active_order') === null;
+        $historicalMessages = $applyNewOrderHistoryBoundary
             ? $this->historicalInboundMessages(data_get($context, 'messages', []))
             : [];
         $warnings = $analysis->warnings;
@@ -56,9 +56,9 @@ class CopilotOrderDraftValidator
         $ungroundedProductDiscarded = false;
         $proposedItems = $analysis->draftOrder['items'] ?? [];
         $discardedN8Indexes = [];
-        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $discardHistoricalRemovals, $historicalMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
+        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $applyNewOrderHistoryBoundary, $historicalMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
             $providerItem = $item;
-            if ($discardHistoricalRemovals) {
+            if ($applyNewOrderHistoryBoundary) {
                 $item = $this->withoutHistoricalOnlyRemovals($item, $selectionMessages, $historicalMessages);
             }
             $quantity = filter_var($item['quantity'] ?? null, FILTER_VALIDATE_INT);
@@ -73,6 +73,9 @@ class CopilotOrderDraftValidator
                 $warnings[] = ['code' => 'UNRESOLVED_MENU_ITEM', 'message' => 'Nao foi possivel associar o item a um produto disponivel.', 'item_index' => $index];
 
                 return [...$item, 'valid' => false];
+            }
+            if ($applyNewOrderHistoryBoundary) {
+                $item = $this->withoutHistoricalOnlyFreeAssemblySaladOptOut($product, $item, $selectionMessages, $historicalMessages);
             }
             if (! $this->products->isGrounded($product, $selectionMessages)) {
                 $warnings[] = ['code' => 'UNGROUNDED_PRODUCT', 'message' => 'O produto sugerido nao possui evidencia suficiente na mensagem do cliente.', 'item_index' => $index];
@@ -400,6 +403,36 @@ class CopilotOrderDraftValidator
         }));
 
         return $item;
+    }
+
+    /**
+     * A free-assembly "Sem salada" is a customer selection, not a component removal.
+     * New orders may not inherit it from an earlier turn, while an ORDER_CONTINUE
+     * deliberately keeps its pending-order selections outside this boundary.
+     *
+     * @param  array<string,mixed>  $item
+     * @param  list<array<string,mixed>>  $currentMessages
+     * @param  list<array<string,mixed>>  $historicalMessages
+     * @return array<string,mixed>
+     */
+    private function withoutHistoricalOnlyFreeAssemblySaladOptOut(Product $product, array $item, array $currentMessages, array $historicalMessages): array
+    {
+        if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)
+            || $historicalMessages === []) {
+            return $item;
+        }
+
+        $selections = $item['selections'] ?? null;
+        if (! is_array($selections)
+            || ($selections['salada'] ?? null) !== 'none'
+            || $this->removals->isGrounded('salada', $currentMessages)
+            || ! $this->removals->isGrounded('salada', $historicalMessages)) {
+            return $item;
+        }
+
+        unset($selections['salada']);
+
+        return [...$item, 'selections' => $selections];
     }
 
     /** @param mixed $messages @return list<array<string,mixed>> */

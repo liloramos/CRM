@@ -86,6 +86,35 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->assertNotContains('UNGROUNDED_REMOVAL', array_column($safe['warnings'], 'code'));
     }
 
+    public function test_new_order_does_not_inherit_a_free_assembly_salad_selection_grounded_only_in_history(): void
+    {
+        $company = $this->seedRestaurant();
+        $date = CarbonImmutable::parse('2026-08-22');
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco', 'salada' => 'none'],
+                'removed_components' => [],
+                'notes' => '',
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze($company, app(ConversationCopilotContextBuilder::class)->forMessages($company, [
+            ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero uma N8 de 16 com porco sem salada.'],
+            ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero uma N8 de 16 com porco.'],
+        ], null, $date), $date)['safe'];
+
+        $this->assertNotSame('none', data_get($safe, 'draft_order.items.0.selections.salada'));
+        $this->assertNotContains('Sem salada', array_column(data_get($safe, 'draft_order.items.0.validated_order_options', []), 'name'));
+        $this->assertSame([], $safe['warnings']);
+        $this->assertSame([], $safe['missing_information']);
+        $this->assertNotContains('UNGROUNDED_SELECTION', array_column($safe['warnings'], 'code'));
+    }
+
     public function test_n8_livre_keeps_an_explicit_without_salad_as_a_free_assembly_choice(): void
     {
         $company = $this->seedRestaurant();
