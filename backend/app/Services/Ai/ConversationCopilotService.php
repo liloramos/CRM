@@ -55,14 +55,16 @@ class ConversationCopilotService
         $intent = $this->latestIntent->resolve($context);
         $context['latest_intent'] = $intent;
         try {
-            $safe = match ($intent) {
-                'MENU_REQUEST' => $this->deterministicAnalysis($this->menuReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']))),
-                'PRODUCT_CLARIFICATION' => $this->deterministicAnalysis($this->productReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']), (string) data_get($context, 'latest_message.body', ''))),
-                'BUSINESS_HOURS_REQUEST' => $this->deterministicAnalysis($this->businessHours->build($conversation->company)),
-                'PAYMENT_QUESTION' => $this->deterministicAnalysis($this->customerReplies->paymentKey()),
-                'DELIVERY_QUESTION' => $this->deterministicAnalysis($this->customerReplies->deliveryFee()),
-                default => $this->pipeline->analyze($conversation->company, $context)['safe'],
-            };
+            $safe = $this->hasResolvedPendingMeatClarification($context)
+                ? $this->pipeline->resolvePendingMeatClarification($conversation->company, $context)
+                : match ($intent) {
+                    'MENU_REQUEST' => $this->deterministicAnalysis($this->menuReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']))),
+                    'PRODUCT_CLARIFICATION' => $this->deterministicAnalysis($this->productReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']), (string) data_get($context, 'latest_message.body', ''))),
+                    'BUSINESS_HOURS_REQUEST' => $this->deterministicAnalysis($this->businessHours->build($conversation->company)),
+                    'PAYMENT_QUESTION' => $this->deterministicAnalysis($this->customerReplies->paymentKey()),
+                    'DELIVERY_QUESTION' => $this->deterministicAnalysis($this->customerReplies->deliveryFee()),
+                    default => $this->pipeline->analyze($conversation->company, $context)['safe'],
+                };
             // The resolver supplies the latest conversational intent, but a safety finalizer
             // may deliberately downgrade an untrusted request to UNKNOWN.
             if ((string) ($safe['intent'] ?? '') !== 'UNKNOWN') {
@@ -92,6 +94,15 @@ class ConversationCopilotService
             'deterministic',
             is_array($analysis['metadata'] ?? null) ? $analysis['metadata'] : [],
         )->toArray();
+    }
+
+    /** @param array<string,mixed> $context */
+    private function hasResolvedPendingMeatClarification(array $context): bool
+    {
+        return data_get($context, 'pending_clarification.status') === 'eligible'
+            && data_get($context, 'pending_clarification.type') === 'ambiguous_meat'
+            && data_get($context, 'pending_clarification.resolution.status') === 'resolved'
+            && (int) data_get($context, 'pending_clarification.resolution.component_id') > 0;
     }
 
     /** @param array<string, mixed> $context @return array<string, mixed> */

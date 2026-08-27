@@ -323,10 +323,10 @@ final class ConversationCopilotContextBuilder
             ->get()
             ->first(function (AutomationEvent $candidate) use ($event): bool {
                 return (int) data_get($candidate->payload, 'clarification_source_event_id') === (int) $event->id
-                    && in_array(data_get($candidate->payload, 'clarification_resolution'), ['resolved', 'stale', 'superseded'], true);
+                    && in_array(data_get($candidate->payload, 'clarification_resolution'), ['resolved', 'invalid', 'rejected', 'stale', 'superseded'], true);
             });
         if ($terminalResolution instanceof AutomationEvent) {
-            return $this->invalidatedClarification($event, (string) data_get($terminalResolution->payload, 'clarification_resolution'));
+            return null;
         }
 
         $snapshot = (array) data_get($event->payload, 'clarification_context', []);
@@ -385,18 +385,6 @@ final class ConversationCopilotContextBuilder
             'source_message_id' => (int) $event->message_id,
             'type' => 'ambiguous_meat',
             'resolution' => ['status' => 'stale', 'reason' => $reason],
-        ];
-    }
-
-    /** @return array<string, mixed> */
-    private function invalidatedClarification(AutomationEvent $event, string $resolution): array
-    {
-        return [
-            'status' => $resolution === 'superseded' ? 'superseded' : 'stale',
-            'source_event_id' => (int) $event->id,
-            'source_message_id' => (int) $event->message_id,
-            'type' => 'ambiguous_meat',
-            'resolution' => ['status' => $resolution],
         ];
     }
 
