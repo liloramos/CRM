@@ -72,6 +72,19 @@ class PaymentWorkflowService
             $payment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
             $order = Order::query()->whereKey($payment->order_id)->lockForUpdate()->firstOrFail();
             $this->assertOrderAcceptsFinancialAction($order, 'anexar comprovante');
+            $metadata = (array) ($attributes['metadata'] ?? []);
+            $mediaId = (int) ($metadata['whatsapp_media_file_id'] ?? 0);
+
+            if ($mediaId > 0) {
+                $existing = PaymentProof::query()
+                    ->where('payment_id', $payment->id)
+                    ->whereJsonContains('metadata->whatsapp_media_file_id', $mediaId)
+                    ->first();
+
+                if ($existing instanceof PaymentProof) {
+                    return $existing;
+                }
+            }
 
             $proof = PaymentProof::query()->create([
                 'payment_id' => $payment->id,
@@ -86,7 +99,7 @@ class PaymentWorkflowService
                 'status' => $attributes['status'] ?? PaymentProof::STATUS_RECEIVED,
                 'received_at' => $attributes['received_at'] ?? now(),
                 'review_notes' => $attributes['review_notes'] ?? null,
-                'metadata' => $attributes['metadata'] ?? null,
+                'metadata' => $metadata !== [] ? $metadata : null,
             ]);
 
             if (! in_array($payment->status, [Payment::STATUS_CONFIRMED, Payment::STATUS_REJECTED], true)) {
@@ -302,6 +315,50 @@ class PaymentWorkflowService
             );
 
             return $payment->refresh();
+        });
+    }
+
+    public function rejectProof(PaymentProof $proof, User $user, string $reason): PaymentProof
+    {
+        return DB::transaction(function () use ($proof, $user, $reason): PaymentProof {
+            $proof = PaymentProof::query()->whereKey($proof->id)->lockForUpdate()->firstOrFail();
+            $payment = Payment::query()->whereKey($proof->payment_id)->lockForUpdate()->firstOrFail();
+            $order = Order::query()->whereKey($proof->order_id)->lockForUpdate()->firstOrFail();
+
+            if ($proof->status === PaymentProof::STATUS_ACCEPTED || $payment->status === Payment::STATUS_CONFIRMED) {
+                throw new DomainException('Confirmed payment evidence must be handled by voiding the payment.');
+            }
+
+            if ($proof->status === PaymentProof::STATUS_REJECTED) {
+                return $proof;
+            }
+
+            $proof->forceFill([
+                'status' => PaymentProof::STATUS_REJECTED,
+                'review_notes' => $reason,
+            ])->save();
+
+            $hasPendingEvidence = PaymentProof::query()
+                ->where('payment_id', $payment->id)
+                ->where('status', PaymentProof::STATUS_RECEIVED)
+                ->exists();
+
+            if (! $hasPendingEvidence && $payment->status === Payment::STATUS_PROOF_RECEIVED) {
+                $payment->forceFill(['status' => Payment::STATUS_AWAITING_PROOF])->save();
+                $this->recalculateOrderPaymentSummary($order);
+
+                if ($order->status !== Order::STATUS_CANCELLED) {
+                    $this->transitionIfOpen(
+                        $order,
+                        Order::STATUS_AWAITING_PAYMENT_PROOF,
+                        $user,
+                        'payment_proof_rejected',
+                        ['payment_id' => $payment->id, 'proof_id' => $proof->id],
+                    );
+                }
+            }
+
+            return $proof->refresh();
         });
     }
 

@@ -23,7 +23,7 @@ final class CopilotLatestMessageIntentResolver
             return 'BUSINESS_HOURS_REQUEST';
         }
 
-        if (preg_match('/\b(chave\s+pix|pix\s+(?:para|de|do)|como\s+pagar\s+por\s+pix)\b/', $text) === 1) {
+        if (preg_match('/\b(chave\s+pix|pix\s+(?:para|de|do)|como\s+pagar\s+por\s+pix|qual(?:\s+e)?\s+(?:o|a)?\s*(?:chave\s+)?pix|me\s+passa\s+(?:a\s+)?(?:chave\s+)?pix)\b/', $text) === 1) {
             return 'PAYMENT_QUESTION';
         }
 

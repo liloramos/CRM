@@ -140,6 +140,7 @@ export function ConversationsPage({
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentRejectReason, setPaymentRejectReason] = useState('')
+  const [selectedPaymentProofId, setSelectedPaymentProofId] = useState<string | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
   const [modeChangePending, setModeChangePending] = useState<'automatic' | 'manual' | null>(null)
   const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
@@ -383,6 +384,9 @@ export function ConversationsPage({
     alertSeverityFilter === 'all' || alert.severity === alertSeverityFilter
   ))
   const review = selectedConversation?.paymentReview ?? null
+  const reviewEvidence = review?.evidences.find((evidence) => evidence.proofId === selectedPaymentProofId)
+    ?? review?.evidences[0]
+    ?? null
   const defaultPaymentAmount = review?.amountCents ? review.amountCents / 100 : review?.expectedTotal
   const selectedIsManual = selectedConversation ? isManualConversation(selectedConversation) : false
   const selectedIsAutomatic = selectedConversation ? isAutomaticConversation(selectedConversation) : false
@@ -894,7 +898,7 @@ export function ConversationsPage({
   }
 
   async function handleApprovePayment() {
-    if (!selectedConversation || !review?.proofId) {
+    if (!selectedConversation || !reviewEvidence) {
       return
     }
 
@@ -905,13 +909,13 @@ export function ConversationsPage({
     }
 
     setLocalError(null)
-    await onApprovePayment(selectedConversation.id, review.proofId, amount, paymentNotes.trim() || undefined)
+    await onApprovePayment(selectedConversation.id, reviewEvidence.proofId, amount, paymentNotes.trim() || undefined)
     setPaymentAmount('')
     setPaymentNotes('')
   }
 
   async function handleRejectPayment() {
-    if (!selectedConversation || !review?.proofId) {
+    if (!selectedConversation || !reviewEvidence) {
       return
     }
 
@@ -922,7 +926,7 @@ export function ConversationsPage({
     }
 
     setLocalError(null)
-    await onRejectPayment(selectedConversation.id, review.proofId, reason)
+    await onRejectPayment(selectedConversation.id, reviewEvidence.proofId, reason)
     setPaymentRejectReason('')
   }
 
@@ -1863,7 +1867,7 @@ export function ConversationsPage({
               {review?.proofId ? (
                 <div className="conversation-context-block payment-review-card">
                   <h3>Pagamento</h3>
-                  <p>Comprovante recebido. A IA não confirma pagamento; Larissa ou Beatriz precisam aprovar.</p>
+                  <p>Comprovante recebido. A IA não confirma pagamento; uma atendente precisa aprovar.</p>
                   <dl>
                     <div>
                       <dt>Pedido</dt>
@@ -1874,16 +1878,34 @@ export function ConversationsPage({
                       <dd>{formatCurrency(review.expectedTotal)}</dd>
                     </div>
                     <div>
-                      <dt>Arquivo</dt>
-                      <dd>
-                        {review.mediaUrl ? (
-                          <a href={review.mediaUrl} rel="noreferrer" target="_blank">
-                            {review.fileName ?? 'Comprovante'}
-                          </a>
-                        ) : review.fileName ?? 'Arquivo protegido'}
-                      </dd>
+                      <dt>Evidências</dt>
+                      <dd>{`${review.evidences.length} recebida${review.evidences.length > 1 ? 's' : ''}`}</dd>
                     </div>
                   </dl>
+                  <div className="payment-review-card__evidences" role="list" aria-label="Evidências de pagamento recebidas">
+                    {review.evidences.map((evidence, index) => (
+                      <button
+                        aria-pressed={reviewEvidence?.proofId === evidence.proofId}
+                        className={reviewEvidence?.proofId === evidence.proofId ? 'is-active' : ''}
+                        key={evidence.proofId}
+                        onClick={() => setSelectedPaymentProofId(evidence.proofId)}
+                        role="listitem"
+                        type="button"
+                      >
+                        <span>{`Evidência ${index + 1}`}</span>
+                        <small>{evidence.fileName ?? evidence.mimeType ?? 'Arquivo protegido'}</small>
+                      </button>
+                    ))}
+                  </div>
+                  {reviewEvidence ? (
+                    <p className="payment-review-card__file">
+                      {reviewEvidence.mediaUrl ? (
+                        <a href={reviewEvidence.mediaUrl} rel="noreferrer" target="_blank">
+                          Abrir evidência selecionada
+                        </a>
+                      ) : 'Arquivo protegido'}
+                    </p>
+                  ) : null}
                   <label>
                     Valor confirmado
                     <input

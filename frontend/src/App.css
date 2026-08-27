@@ -2590,6 +2590,42 @@ label textarea {
   gap: 6px;
 }
 
+.payment-review-card__evidences {
+  display: grid;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.payment-review-card__evidences button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--color-text-primary);
+  text-align: left;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.payment-review-card__evidences button:hover,
+.payment-review-card__evidences button:focus-visible,
+.payment-review-card__evidences button.is-active {
+  border-color: var(--color-brand);
+  background: rgba(236, 169, 48, 0.12);
+}
+
+.payment-review-card__evidences small,
+.payment-review-card__file {
+  overflow-wrap: anywhere;
+}
+
+.payment-review-card__file {
+  margin: 0;
+}
+
 .current-order {
   display: grid;
   gap: 14px;

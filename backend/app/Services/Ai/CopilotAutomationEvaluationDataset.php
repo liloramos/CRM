@@ -4,7 +4,7 @@ namespace App\Services\Ai;
 
 final class CopilotAutomationEvaluationDataset
 {
-    public const VERSION = 3;
+    public const VERSION = 4;
 
     public static function fingerprint(): string
     {
@@ -35,7 +35,10 @@ final class CopilotAutomationEvaluationDataset
             self::humanReview('produto_ambiguo', 'UNKNOWN', ['MENU_ITEM']),
             self::humanReview('PRICE_MISMATCH', 'ORDER_CREATE', [], 'NEW_ORDER', ['PRICE_MISMATCH']),
             self::denied('pix', 'PAYMENT_QUESTION'),
+            self::denied('already_paid', 'PAYMENT_CONFIRMATION'),
             self::denied('comprovante', 'PAYMENT_PROOF'),
+            self::denied('proof_image_context', 'PAYMENT_PROOF'),
+            self::denied('proof_without_context', 'PAYMENT_PROOF'),
             self::denied('PAYMENT_CONFIRM', 'PAYMENT_CONFIRMATION'),
             self::denied('PAYMENT_VOID', 'PAYMENT_VOID'),
             self::denied('refund', 'REFUND'),

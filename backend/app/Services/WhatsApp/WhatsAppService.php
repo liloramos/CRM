@@ -760,7 +760,18 @@ class WhatsAppService
             );
         }
 
-        $paymentProofCandidate = $this->paymentProofClassifier->classify($conversation, $message, $media);
+        try {
+            $paymentProofCandidate = $this->paymentProofClassifier->classify($conversation, $message, $media);
+        } catch (Throwable $exception) {
+            Log::warning('WhatsApp payment evidence classifier failed closed.', [
+                'conversation_id' => $conversation->id,
+                'message_id' => $message->id,
+                'error_class' => $exception::class,
+            ]);
+
+            $paymentProofCandidate = null;
+        }
+
         if ($paymentProofCandidate !== null) {
             $this->handlePossiblePaymentProof($company, $conversation, $message, $media, $paymentProofCandidate);
         }
@@ -1183,7 +1194,16 @@ class WhatsAppService
             payment: $payment,
             paymentProof: $proof,
             deduplicationKey: 'payment-proof:'.$proof->id,
-            metadata: ['classification' => 'deterministic_payment_proof_candidate', 'confidence' => $candidate['confidence'], 'signals' => $candidate['signals']],
+            metadata: [
+                'classification' => 'deterministic_payment_proof_candidate',
+                'confidence' => $candidate['confidence'],
+                'signals' => $candidate['signals'],
+                'payment_context_detected' => true,
+                'possible_payment_evidence' => true,
+                'evidence_message_id' => $message->id,
+                'evidence_media_type' => $media?->media_type,
+                'payment_review_required' => true,
+            ],
         );
 
         if ($conversation->automation_mode !== Conversation::AUTOMATION_MODE_MANUAL) {

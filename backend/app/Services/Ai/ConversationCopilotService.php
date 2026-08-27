@@ -61,7 +61,7 @@ class ConversationCopilotService
                     'MENU_REQUEST' => $this->deterministicAnalysis($this->menuReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']))),
                     'PRODUCT_CLARIFICATION' => $this->deterministicAnalysis($this->productReplies->build($conversation->company, CarbonImmutable::parse((string) $context['evaluation_date']), (string) data_get($context, 'latest_message.body', ''))),
                     'BUSINESS_HOURS_REQUEST' => $this->deterministicAnalysis($this->businessHours->build($conversation->company)),
-                    'PAYMENT_QUESTION' => $this->deterministicAnalysis($this->customerReplies->paymentKey()),
+                    'PAYMENT_QUESTION' => $this->deterministicAnalysis($this->customerReplies->paymentKey($conversation->company)),
                     'DELIVERY_QUESTION' => $this->deterministicAnalysis($this->customerReplies->deliveryFee()),
                     default => $this->pipeline->analyze($conversation->company, $context)['safe'],
                 };

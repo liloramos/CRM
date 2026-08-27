@@ -6,10 +6,13 @@ use App\Models\Conversation;
 use App\Models\Message;
 use App\Models\Order;
 use App\Models\WhatsAppMediaFile;
+use App\Services\Orders\CustomerActiveOrderResolver;
 use Illuminate\Support\Str;
 
 class PaymentProofCandidateClassifier
 {
+    public function __construct(private readonly CustomerActiveOrderResolver $activeOrders) {}
+
     /** @return array{order: Order, confidence: string, signals: list<string>}|null */
     public function classify(Conversation $conversation, Message $message, ?WhatsAppMediaFile $media): ?array
     {
@@ -17,12 +20,15 @@ class PaymentProofCandidateClassifier
             return null;
         }
 
-        $order = $conversation->activeOrder ?: $conversation->orders()
-            ->whereIn('status', [Order::STATUS_AWAITING_PAYMENT, Order::STATUS_AWAITING_PAYMENT_PROOF])
-            ->latest('id')
-            ->first();
+        $order = $this->activeOrders->forConversation($conversation);
 
-        if (! $order instanceof Order || (int) $order->total_cents <= 0) {
+        if (! $order instanceof Order
+            || (int) $order->total_cents <= 0
+            || ! in_array($order->status, [
+                Order::STATUS_AWAITING_PAYMENT,
+                Order::STATUS_AWAITING_PAYMENT_PROOF,
+                Order::STATUS_PAYMENT_PROOF_RECEIVED,
+            ], true)) {
             return null;
         }
 

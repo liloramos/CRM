@@ -279,10 +279,15 @@ class ConversationPresenter
 
         /** @var Collection<int, PaymentProof> $proofs */
         $proofs = $payment->relationLoaded('proofs') ? $payment->proofs : $payment->proofs()->get();
-        $proof = $proofs
+        $reviewProofs = $proofs
+            ->filter(fn (PaymentProof $proof): bool => $proof->status === PaymentProof::STATUS_RECEIVED)
             ->sortByDesc('id')
-            ->first();
-        $mediaId = $proof?->metadata['whatsapp_media_file_id'] ?? null;
+            ->values();
+        $proof = $reviewProofs->first();
+
+        if (! $proof instanceof PaymentProof) {
+            return null;
+        }
 
         return [
             'paymentId' => (string) $payment->id,
@@ -297,8 +302,30 @@ class ConversationPresenter
             'receivedAt' => $proof?->received_at?->toIso8601String(),
             'fileName' => $proof?->original_filename,
             'mimeType' => $proof?->mime_type,
-            'mediaUrl' => $mediaId ? route('api.app.conversations.media.show', ['media' => $mediaId], false) : null,
+            'mediaUrl' => $this->paymentProofMediaUrl($proof),
+            'evidences' => $reviewProofs
+                ->map(fn (PaymentProof $candidate): array => $this->paymentProofEvidence($candidate))
+                ->all(),
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function paymentProofEvidence(PaymentProof $proof): array
+    {
+        return [
+            'proofId' => (string) $proof->id,
+            'receivedAt' => $proof->received_at?->toIso8601String(),
+            'fileName' => $proof->original_filename,
+            'mimeType' => $proof->mime_type,
+            'mediaUrl' => $this->paymentProofMediaUrl($proof),
+        ];
+    }
+
+    private function paymentProofMediaUrl(PaymentProof $proof): ?string
+    {
+        $mediaId = data_get($proof->metadata, 'whatsapp_media_file_id');
+
+        return $mediaId ? route('api.app.conversations.media.show', ['media' => $mediaId], false) : null;
     }
 
     private function orderCustomerName(Order $order): string

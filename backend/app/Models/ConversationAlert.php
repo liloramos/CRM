@@ -31,6 +31,8 @@ class ConversationAlert extends Model
 
     public const TYPE_PAYMENT_REJECTED = 'payment_rejected';
 
+    public const TYPE_PAYMENT_EVIDENCE_REJECTED = 'payment_evidence_rejected';
+
     public const TYPE_MESSAGE_SEND_FAILED = 'message_send_failed';
 
     protected $fillable = [

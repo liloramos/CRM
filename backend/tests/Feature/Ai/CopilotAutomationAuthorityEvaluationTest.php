@@ -81,7 +81,7 @@ class CopilotAutomationAuthorityEvaluationTest extends TestCase
         $this->assertSame(100.0, round(($groundedReplies / $groundedReplyCandidates) * 100, 2));
         $this->assertSame(100.0, round(($humanReviewCaptured / $humanReviewExpected) * 100, 2));
         $this->assertSame(64, strlen(CopilotAutomationEvaluationDataset::fingerprint()));
-        $this->assertSame(3, CopilotAutomationEvaluationDataset::VERSION);
+        $this->assertSame(4, CopilotAutomationEvaluationDataset::VERSION);
     }
 
     public function test_manual_and_disabled_rollouts_do_not_promote_a_candidate(): void

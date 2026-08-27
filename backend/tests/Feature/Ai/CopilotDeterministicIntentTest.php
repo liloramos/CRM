@@ -660,6 +660,7 @@ class CopilotDeterministicIntentTest extends TestCase
         $pix = app(ConversationCopilotService::class)->analyze($conversation);
         $this->assertSame('PAYMENT_QUESTION', $pix['intent']);
         $this->assertSame('Vou confirmar a chave Pix para você.', $pix['suggested_reply']);
+        $this->assertFalse((bool) data_get($pix, 'metadata.pix_configured'));
         $this->assertStringNotContainsString('confirmado', $pix['suggested_reply']);
 
         Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'qual o valor da taxa de entrega?', 'type' => 'text', 'received_at' => now()]);
@@ -667,6 +668,40 @@ class CopilotDeterministicIntentTest extends TestCase
         $this->assertSame('DELIVERY_QUESTION', $fee['intent']);
         $this->assertSame('Ainda preciso confirmar a taxa de entrega para esse endereço.', $fee['suggested_reply']);
         $this->assertStringNotContainsString('R$', $fee['suggested_reply']);
+    }
+
+    public function test_pix_information_uses_only_the_company_configured_customer_facing_key(): void
+    {
+        $company = $this->seededCompany();
+        $company->setting()->updateOrCreate([], [
+            'timezone' => 'America/Sao_Paulo',
+            'settings' => [
+                'payments' => [
+                    'pix' => [
+                        'key' => 'pix-chave-teste',
+                        'holder_name' => 'Restaurante Sol',
+                    ],
+                ],
+            ],
+        ]);
+        $conversation = $this->conversation($company->fresh('setting'));
+        $this->app->instance(ConversationCopilotProviderInterface::class, $this->emptyOrderProvider());
+
+        Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => 'inbound',
+            'content' => 'qual o Pix?',
+            'type' => 'text',
+            'received_at' => now(),
+        ]);
+
+        $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+        $this->assertSame('PAYMENT_QUESTION', $result['intent']);
+        $this->assertSame('A chave Pix é pix-chave-teste. Favorecido: Restaurante Sol.', $result['suggested_reply']);
+        $this->assertTrue((bool) data_get($result, 'metadata.pix_configured'));
+        $this->assertStringNotContainsString('confirmado', $result['suggested_reply']);
     }
 
     private function emptyOrderProvider(): ConversationCopilotProviderInterface
