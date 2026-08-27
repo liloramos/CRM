@@ -21,6 +21,7 @@ use Carbon\CarbonImmutable;
 use Database\Seeders\SolRestaurantStructuredMenuSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class CopilotSafeClarificationContinuationTest extends TestCase
@@ -59,8 +60,10 @@ class CopilotSafeClarificationContinuationTest extends TestCase
             ],
         );
         $message = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
-        $this->app->instance(ConversationCopilotProviderInterface::class, new class($options[0]['name']) implements ConversationCopilotProviderInterface
+        $provider = new class($options[0]['name']) implements ConversationCopilotProviderInterface
         {
+            public int $calls = 0;
+
             public function __construct(private readonly string $meat) {}
 
             public function name(): string
@@ -70,12 +73,16 @@ class CopilotSafeClarificationContinuationTest extends TestCase
 
             public function analyze(array $context): array
             {
+                $this->calls++;
+                $latestMessage = (string) data_get($context, 'latest_message.body', '');
+                $meat = str_contains(mb_strtolower($latestMessage), 'porco') ? 'porco' : $this->meat;
+
                 return [
                     'intent' => 'ORDER_CREATE',
                     'draft_order' => ['items' => [[
                         'product' => 'n8',
                         'quantity' => 1,
-                        'selections' => ['meats' => [$this->meat]],
+                        'selections' => ['meats' => [$meat]],
                         'removed_components' => [],
                         'notes' => '',
                     ]]],
@@ -84,7 +91,8 @@ class CopilotSafeClarificationContinuationTest extends TestCase
                     'suggested_reply' => 'Resumo do pedido.',
                 ];
             }
-        });
+        };
+        $this->app->instance(ConversationCopilotProviderInterface::class, $provider);
 
         $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
 
@@ -105,6 +113,10 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
 
         $followUp = $this->inbound($conversation, 'a primeira');
+        $followUpContext = app(ConversationCopilotContextBuilder::class)->forConversation($conversation->fresh());
+        $this->assertSame('eligible', data_get($followUpContext, 'pending_clarification.status'));
+        $this->assertSame('resolved', data_get($followUpContext, 'pending_clarification.resolution.status'));
+        $this->assertSame($options[0]['id'], data_get($followUpContext, 'pending_clarification.resolution.component_id'));
         $resolvedEvent = app(CopilotAutomationService::class)->handle($followUp->id, (int) $conversation->automation_version);
 
         $this->assertSame('ORDER_CONTINUE', data_get($resolvedEvent?->payload, 'intent'));
@@ -114,6 +126,23 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertNotContains('AMBIGUOUS_MEAT', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
         $this->assertNotContains('DOMAIN_SELECTION_REJECTED', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
         $this->assertSame('not_executed', data_get($resolvedEvent?->response_payload, 'execution_result'));
+        $this->assertSame(1, $provider->calls);
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
+
+        $newOrder = $this->inbound($conversation, 'Quero uma N8 de 16 com porco.');
+        $newOrderEvent = app(CopilotAutomationService::class)->handle($newOrder->id, (int) $conversation->automation_version);
+
+        $this->assertSame('ORDER_CREATE', data_get($newOrderEvent?->payload, 'intent'));
+        $this->assertSame('NEW_ORDER', data_get($newOrderEvent?->payload, 'target_state'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($newOrderEvent?->payload, 'decision'));
+        $this->assertSame('stage_new_order', data_get($newOrderEvent?->payload, 'action'));
+        $this->assertContains('new_order_fully_validated', data_get($newOrderEvent?->payload, 'reason_codes', []));
+        $this->assertSame([], data_get($newOrderEvent?->payload, 'guard_results.warning_codes'));
+        $this->assertSame([], data_get($newOrderEvent?->payload, 'guard_results.missing_information_codes'));
+        $this->assertNull(data_get($newOrderEvent?->payload, 'clarification_source_event_id'));
+        $this->assertNull(data_get($newOrderEvent?->payload, 'clarification_resolution'));
+        $this->assertSame(2, $provider->calls);
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
     }
@@ -194,19 +223,36 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame('MEAT', data_get($analysis, 'clarification.type'));
     }
 
-    public function test_a_resolved_reply_keeps_an_independent_provider_ambiguity_fail_closed(): void
+    public function test_a_new_independent_ambiguity_remains_fail_closed_after_a_resolved_clarification(): void
     {
         [$company, $conversation, $options] = $this->scenario();
         $source = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
-        $this->pendingClarification($conversation, $source, $options);
-        $this->inbound($conversation, 'a primeira');
+        $clarification = $this->pendingClarification($conversation, $source, $options);
+        $resolvedReply = $this->inbound($conversation, 'a primeira');
+        AutomationEvent::query()->create([
+            'company_id' => $company->id,
+            'conversation_id' => $conversation->id,
+            'message_id' => $resolvedReply->id,
+            'provider' => 'copilot',
+            'event_type' => AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION,
+            'status' => AutomationEvent::STATUS_SKIPPED,
+            'payload' => [
+                'clarification_source_event_id' => $clarification->id,
+                'clarification_resolution' => 'resolved',
+                'clarification_matched_option_id' => $options[0]['id'],
+            ],
+            'response_payload' => ['execution_result' => 'not_executed'],
+            'processed_at' => now(),
+        ]);
+        $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
         $this->providerReturnsNoItems([
-            ['code' => 'AMBIGUOUS_MEAT', 'message' => 'Uma segunda escolha de carne permanece ambigua.'],
+            ['code' => 'AMBIGUOUS_MEAT', 'message' => 'A nova escolha de carne permanece ambigua.'],
         ]);
 
         $analysis = app(ConversationCopilotService::class)->analyze($conversation->fresh());
 
-        $this->assertSame('resolved', data_get($analysis, 'metadata.clarification_continuity.resolution'));
+        $this->assertSame('ORDER_CREATE', $analysis['intent']);
+        $this->assertNull(data_get($analysis, 'metadata.clarification_continuity.source_event_id'));
         $this->assertContains('AMBIGUOUS_MEAT', array_column($analysis['warnings'], 'code'));
         $this->assertTrue((bool) $analysis['requires_human_review']);
     }
@@ -268,7 +314,8 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame('menu_changed', data_get($context, 'pending_clarification.resolution.reason'));
     }
 
-    public function test_a_terminal_supersession_event_prevents_an_old_clarification_from_reappearing(): void
+    #[DataProvider('terminalClarificationResolutions')]
+    public function test_a_terminal_clarification_event_prevents_an_old_clarification_from_reappearing(string $resolution): void
     {
         [$company, $conversation, $options] = $this->scenario();
         $source = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
@@ -281,7 +328,7 @@ class CopilotSafeClarificationContinuationTest extends TestCase
             'provider' => 'copilot',
             'event_type' => AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION,
             'status' => AutomationEvent::STATUS_SKIPPED,
-            'payload' => ['clarification_source_event_id' => $clarification->id, 'clarification_resolution' => 'superseded'],
+            'payload' => ['clarification_source_event_id' => $clarification->id, 'clarification_resolution' => $resolution],
             'response_payload' => ['execution_result' => 'not_executed'],
             'processed_at' => now(),
         ]);
@@ -289,8 +336,19 @@ class CopilotSafeClarificationContinuationTest extends TestCase
 
         $context = app(ConversationCopilotContextBuilder::class)->forConversation($conversation->fresh());
 
-        $this->assertSame('superseded', data_get($context, 'pending_clarification.status'));
-        $this->assertSame('superseded', data_get($context, 'pending_clarification.resolution.status'));
+        $this->assertNull(data_get($context, 'pending_clarification'));
+    }
+
+    /** @return array<string, array{string}> */
+    public static function terminalClarificationResolutions(): array
+    {
+        return [
+            'resolved' => ['resolved'],
+            'invalid' => ['invalid'],
+            'rejected' => ['rejected'],
+            'stale' => ['stale'],
+            'superseded' => ['superseded'],
+        ];
     }
 
     /** @return array{Company,Conversation,list<array{id:int,name:string}>} */

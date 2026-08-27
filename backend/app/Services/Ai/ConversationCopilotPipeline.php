@@ -23,4 +23,19 @@ final class ConversationCopilotPipeline
 
         return ['raw' => $raw, 'normalized' => $normalized->toArray(), 'safe' => $this->validator->validate($company, $normalized, $date, $context)->toArray()];
     }
+
+    /** @param array<string,mixed> $context @return array<string,mixed> */
+    public function resolvePendingMeatClarification(Company $company, array $context, ?CarbonInterface $date = null): array
+    {
+        $normalized = $this->normalizer->normalize([
+            'intent' => 'ORDER_CONTINUE',
+            'summary' => 'Escolha de carne revalidada a partir da resposta do cliente.',
+            'draft_order' => ['items' => []],
+            'missing_information' => [],
+            'warnings' => [],
+            'suggested_reply' => '',
+        ], 'deterministic', ['reply_source' => 'resolved_pending_meat_clarification']);
+
+        return $this->validator->validate($company, $normalized, $date, $context)->toArray();
+    }
 }
