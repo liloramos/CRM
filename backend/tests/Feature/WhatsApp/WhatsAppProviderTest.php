@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\PaymentProofCandidateClassifier;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppAudioNormalizer;
@@ -249,11 +250,93 @@ class WhatsAppProviderTest extends TestCase
             ->assertHeader('Content-Length', '9')
             ->assertHeader('Content-Disposition', 'attachment; filename="secure.pdf"');
 
+        $this->actingAs($user)->get("/api/app/conversations/media/{$media->id}")
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf');
+
         $otherCompany = Company::query()->create(['name' => 'Outra empresa', 'slug' => 'outra-empresa-media']);
         $otherUser = User::factory()->create(['company_id' => $otherCompany->id]);
         $otherUser->assignRole(Role::ADMIN_GERENTE);
         $this->actingAs($otherUser)->getJson("/api/app/conversations/{$conversation->id}/media/{$media->id}/download")->assertNotFound();
+        $this->actingAs($otherUser)->get("/api/app/conversations/media/{$media->id}")->assertNotFound();
         $this->getJson("/api/app/conversations/{$conversation->id}/media/{$media->id}/download")->assertNotFound();
+    }
+
+    public function test_protected_media_show_recovers_a_pending_inbound_file_using_its_media_id(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Storage::fake('local');
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente recuperacao', 'phone' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'started_at' => now()]);
+        $message = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND, 'content' => 'imagem recebida', 'type' => 'image']);
+        $media = WhatsAppMediaFile::query()->create(['company_id' => $company->id, 'message_id' => $message->id, 'provider' => 'fake', 'provider_media_id' => 'recoverable-media', 'media_type' => 'image', 'mime_type' => 'image/png', 'status' => WhatsAppMediaFile::STATUS_RECEIVED, 'metadata' => ['download_attempted' => true]]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)->get("/api/app/conversations/media/{$media->id}")
+            ->assertOk()
+            ->assertHeader('Cache-Control');
+
+        $media->refresh();
+        $this->assertSame(WhatsAppMediaFile::STATUS_STORED, $media->status);
+        $this->assertSame('local', $media->storage_disk);
+        $this->assertNotNull($media->file_path);
+        Storage::disk('local')->assertExists($media->file_path);
+        $presented = app(ConversationPresenter::class)->conversation($conversation->fresh());
+        $this->assertSame("/api/app/conversations/media/{$media->id}", data_get($presented, 'messages.0.media.0.url'));
+    }
+
+    public function test_inbound_document_is_persisted_and_served_by_the_protected_media_endpoint(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $this->postJson('/api/webhooks/whatsapp', $this->mediaPayload('wamid.inbound-document', 'document', 'application/pdf'))->assertOk();
+        $event = WhatsAppWebhookEvent::query()->sole();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        $media = WhatsAppMediaFile::query()->sole();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)->get("/api/app/conversations/media/{$media->id}")->assertOk();
+
+        $this->assertSame(WhatsAppMediaFile::STATUS_STORED, $media->fresh()->status);
+        $this->assertSame('local', $media->fresh()->storage_disk);
+        $this->assertNotNull($media->fresh()->file_path);
+    }
+
+    public function test_protected_media_show_fails_closed_without_leaking_a_missing_file_path(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente sem arquivo', 'phone' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'started_at' => now()]);
+        $message = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND, 'content' => 'documento indisponivel', 'type' => 'document']);
+        $media = WhatsAppMediaFile::query()->create(['company_id' => $company->id, 'message_id' => $message->id, 'provider' => 'fake', 'media_type' => 'document', 'mime_type' => 'application/pdf', 'status' => WhatsAppMediaFile::STATUS_RECEIVED]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)->get("/api/app/conversations/media/{$media->id}")
+            ->assertNotFound()
+            ->assertDontSee('whatsapp/');
+
+        $this->assertSame(WhatsAppMediaFile::STATUS_FAILED, $media->fresh()->status);
+        $this->assertNull($media->fresh()->file_path);
+    }
+
+    public function test_payment_proof_classifier_uses_the_customer_active_order_fallback(): void
+    {
+        $company = $this->prepareWhatsApp();
+        Storage::fake('local');
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente fallback', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+        $order->forceFill(['conversation_id' => null])->save();
+        $conversation->forceFill(['active_order_id' => null])->save();
+        $message = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND, 'content' => 'Enviei o Pix.', 'type' => 'image']);
+        $media = WhatsAppMediaFile::query()->create(['company_id' => $company->id, 'message_id' => $message->id, 'provider' => 'fake', 'provider_media_id' => 'fallback-media', 'media_type' => 'image', 'mime_type' => 'image/png', 'storage_disk' => 'local', 'file_path' => 'whatsapp/fallback.png', 'status' => WhatsAppMediaFile::STATUS_STORED]);
+        Storage::disk('local')->put($media->file_path, 'fake');
+
+        $candidate = app(PaymentProofCandidateClassifier::class)->classify($conversation->fresh(), $message, $media);
+
+        $this->assertSame($order->id, data_get($candidate, 'order.id'));
     }
 
     public function test_webhook_verification_and_receive_persists_safe_event_and_message(): void

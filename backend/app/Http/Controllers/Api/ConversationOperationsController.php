@@ -21,6 +21,7 @@ use App\Services\Conversations\ConversationWorkflowService;
 use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppMediaFilename;
+use App\Services\WhatsApp\WhatsAppMediaStorageService;
 use App\Services\WhatsApp\WhatsAppService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -512,10 +513,15 @@ class ConversationOperationsController extends Controller
         ]);
     }
 
-    public function showMedia(Request $request, WhatsAppMediaFile $media)
+    public function showMedia(Request $request, WhatsAppMediaFile $media, WhatsAppMediaStorageService $mediaStorage)
     {
         $company = $this->resolveCompany($request);
         abort_unless((int) $media->company_id === (int) $company->id, 404);
+
+        if (! $media->storage_disk || ! $media->file_path || ! Storage::disk($media->storage_disk)->exists($media->file_path)) {
+            $media = $mediaStorage->restoreIncomingMedia($media);
+        }
+
         abort_unless($media->storage_disk && $media->file_path && Storage::disk($media->storage_disk)->exists($media->file_path), 404);
 
         $filename = WhatsAppMediaFilename::forMedia($media->original_filename, $media->mime_type, $media->media_type, $media->created_at?->format('Ymd-His'), $media->id);
