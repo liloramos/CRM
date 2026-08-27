@@ -37,6 +37,16 @@ class CopilotOrderItemSelectionAdapter
         $groundedMode = $this->meatModes->ground($product, $selections, $customerMessages);
         $selections = $groundedMode['selections'];
         $warnings = [...$warnings, ...$groundedMode['warnings']];
+        $freeAssemblyWithoutSalad = $this->isTraditionalMarmita($product)
+            && ($selections['salada'] ?? null) === 'none';
+        if ($freeAssemblyWithoutSalad && ! $this->removals->isGrounded('salada', $customerMessages)) {
+            $warnings[] = [
+                'code' => 'UNGROUNDED_SELECTION',
+                'message' => 'A escolha sem salada nao possui evidencia no pedido do cliente.',
+            ];
+            $selections['salada'] = null;
+            $freeAssemblyWithoutSalad = false;
+        }
 
         foreach ($this->selectionValues($product, $selections) as [$groupHint, $value]) {
             $link = $this->resolveLink($product, $groupHint, $value);
@@ -55,6 +65,9 @@ class CopilotOrderItemSelectionAdapter
         $removedComponentIds = [];
         $removedGroupCodes = [];
         foreach ($item['removed_components'] ?? [] as $removed) {
+            if ($freeAssemblyWithoutSalad && $this->key((string) $removed) === 'salada') {
+                continue;
+            }
             if (! $this->removals->isGrounded((string) $removed, $customerMessages)) {
                 $warnings[] = [
                     'code' => 'UNGROUNDED_REMOVAL',
@@ -141,6 +154,7 @@ class CopilotOrderItemSelectionAdapter
                     'meat_mode' => $meatMode,
                     'traditional_meat_component_ids' => $meatIds,
                     'extra_beef_quantity' => $extraBeef,
+                    'salada' => $freeAssemblyWithoutSalad ? 'none' : null,
                 ],
                 $quantity,
                 [
@@ -293,6 +307,44 @@ class CopilotOrderItemSelectionAdapter
         ];
     }
 
+    /**
+     * N8/N9 Livre have no default salad to remove. "Sem salada" is instead an
+     * explicit free-assembly choice, kept apart from fixed-component removals.
+     *
+     * @param  array<string,mixed>  $item
+     * @param  list<array<string,mixed>>  $customerMessages
+     * @return array<string,mixed>
+     */
+    public function recoverExplicitFreeAssemblySaladOptOut(Company $company, Product $product, CarbonInterface $date, array $item, array $customerMessages): array
+    {
+        if (! $this->isTraditionalMarmita($product) || ! $this->removals->isGrounded('salada', $customerMessages)) {
+            return $item;
+        }
+
+        $saladComponentIds = collect(data_get($this->dailyMenu->day($company, $date), 'sections.salad', []))
+            ->map(fn (array $entry): int => (int) data_get($entry, 'component.id'))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->all();
+        $dailyComponentIds = collect($item['daily_component_ids'] ?? [])
+            ->filter(fn (mixed $id): bool => is_numeric($id) && (int) $id > 0)
+            ->map(fn (mixed $id): int => (int) $id)
+            ->reject(fn (int $id): bool => in_array($id, $saladComponentIds, true))
+            ->values()
+            ->all();
+        $removedComponents = collect($item['removed_components'] ?? [])
+            ->reject(fn (mixed $removed): bool => is_string($removed) && $this->key($removed) === 'salada')
+            ->values()
+            ->all();
+        $selections = is_array($item['selections'] ?? null) ? $item['selections'] : [];
+
+        return [
+            ...$item,
+            'daily_component_ids' => $dailyComponentIds,
+            'removed_components' => $removedComponents,
+            'selections' => [...$selections, 'salada' => 'none'],
+        ];
+    }
+
     /** @return list<array{0:string,1:string}> */
     private function selectionValues(Product $product, array $selections): array
     {
@@ -300,7 +352,7 @@ class CopilotOrderItemSelectionAdapter
         foreach ($selections as $key => $selection) {
             $isTraditionalMarmita = in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true);
             if (in_array((string) $key, ['meat_mode', 'beef_variant', 'extra_beef'], true)
-                || ($isTraditionalMarmita && in_array((string) $key, ['meat', 'meats'], true))) {
+                || ($isTraditionalMarmita && in_array((string) $key, ['meat', 'meats', 'salada'], true))) {
                 continue;
             }
             foreach (is_array($selection) ? $selection : [$selection] as $value) {
@@ -557,6 +609,11 @@ class CopilotOrderItemSelectionAdapter
         }
 
         return in_array($value, ['none', 'semcarne'], true) ? 'none' : 'traditional';
+    }
+
+    private function isTraditionalMarmita(Product $product): bool
+    {
+        return in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true);
     }
 
     private function hasTraditionalMeatSelection(array $selections): bool

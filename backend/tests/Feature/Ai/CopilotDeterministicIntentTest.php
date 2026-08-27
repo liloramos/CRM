@@ -252,6 +252,74 @@ class CopilotDeterministicIntentTest extends TestCase
         }
     }
 
+    public function test_n8_free_assembly_salad_opt_out_is_explicit_and_does_not_leak_into_the_next_order(): void
+    {
+        CarbonImmutable::setTestNow('2026-08-22 15:00:00');
+        try {
+            $company = $this->seededCompany();
+            $conversation = $this->conversation($company);
+            $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+            {
+                private int $calls = 0;
+
+                public function name(): string
+                {
+                    return 'test';
+                }
+
+                public function analyze(array $context): array
+                {
+                    $this->calls++;
+
+                    return [
+                        'intent' => 'ORDER_CREATE',
+                        'confidence' => 0.9,
+                        'draft_order' => ['items' => [[
+                            'menu_item_slug' => 'n8',
+                            'quantity' => 1,
+                            'selections' => ['meat' => 'porco'],
+                            'removed_components' => $this->calls === 1 ? [] : ['salada'],
+                        ]], 'fulfillment' => 'pickup'],
+                        'missing_information' => [],
+                        'warnings' => $this->calls === 1 ? [] : [[
+                            'code' => 'REMOVAL_NOT_SUPPORTED',
+                            'message' => 'A montagem livre nao suporta remocao de salada.',
+                        ]],
+                        'suggested_reply' => 'Resumo do pedido.',
+                    ];
+                }
+            });
+
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quero uma N8 de 16 com porco.', 'type' => 'text', 'received_at' => now()]);
+            $first = app(ConversationCopilotService::class)->analyze($conversation);
+            $this->assertSame('ORDER_CREATE', $first['intent']);
+            $this->assertSame([], $first['warnings']);
+            $this->assertNotSame('none', data_get($first, 'draft_order.items.0.selections.salada'));
+
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Sem salada.', 'type' => 'text', 'received_at' => now()]);
+            $followUp = app(ConversationCopilotService::class)->analyze($conversation);
+            $followUpItem = $followUp['draft_order']['items'][0];
+            $this->assertSame('ORDER_CONTINUE', $followUp['intent']);
+            $this->assertSame('none', data_get($followUpItem, 'selections.salada'));
+            $this->assertSame([], $followUpItem['removed_components']);
+            $this->assertContains('Sem salada', array_column($followUpItem['validated_order_options'], 'name'));
+            $this->assertSame([], $followUp['warnings']);
+            $this->assertSame([], $followUp['missing_information']);
+
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quero uma N8 de 16 com porco.', 'type' => 'text', 'received_at' => now()]);
+            $fresh = app(ConversationCopilotService::class)->analyze($conversation);
+            $freshItem = $fresh['draft_order']['items'][0];
+            $this->assertSame('ORDER_CREATE', $fresh['intent']);
+            $this->assertNotSame('none', data_get($freshItem, 'selections.salada'));
+            $this->assertSame([], $freshItem['removed_components']);
+            $this->assertNotContains('Sem salada', array_column($freshItem['validated_order_options'], 'name'));
+            $this->assertSame([], $fresh['warnings']);
+            $this->assertSame([], $fresh['missing_information']);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
     public function test_menu_request_overrides_an_incomplete_prior_n8_without_calling_the_provider(): void
     {
         $company = $this->seededCompany();

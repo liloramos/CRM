@@ -134,6 +134,7 @@ class OrderItemSelectionValidator
         $mode = $meatSelection['meat_mode'] ?? 'traditional';
         $traditionalMeatIds = $this->integerList($meatSelection['traditional_meat_component_ids'] ?? []);
         $extraBeefQuantity = max(0, (int) ($meatSelection['extra_beef_quantity'] ?? 0));
+        $withoutSalad = ($meatSelection['salada'] ?? null) === 'none';
 
         $quote = $this->quoteBeefRules($product, [
             'meat_mode' => $mode,
@@ -151,6 +152,12 @@ class OrderItemSelectionValidator
             $this->integerList($compositionSelection['daily_component_ids'] ?? []),
             $this->integerList($compositionSelection['historical_daily_component_ids'] ?? []),
         );
+        if ($withoutSalad) {
+            $dailyBuffetRows = array_values(array_filter(
+                $dailyBuffetRows,
+                fn (array $row): bool => ($row['group_code'] ?? null) !== 'buffet_salad',
+            ));
+        }
         $selectedComponents = [...$selectedComponents, ...collect($dailyBuffetRows)->pluck('name')->all()];
 
         foreach ($product->optionGroups->sortBy([['display_order', 'asc'], ['id', 'asc']]) as $group) {
@@ -187,6 +194,7 @@ class OrderItemSelectionValidator
                     ...$validated,
                     ...$dailyBuffetRows,
                     $this->beefOnlyRow($beefOnly, $quote),
+                    ...$this->withoutSaladRows($withoutSalad),
                 ],
                 'unit_price_cents' => (int) $quote['total_cents'],
                 'selected_components' => $selectedComponents,
@@ -196,7 +204,7 @@ class OrderItemSelectionValidator
 
         if ($mode === 'none') {
             return [
-                'options' => [...$validated, ...$dailyBuffetRows, $this->withoutMeatRow()],
+                'options' => [...$validated, ...$dailyBuffetRows, $this->withoutMeatRow(), ...$this->withoutSaladRows($withoutSalad)],
                 'unit_price_cents' => (int) $quote['total_cents'],
                 'selected_components' => $selectedComponents,
                 'removed_ingredients' => $removedIngredients,
@@ -217,6 +225,7 @@ class OrderItemSelectionValidator
                 ...$validated,
                 ...$dailyBuffetRows,
                 ...$traditionalRows,
+                ...$this->withoutSaladRows($withoutSalad),
             ],
             'unit_price_cents' => (int) $quote['total_cents'],
             'selected_components' => $selectedComponents,
@@ -741,6 +750,29 @@ class OrderItemSelectionValidator
                 'included_in_unit_price' => true,
             ],
         ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function withoutSaladRows(bool $withoutSalad): array
+    {
+        if (! $withoutSalad) {
+            return [];
+        }
+
+        return [[
+            'product_option_id' => null,
+            'name' => 'Sem salada',
+            'option_type' => ProductSelectionMode::IncludedChoice->value,
+            'group_code' => 'buffet_salad',
+            'quantity' => 1,
+            'price_delta_cents' => 0,
+            'total_price_cents' => 0,
+            'metadata' => [
+                'source' => 'explicit_no_salad',
+                'daily_menu_section' => 'salad',
+                'included_in_unit_price' => true,
+            ],
+        ]];
     }
 
     /**
