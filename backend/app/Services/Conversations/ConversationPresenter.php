@@ -29,6 +29,7 @@ class ConversationPresenter
     public function conversation(Conversation $conversation): array
     {
         $conversation->loadMissing([
+            'company.setting',
             'customer.addresses',
             'assignedUser',
             'pinnedBy',
@@ -47,10 +48,12 @@ class ConversationPresenter
             'alerts.paymentProof',
         ]);
 
+        $timezone = $this->timezoneFor($conversation);
+
         $messages = $conversation->messages
             ->filter(fn (Message $message): bool => $message->hidden_at === null)
             ->sortBy('created_at')
-            ->map(fn (Message $message): array => $this->message($message))
+            ->map(fn (Message $message): array => $this->message($message, $timezone))
             ->values();
 
         $alerts = $conversation->alerts
@@ -64,6 +67,7 @@ class ConversationPresenter
 
         return [
             'id' => (string) $conversation->id,
+            'timezone' => $timezone,
             'customer' => $this->customer($conversation),
             'mode' => $this->modeFor($conversation),
             'automationMode' => $conversation->automation_mode,
@@ -119,7 +123,7 @@ class ConversationPresenter
     /**
      * @return array<string, mixed>
      */
-    private function message(Message $message): array
+    private function message(Message $message, string $timezone): array
     {
         $delivery = $message->relationLoaded('whatsappMessageDeliveries')
             ? $message->whatsappMessageDeliveries->sortByDesc('id')->first()
@@ -131,7 +135,7 @@ class ConversationPresenter
             'direction' => $message->direction ?: ($message->sender === 'customer' ? 'inbound' : 'outbound'),
             'type' => $message->type,
             'body' => $message->hidden_at !== null ? null : $this->displayBody($message),
-            'timeLabel' => $message->created_at?->format('H:i') ?? '',
+            'timeLabel' => $message->created_at?->copy()->setTimezone($timezone)->format('H:i') ?? '',
             'createdAt' => $message->created_at?->toIso8601String(),
             'occurredAt' => ($message->sent_at ?? $message->received_at ?? $message->created_at)?->toIso8601String(),
             'sentAt' => $message->sent_at?->toIso8601String(),
@@ -253,6 +257,15 @@ class ConversationPresenter
     private function modeFor(Conversation $conversation): string
     {
         return $conversation->automation_mode === Conversation::AUTOMATION_MODE_MANUAL ? 'manual' : 'ia';
+    }
+
+    private function timezoneFor(Conversation $conversation): string
+    {
+        $timezone = $conversation->company?->setting?->timezone;
+
+        return is_string($timezone) && $timezone !== ''
+            ? $timezone
+            : (string) config('app.timezone', 'UTC');
     }
 
     /**

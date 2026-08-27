@@ -1361,7 +1361,7 @@ export function ConversationsPage({
                         <strong>{conversation.customer.name}</strong>
                         <StatusDot status={operationalStatus} />
                       </span>
-                      <time>{conversation.isPinned ? <Icon name="pin" size={12} /> : null}{formatConversationTime(conversation.lastMessageAt)}</time>
+                      <time>{conversation.isPinned ? <Icon name="pin" size={12} /> : null}{formatConversationTime(conversation.lastMessageAt, conversation.timezone)}</time>
                     </span>
                     <small>{conversation.customer.phoneLabel || 'Sem telefone cadastrado'}</small>
                     <span className="conversation-item__preview">{conversation.lastMessage}</span>
@@ -1470,6 +1470,7 @@ export function ConversationsPage({
               {isDragActive ? <div className="chat-drop-overlay" role="status">Solte para anexar</div> : null}
               <MessageTimeline
                 conversationId={selectedConversation.id}
+                timezone={selectedConversation.timezone}
                 onDragEnter={handleDragEnter}
                 onDragLeave={handleDragLeave}
                 onDragOver={(event) => event.preventDefault()}
@@ -2145,6 +2146,7 @@ function ConversationAlertCard({
 function MessageTimeline({
   conversationId,
   messages,
+  timezone,
   onDragEnter,
   onDragLeave,
   onDragOver,
@@ -2157,6 +2159,7 @@ function MessageTimeline({
 }: {
   conversationId: string
   messages: ConversationMessage[]
+  timezone?: string
   onDragEnter: (event: DragEvent<HTMLDivElement>) => void
   onDragLeave: (event: DragEvent<HTMLDivElement>) => void
   onDragOver: (event: DragEvent<HTMLDivElement>) => void
@@ -2217,16 +2220,17 @@ function MessageTimeline({
       {messages.length > 0 ? (
         messages.map((message) => {
           const messageTimestamp = message.occurredAt ?? message.createdAt
-          const dateKey = messageTimestamp ? new Date(messageTimestamp).toDateString() : message.id
+          const dateKey = messageDateKey(messageTimestamp, timezone) ?? message.id
           const shouldShowDate = dateKey !== lastDateKey
           lastDateKey = dateKey
 
           return (
             <div className="message-list__group" key={message.id}>
-              {shouldShowDate ? <div className="message-date-separator">{formatMessageDate(messageTimestamp)}</div> : null}
+              {shouldShowDate ? <div className="message-date-separator">{formatMessageDate(messageTimestamp, timezone)}</div> : null}
               <MessageBubble
                 boundaryRef={listRef}
                 conversationId={conversationId}
+                timezone={timezone}
                 message={message}
                 onReply={() => onReply(message)}
                 onRetry={() => onRetryMessage(message.id)}
@@ -2259,9 +2263,10 @@ function MessageTimeline({
   )
 }
 
-function MessageBubble({ boundaryRef, conversationId, message, onReply, onRetry, onReact, onTogglePin, onCopyMessage }: {
+function MessageBubble({ boundaryRef, conversationId, timezone, message, onReply, onRetry, onReact, onTogglePin, onCopyMessage }: {
   boundaryRef: RefObject<HTMLDivElement | null>
   conversationId: string
+  timezone?: string
   message: ConversationMessage
   onReply: () => void
   onRetry: () => void
@@ -2503,11 +2508,11 @@ function MessageBubble({ boundaryRef, conversationId, message, onReply, onRetry,
         <dt>Enviada por</dt><dd>{senderLabel(message.sender)}</dd>
         <dt>Direção</dt><dd>{message.direction === 'outbound' ? 'Enviada' : 'Recebida'}</dd>
         {message.status ? <><dt>Status</dt><dd>{messageStatusLabel(message.status)}</dd></> : null}
-        {message.receivedAt ? <><dt>Recebida</dt><dd>{formatMessageTimestamp(message.receivedAt)}</dd></> : null}
-        {message.sentAt ? <><dt>Enviada</dt><dd>{formatMessageTimestamp(message.sentAt)}</dd></> : null}
-        {message.deliveredAt ? <><dt>Entregue</dt><dd>{formatMessageTimestamp(message.deliveredAt)}</dd></> : null}
-        {message.readAt ? <><dt>{message.direction === 'inbound' ? 'Lida pela equipe' : 'Lida'}</dt><dd>{formatMessageTimestamp(message.readAt)}</dd></> : null}
-        {message.failedAt ? <><dt>Falhou</dt><dd>{formatMessageTimestamp(message.failedAt)}</dd></> : null}
+        {message.receivedAt ? <><dt>Recebida</dt><dd>{formatMessageTimestamp(message.receivedAt, timezone)}</dd></> : null}
+        {message.sentAt ? <><dt>Enviada</dt><dd>{formatMessageTimestamp(message.sentAt, timezone)}</dd></> : null}
+        {message.deliveredAt ? <><dt>Entregue</dt><dd>{formatMessageTimestamp(message.deliveredAt, timezone)}</dd></> : null}
+        {message.readAt ? <><dt>{message.direction === 'inbound' ? 'Lida pela equipe' : 'Lida'}</dt><dd>{formatMessageTimestamp(message.readAt, timezone)}</dd></> : null}
+        {message.failedAt ? <><dt>Falhou</dt><dd>{formatMessageTimestamp(message.failedAt, timezone)}</dd></> : null}
       </dl>
     </Modal>
     </>
@@ -2834,7 +2839,7 @@ function formatFileSize(sizeBytes: number): string {
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function formatConversationTime(value?: string | null): string {
+function formatConversationTime(value?: string | null, timezone?: string): string {
   if (!value) {
     return ''
   }
@@ -2844,10 +2849,10 @@ function formatConversationTime(value?: string | null): string {
     return ''
   }
 
-  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: timezone })
 }
 
-function formatMessageDate(value?: string | null): string {
+function formatMessageDate(value?: string | null, timezone?: string): string {
   if (!value) {
     return 'Data não informada'
   }
@@ -2857,15 +2862,15 @@ function formatMessageDate(value?: string | null): string {
     return 'Data não informada'
   }
 
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(today.getDate() - 1)
+  const dateKey = messageDateKey(value, timezone)
+  const today = messageDateKey(new Date().toISOString(), timezone)
+  const yesterday = messageDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), timezone)
 
-  if (date.toDateString() === today.toDateString()) {
+  if (dateKey === today) {
     return 'Hoje'
   }
 
-  if (date.toDateString() === yesterday.toDateString()) {
+  if (dateKey === yesterday) {
     return 'Ontem'
   }
 
@@ -2873,6 +2878,7 @@ function formatMessageDate(value?: string | null): string {
     day: '2-digit',
     month: 'short',
     weekday: 'long',
+    timeZone: timezone,
   })
 }
 
@@ -2888,7 +2894,7 @@ function quotedMessageLabel(message: Pick<ConversationMessage, 'body' | 'type'>)
   return messageTypeLabel(message.type)
 }
 
-function formatMessageTimestamp(value: string): string {
+function formatMessageTimestamp(value: string, timezone?: string): string {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
     return '—'
@@ -2897,7 +2903,26 @@ function formatMessageTimestamp(value: string): string {
   return date.toLocaleString('pt-BR', {
     dateStyle: 'short',
     timeStyle: 'short',
+    timeZone: timezone,
   })
+}
+
+function messageDateKey(value?: string | null, timezone?: string): string | null {
+  if (!value) {
+    return null
+  }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return new Intl.DateTimeFormat('sv-SE', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: timezone,
+  }).format(date)
 }
 
 function normalize(value: string): string {
