@@ -4,7 +4,7 @@ namespace App\Services\Ai;
 
 final class CopilotAutomationEvaluationDataset
 {
-    public const VERSION = 2;
+    public const VERSION = 3;
 
     public static function fingerprint(): string
     {
@@ -77,12 +77,17 @@ final class CopilotAutomationEvaluationDataset
     private static function safeClarification(string $id): array
     {
         return self::case($id, 'ORDER_CREATE', CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, [
-            'warnings' => [['code' => 'AMBIGUOUS_MEAT']],
+            'missing_information' => [['code' => 'CARNE']],
+            'warnings' => [
+                ['code' => 'AMBIGUOUS_MEAT'],
+                ['code' => 'DOMAIN_SELECTION_REJECTED'],
+            ],
             'clarification' => [
                 'type' => 'MEAT',
                 'source' => 'DAILY_MENU',
                 'grounded' => true,
                 'options' => [['component_id' => 101], ['component_id' => 102]],
+                'scope' => ['product_id' => 1, 'selection_group' => 'meat'],
             ],
         ], CopilotAutomationAuthorityPolicy::DECISION_SHADOW);
     }

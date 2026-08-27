@@ -81,7 +81,7 @@ class CopilotAutomationAuthorityEvaluationTest extends TestCase
         $this->assertSame(100.0, round(($groundedReplies / $groundedReplyCandidates) * 100, 2));
         $this->assertSame(100.0, round(($humanReviewCaptured / $humanReviewExpected) * 100, 2));
         $this->assertSame(64, strlen(CopilotAutomationEvaluationDataset::fingerprint()));
-        $this->assertSame(2, CopilotAutomationEvaluationDataset::VERSION);
+        $this->assertSame(3, CopilotAutomationEvaluationDataset::VERSION);
     }
 
     public function test_manual_and_disabled_rollouts_do_not_promote_a_candidate(): void
@@ -99,5 +99,39 @@ class CopilotAutomationAuthorityEvaluationTest extends TestCase
             CopilotAutomationAuthorityPolicy::DECISION_DISABLED,
             $policy->decide($automatic, $analysis, CopilotAutomationAuthorityPolicy::ROLLOUT_DISABLED, true)['decision'],
         );
+    }
+
+    public function test_safe_clarification_accepts_only_the_explicitly_compatible_meat_diagnostics(): void
+    {
+        $policy = app(CopilotAutomationAuthorityPolicy::class);
+        $conversation = new Conversation(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]);
+        $analysis = [
+            'intent' => 'ORDER_CREATE',
+            'missing_information' => [['code' => 'CARNE']],
+            'warnings' => [
+                ['code' => 'AMBIGUOUS_MEAT'],
+                ['code' => 'DOMAIN_SELECTION_REJECTED'],
+            ],
+            'clarification' => [
+                'type' => 'MEAT',
+                'source' => 'DAILY_MENU',
+                'grounded' => true,
+                'scope' => ['product_id' => 11, 'selection_group' => 'meat'],
+                'options' => [['component_id' => 101], ['component_id' => 102]],
+            ],
+        ];
+
+        $shadow = $policy->decide($conversation, $analysis, CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW, true);
+        $actSafe = $policy->decide($conversation, $analysis, CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE, true);
+        $blockingWarning = $policy->decide($conversation, [...$analysis, 'warnings' => [...$analysis['warnings'], ['code' => 'PRICE_MISMATCH']]], CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW, true);
+        $insufficientOptions = $policy->decide($conversation, [...$analysis, 'clarification' => [...$analysis['clarification'], 'options' => [['component_id' => 101]]]], CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW, true);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, $shadow['decision']);
+        $this->assertSame('send_safe_clarification', $shadow['action']);
+        $this->assertContains('safe_clarification_available', $shadow['reason_codes']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $actSafe['decision']);
+        $this->assertContains('safe_clarification_shadow_only', $actSafe['reason_codes']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $blockingWarning['decision']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $insufficientOptions['decision']);
     }
 }

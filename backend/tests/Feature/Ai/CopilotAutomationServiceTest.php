@@ -128,17 +128,20 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
-    public function test_shadow_safe_clarification_records_only_the_minimum_rehydratable_context(): void
+    public function test_shadow_safe_clarification_records_context_while_preserving_the_unresolved_order_diagnostics(): void
     {
-        [$company, $conversation, $message] = $this->conversationWithInbound('quero uma n8 com frango');
+        [$company, $conversation, $message] = $this->conversationWithInbound('Quero uma N8 de 16 com frango.');
         $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
         $this->enableActSafe($company, CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW);
         $product = $this->availableProduct($company);
         $analysis = [
             'intent' => 'ORDER_CREATE',
             'draft_order' => ['items' => [['menu_item_id' => $product->id, 'menu_item_slug' => $product->slug, 'quantity' => 1]], 'fulfillment' => 'pickup'],
-            'missing_information' => [],
-            'warnings' => [['code' => 'AMBIGUOUS_MEAT']],
+            'missing_information' => [['code' => 'CARNE', 'label' => 'Carnes']],
+            'warnings' => [
+                ['code' => 'AMBIGUOUS_MEAT'],
+                ['code' => 'DOMAIN_SELECTION_REJECTED'],
+            ],
             'clarification' => [
                 'type' => 'MEAT',
                 'source' => 'DAILY_MENU',
@@ -147,6 +150,7 @@ class CopilotAutomationServiceTest extends TestCase
                     ['component_id' => 701, 'display_name' => 'Opção que não deve ser persistida'],
                     ['component_id' => 702, 'display_name' => 'Outra opção que não deve ser persistida'],
                 ],
+                'scope' => ['product_id' => $product->id, 'selection_group' => 'meat'],
             ],
             'proposal' => ['target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false]],
         ];
@@ -157,6 +161,11 @@ class CopilotAutomationServiceTest extends TestCase
         $context = (array) data_get($event?->payload, 'clarification_context');
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($event?->payload, 'decision'));
         $this->assertSame('send_safe_clarification', data_get($event?->payload, 'action'));
+        $this->assertSame('requires_human_review', data_get($event?->payload, 'safe_result_status'));
+        $this->assertTrue((bool) data_get($event?->payload, 'guard_results.requires_human_review'));
+        $this->assertFalse((bool) data_get($event?->payload, 'guard_results.policy_requires_human_review'));
+        $this->assertSame(['CARNE'], data_get($event?->payload, 'guard_results.missing_information_codes'));
+        $this->assertSame(['AMBIGUOUS_MEAT', 'DOMAIN_SELECTION_REJECTED'], data_get($event?->payload, 'guard_results.warning_codes'));
         $this->assertSame('ambiguous_meat', data_get($context, 'type'));
         $this->assertSame([$product->id, $product->slug, 1], [data_get($context, 'candidate.product_id'), data_get($context, 'candidate.product_slug'), data_get($context, 'candidate.quantity')]);
         $this->assertSame([701, 702], $context['option_component_ids']);

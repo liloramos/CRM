@@ -3,18 +3,24 @@
 namespace Tests\Feature\Ai;
 
 use App\Contracts\Ai\ConversationCopilotProviderInterface;
+use App\Models\AiAutomationSetting;
 use App\Models\AutomationEvent;
 use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\Customer;
 use App\Models\Message;
+use App\Models\Order;
 use App\Models\Product;
 use App\Services\Ai\ConversationCopilotContextBuilder;
 use App\Services\Ai\ConversationCopilotService;
+use App\Services\Ai\CopilotAutomationAuthorityPolicy;
+use App\Services\Ai\CopilotAutomationService;
+use App\Services\Ai\CopilotAutomationSettings;
 use App\Services\Menu\DailyStructuredMenuService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\SolRestaurantStructuredMenuSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Tests\TestCase;
 
 class CopilotSafeClarificationContinuationTest extends TestCase
@@ -31,6 +37,72 @@ class CopilotSafeClarificationContinuationTest extends TestCase
     {
         CarbonImmutable::setTestNow();
         parent::tearDown();
+    }
+
+    public function test_shadow_records_a_safe_clarification_for_an_ambiguous_n8_meat_without_mutating_the_order(): void
+    {
+        [$company, $conversation, $options] = $this->scenario();
+        $sharedToken = $this->sharedToken($options);
+        $this->assertSame('frango', $sharedToken);
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        Config::set('chatbotcrm.ai.copilot.act_safe_enabled', true);
+        AiAutomationSetting::query()->updateOrCreate(
+            ['company_id' => $company->id, 'provider' => CopilotAutomationSettings::PROVIDER],
+            [
+                'default_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+                'automation_enabled' => true,
+                'allow_auto_send' => false,
+                'require_human_confirmation_for_ambiguous' => true,
+                'require_human_confirmation_for_payments' => true,
+                'status' => AiAutomationSetting::STATUS_ACTIVE,
+                'settings' => ['rollout' => CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW],
+            ],
+        );
+        $message = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
+        $this->app->instance(ConversationCopilotProviderInterface::class, new class($options[0]['name']) implements ConversationCopilotProviderInterface
+        {
+            public function __construct(private readonly string $meat) {}
+
+            public function name(): string
+            {
+                return 'test';
+            }
+
+            public function analyze(array $context): array
+            {
+                return [
+                    'intent' => 'ORDER_CREATE',
+                    'draft_order' => ['items' => [[
+                        'product' => 'n8',
+                        'quantity' => 1,
+                        'selections' => ['meats' => [$this->meat]],
+                        'removed_components' => [],
+                        'notes' => '',
+                    ]]],
+                    'missing_information' => [],
+                    'warnings' => [],
+                    'suggested_reply' => 'Resumo do pedido.',
+                ];
+            }
+        });
+
+        $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame('ORDER_CREATE', data_get($event?->payload, 'intent'));
+        $this->assertSame('NEW_ORDER', data_get($event?->payload, 'target_state'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW, data_get($event?->payload, 'rollout'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($event?->payload, 'decision'));
+        $this->assertSame('send_safe_clarification', data_get($event?->payload, 'action'));
+        $this->assertContains('shadow_no_execution', data_get($event?->payload, 'reason_codes', []));
+        $this->assertContains('safe_clarification_available', data_get($event?->payload, 'reason_codes', []));
+        $this->assertSame('requires_human_review', data_get($event?->payload, 'safe_result_status'));
+        $this->assertSame(['CARNE'], data_get($event?->payload, 'guard_results.missing_information_codes'));
+        $this->assertSame(['AMBIGUOUS_MEAT', 'DOMAIN_SELECTION_REJECTED'], data_get($event?->payload, 'guard_results.warning_codes'));
+        $this->assertSame('ambiguous_meat', data_get($event?->payload, 'clarification_context.type'));
+        $this->assertEqualsCanonicalizing(array_column($options, 'id'), data_get($event?->payload, 'clarification_context.option_component_ids'));
+        $this->assertSame('not_executed', data_get($event?->response_payload, 'execution_result'));
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
     }
 
     public function test_an_exact_reply_rehydrates_only_the_pending_product_with_a_current_menu_option(): void
