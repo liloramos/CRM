@@ -57,6 +57,7 @@ class CopilotOrderDraftValidator
         $proposedItems = $analysis->draftOrder['items'] ?? [];
         $discardedN8Indexes = [];
         $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $discardHistoricalRemovals, $historicalMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
+            $providerItem = $item;
             if ($discardHistoricalRemovals) {
                 $item = $this->withoutHistoricalOnlyRemovals($item, $selectionMessages, $historicalMessages);
             }
@@ -87,6 +88,7 @@ class CopilotOrderDraftValidator
             $dailyComponents = $this->selections->recoverExplicitDailyComponents($company, $product, $date, $item, $selectionMessages);
             $item = $dailyComponents['item'];
             $warnings = [...$warnings, ...$dailyComponents['warnings']];
+            $item = $this->selections->recoverExplicitFreeAssemblySaladOptOut($company, $product, $date, $item, $selectionMessages);
             if ($this->hasHouseSaladDelegation($selectionMessages) && trim((string) ($item['item_notes'] ?? '')) === '') {
                 $item['item_notes'] = 'Salada à escolha da casa';
             }
@@ -103,6 +105,10 @@ class CopilotOrderDraftValidator
             ], $selectionMessages);
             foreach ($result['warnings'] as $warning) {
                 $warnings[] = [...$warning, 'item_index' => $index];
+            }
+            if ($this->isFreeAssemblySaladOptOut($product, $result['item'])
+                || $this->discardedHistoricalFreeAssemblySaladOptOut($product, $providerItem, $item)) {
+                $warnings = array_values(array_filter($warnings, fn (array $warning): bool => strtoupper((string) ($warning['code'] ?? '')) !== 'REMOVAL_NOT_SUPPORTED'));
             }
 
             $priceWarning = $this->priceWarning($product, $this->products->selectionText($product, $selectionMessages));
@@ -247,6 +253,32 @@ class CopilotOrderDraftValidator
     {
         return str_contains(Str::of($text)->ascii()->lower()->toString(), 'sem carne')
             || preg_match('/\bnao\s+(?:quero|quero)\s+carne\b/i', $text) === 1;
+    }
+
+    /** @param array<string,mixed> $item */
+    private function isFreeAssemblySaladOptOut(Product $product, array $item): bool
+    {
+        return in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)
+            && data_get($item, 'selections.salada') === 'none';
+    }
+
+    /** @param array<string,mixed> $providerItem @param array<string,mixed> $item */
+    private function discardedHistoricalFreeAssemblySaladOptOut(Product $product, array $providerItem, array $item): bool
+    {
+        if (! in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
+            return false;
+        }
+
+        $providerRemovals = collect($providerItem['removed_components'] ?? [])
+            ->filter(fn (mixed $removed): bool => is_string($removed) && trim($removed) !== '');
+        if ($providerRemovals->isEmpty()
+            || ! $providerRemovals->every(fn (string $removed): bool => $this->key($removed) === 'salada')) {
+            return false;
+        }
+
+        return collect($item['removed_components'] ?? [])
+            ->filter(fn (mixed $removed): bool => is_string($removed) && $this->key($removed) === 'salada')
+            ->isEmpty();
     }
 
     /** @param list<array{code:string,label:string}> $missing @return list<array{code:string,label:string}> */

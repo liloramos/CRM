@@ -22,6 +22,7 @@ final class CopilotAutomationEvaluationDataset
             self::information('PRODUCT_CLARIFICATION', 'disponibilidade_suco_laranja', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
             self::readyOrder('n5_validada'),
             self::readyOrder('n8_frango_e_porco'),
+            self::readyOrder('n8_livre_sem_salada_explicita'),
             self::readyOrder('novo_pedido_sem_remocao_historica'),
             self::readyOrder('n8_sem_carne'),
             self::readyOrder('n8_somente_bife'),

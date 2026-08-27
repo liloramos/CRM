@@ -80,8 +80,130 @@ class ConversationCopilotPipelineTest extends TestCase
         ], null, $date), $date)['safe'];
 
         $this->assertSame([], $safe['draft_order']['items'][0]['removed_components']);
+        $this->assertNotSame('none', data_get($safe, 'draft_order.items.0.selections.salada'));
+        $this->assertNotContains('Sem salada', array_column(data_get($safe, 'draft_order.items.0.validated_order_options', []), 'name'));
         $this->assertSame([], $safe['missing_information']);
         $this->assertNotContains('UNGROUNDED_REMOVAL', array_column($safe['warnings'], 'code'));
+    }
+
+    public function test_n8_livre_keeps_an_explicit_without_salad_as_a_free_assembly_choice(): void
+    {
+        $company = $this->seedRestaurant();
+        $date = CarbonImmutable::parse('2026-08-22');
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco'],
+                'removed_components' => ['salada'],
+                'notes' => '',
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [[
+                'code' => 'REMOVAL_NOT_SUPPORTED',
+                'message' => 'A montagem livre nao suporta remocao de salada.',
+            ]],
+        ]));
+
+        $context = app(ConversationCopilotContextBuilder::class)->forMessages($company, [
+            ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero uma N8 de 16 com porco.'],
+            ['direction' => 'inbound', 'type' => 'text', 'body' => 'Sem salada.'],
+        ], null, $date);
+        $context['latest_intent'] = 'ORDER_CONTINUE';
+        $safe = app(ConversationCopilotPipeline::class)->analyze($company, $context, $date)['safe'];
+        $item = $safe['draft_order']['items'][0];
+
+        $this->assertSame('none', data_get($item, 'selections.salada'));
+        $this->assertSame([], $item['removed_components']);
+        $this->assertContains('Sem salada', array_column($item['validated_order_options'], 'name'));
+        $this->assertSame([], $safe['missing_information']);
+        $this->assertNotContains('REMOVAL_NOT_SUPPORTED', array_column($safe['warnings'], 'code'));
+        $this->assertNotContains('UNGROUNDED_REMOVAL', array_column($safe['warnings'], 'code'));
+        $this->assertNotContains('INVALID_REMOVAL', array_column($safe['warnings'], 'code'));
+    }
+
+    public function test_n8_livre_keeps_unrelated_removals_fail_closed(): void
+    {
+        $company = $this->seedRestaurant();
+        $date = CarbonImmutable::parse('2026-08-22');
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco'],
+                'removed_components' => ['farofa'],
+                'notes' => '',
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [[
+                'code' => 'REMOVAL_NOT_SUPPORTED',
+                'message' => 'A montagem livre nao suporta essa remocao.',
+            ]],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze(
+            $company,
+            $this->context($company, 'Quero uma N8 de 16 com porco, sem farofa.'),
+            $date,
+        )['safe'];
+
+        $this->assertNotSame('none', data_get($safe, 'draft_order.items.0.selections.salada'));
+        $this->assertContains('REMOVAL_NOT_SUPPORTED', array_column($safe['warnings'], 'code'));
+        $this->assertContains('INVALID_REMOVAL', array_column($safe['warnings'], 'code'));
+    }
+
+    public function test_n8_livre_rejects_an_ungrounded_without_salad_provider_selection(): void
+    {
+        $company = $this->seedRestaurant();
+        $date = CarbonImmutable::parse('2026-08-22');
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco', 'salada' => 'none'],
+                'removed_components' => [],
+                'notes' => '',
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze(
+            $company,
+            $this->context($company, 'Quero uma N8 de 16 com porco.'),
+            $date,
+        )['safe'];
+
+        $this->assertNotSame('none', data_get($safe, 'draft_order.items.0.selections.salada'));
+        $this->assertNotContains('Sem salada', array_column(data_get($safe, 'draft_order.items.0.validated_order_options', []), 'name'));
+        $this->assertContains('UNGROUNDED_SELECTION', array_column($safe['warnings'], 'code'));
+    }
+
+    public function test_an_isolated_without_salad_does_not_create_a_free_assembly_order(): void
+    {
+        $company = $this->seedRestaurant();
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['salada' => 'none'],
+                'removed_components' => [],
+                'notes' => '',
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [],
+        ]));
+
+        $context = $this->context($company, 'Sem salada.');
+        $context['latest_intent'] = 'GENERAL_MESSAGE';
+        $safe = app(ConversationCopilotPipeline::class)->analyze($company, $context, $this->evaluationDate())['safe'];
+
+        $this->assertSame('UNKNOWN', $safe['intent']);
+        $this->assertSame([], $safe['draft_order']['items']);
     }
 
     public function test_openai_shaped_n8_and_n9_beef_results_keep_their_meat_modes(): void
@@ -211,6 +333,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $n8WithoutSalad = app(ConversationCopilotPipeline::class)->analyze($company, app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 Casa frango sem salada']]))['safe'];
 
         $this->assertNotContains('SALADA', array_column($n8WithoutSalad['missing_information'], 'code'));
+        $this->assertContains('Sem Salada', data_get($n8WithoutSalad, 'draft_order.items.0.removed_components', []));
     }
 
     public function test_n8_casa_keeps_the_two_piece_meat_portion_without_a_technical_warning(): void
