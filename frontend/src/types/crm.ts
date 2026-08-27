@@ -280,6 +280,13 @@ export type ConversationPaymentReview = {
   fileName: string | null
   mimeType: string | null
   mediaUrl: string | null
+  evidences: Array<{
+    proofId: string
+    receivedAt: string | null
+    fileName: string | null
+    mimeType: string | null
+    mediaUrl: string | null
+  }>
 } | null
 
 export type ConversationOperationalStatus = {

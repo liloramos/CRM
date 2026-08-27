@@ -2,12 +2,27 @@
 
 namespace App\Services\Ai;
 
+use App\Models\Company;
+
 final class CopilotCustomerFacingReplyBuilder
 {
     /** @return array<string,mixed> */
-    public function paymentKey(): array
+    public function paymentKey(Company $company): array
     {
-        return $this->analysis('Vou confirmar a chave Pix para você.');
+        $company->loadMissing('setting');
+        $key = trim((string) data_get($company->setting?->settings, 'payments.pix.key', ''));
+        $holder = trim((string) data_get($company->setting?->settings, 'payments.pix.holder_name', ''));
+
+        if ($key === '') {
+            return $this->analysis('Vou confirmar a chave Pix para você.', ['pix_configured' => false]);
+        }
+
+        $reply = "A chave Pix é {$key}.";
+        if ($holder !== '') {
+            $reply .= " Favorecido: {$holder}.";
+        }
+
+        return $this->analysis($reply, ['pix_configured' => true]);
     }
 
     /** @return array<string,mixed> */
@@ -17,7 +32,7 @@ final class CopilotCustomerFacingReplyBuilder
     }
 
     /** @return array<string,mixed> */
-    private function analysis(string $reply): array
+    private function analysis(string $reply, array $metadata = []): array
     {
         return [
             'intent' => 'GENERAL_MESSAGE',
@@ -27,7 +42,7 @@ final class CopilotCustomerFacingReplyBuilder
             'missing_information' => [],
             'warnings' => [],
             'suggested_reply' => $reply,
-            'metadata' => ['reply_source' => 'customer_facing_policy'],
+            'metadata' => ['reply_source' => 'customer_facing_policy', ...$metadata],
         ];
     }
 }

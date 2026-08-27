@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\Conversations\PaymentProofCandidateClassifier;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppAudioNormalizer;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
@@ -1611,6 +1612,136 @@ class WhatsAppProviderTest extends TestCase
 
         $this->assertDatabaseHas('payment_proofs', ['order_id' => $order->id, 'source_channel' => PaymentProof::SOURCE_WHATSAPP]);
         $this->assertDatabaseHas('conversation_alerts', ['type' => ConversationAlert::TYPE_PAYMENT_PROOF_RECEIVED]);
+    }
+
+    public function test_second_payment_evidence_keeps_the_same_payment_in_review_and_preserves_both_media_references(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente duas evidências', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+
+        foreach ([
+            $this->textPayload('wamid.second-proof-context', 'Enviei o Pix.'),
+            $this->mediaPayload('wamid.second-proof-image-one', 'image', 'image/png'),
+            $this->mediaPayload('wamid.second-proof-image-two', 'image', 'image/png'),
+        ] as $payload) {
+            $this->postJson('/api/webhooks/whatsapp', $payload)->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        }
+
+        $payment = $order->payments()->sole();
+        $proofs = $payment->proofs()->orderBy('id')->get();
+
+        $this->assertSame(Payment::STATUS_PROOF_RECEIVED, $payment->status);
+        $this->assertSame(Order::STATUS_PAYMENT_PROOF_RECEIVED, $order->refresh()->status);
+        $this->assertCount(2, $proofs);
+        $this->assertNotSame(
+            data_get($proofs->first()->metadata, 'whatsapp_media_file_id'),
+            data_get($proofs->last()->metadata, 'whatsapp_media_file_id'),
+        );
+        $this->assertSame(0, $order->amount_paid_cents);
+    }
+
+    public function test_payment_context_document_is_saved_as_evidence_without_financial_confirmation(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente documento Pix', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+
+        foreach ([
+            $this->textPayload('wamid.document-proof-context', 'Segue o comprovante do Pix.'),
+            $this->mediaPayload('wamid.document-proof', 'document', 'application/pdf'),
+        ] as $payload) {
+            $this->postJson('/api/webhooks/whatsapp', $payload)->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        }
+
+        $proof = $order->paymentProofs()->sole();
+        $this->assertSame(PaymentProof::SOURCE_WHATSAPP, $proof->source_channel);
+        $this->assertSame('document', WhatsAppMediaFile::query()->findOrFail(data_get($proof->metadata, 'whatsapp_media_file_id'))->media_type);
+        $this->assertSame(Payment::STATUS_PROOF_RECEIVED, $order->payments()->sole()->status);
+        $this->assertSame(0, $order->refresh()->amount_paid_cents);
+    }
+
+    public function test_retrying_the_same_inbound_media_does_not_duplicate_payment_evidence(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente retry evidência', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+
+        $this->postJson('/api/webhooks/whatsapp', $this->textPayload('wamid.retry-proof-context', 'Pix feito.'))->assertOk();
+        $contextEvent = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($contextEvent->id))->handle(app(WhatsAppService::class));
+
+        $payload = $this->mediaPayload('wamid.retry-proof-media', 'image', 'image/png');
+        foreach ([1, 2] as $attempt) {
+            $this->postJson('/api/webhooks/whatsapp', $payload)->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        }
+
+        $this->assertSame(1, $order->payments()->count());
+        $this->assertSame(1, $order->paymentProofs()->count());
+        $this->assertSame(0, $order->refresh()->amount_paid_cents);
+    }
+
+    public function test_already_paid_text_never_confirms_a_payment(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente já paguei', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+
+        $this->postJson('/api/webhooks/whatsapp', $this->textPayload('wamid.already-paid', 'Já paguei.'))->assertOk();
+        $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+
+        $this->assertSame(0, $order->payments()->where('status', Payment::STATUS_CONFIRMED)->count());
+        $this->assertSame(0, $order->refresh()->amount_paid_cents);
+        $this->assertSame(Order::STATUS_AWAITING_PAYMENT, $order->status);
+    }
+
+    public function test_media_does_not_attach_to_a_cancelled_or_finished_historical_order(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente histórico', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+        foreach ([Order::STATUS_CANCELLED, Order::STATUS_FINISHED] as $status) {
+            $order->forceFill(['status' => $status])->save();
+
+            $this->postJson('/api/webhooks/whatsapp', $this->imagePayload('wamid.historical-order-media.'.$status))->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+        }
+
+        $this->assertSame(0, $order->paymentProofs()->count());
+        $this->assertSame(0, $order->payments()->count());
+    }
+
+    public function test_classifier_failure_keeps_inbound_media_without_creating_payment_state(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente classificador', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+        $classifier = \Mockery::mock(PaymentProofCandidateClassifier::class);
+        $classifier->shouldReceive('classify')->once()->andThrow(new \RuntimeException('classifier unavailable'));
+        $this->app->instance(PaymentProofCandidateClassifier::class, $classifier);
+
+        $this->postJson('/api/webhooks/whatsapp', $this->imagePayload('wamid.classifier-failure'))->assertOk();
+        $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+
+        $this->assertSame(1, WhatsAppMediaFile::query()->count());
+        $this->assertSame(0, $order->paymentProofs()->count());
+        $this->assertSame(0, $order->payments()->count());
+        $this->assertSame(Order::STATUS_AWAITING_PAYMENT, $order->refresh()->status);
     }
 
     public function test_human_can_approve_payment_proof_once_from_conversation(): void

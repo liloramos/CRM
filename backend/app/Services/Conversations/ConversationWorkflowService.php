@@ -291,18 +291,21 @@ class ConversationWorkflowService
             return $conversation->refresh();
         }
 
-        $this->payments->rejectPayment($payment, $user, $reason, $reason);
+        $proof = $this->payments->rejectProof($proof, $user, $reason);
 
-        $proof->forceFill([
-            'status' => PaymentProof::STATUS_REJECTED,
-            'review_notes' => $reason,
-        ])->save();
+        ConversationAlert::query()
+            ->where('company_id', $company->id)
+            ->where('payment_proof_id', $proof->id)
+            ->where('type', ConversationAlert::TYPE_PAYMENT_PROOF_RECEIVED)
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->get()
+            ->each(fn (ConversationAlert $alert) => $this->alerts->resolve($alert, $user));
 
         $this->alerts->open(
             company: $company,
-            type: ConversationAlert::TYPE_PAYMENT_REJECTED,
+            type: ConversationAlert::TYPE_PAYMENT_EVIDENCE_REJECTED,
             severity: ConversationAlert::SEVERITY_WARNING,
-            title: 'Comprovante rejeitado',
+            title: 'Evidência de pagamento rejeitada',
             message: $reason,
             conversation: $conversation,
             order: $proof->order()->first(),
@@ -313,7 +316,7 @@ class ConversationWorkflowService
 
         $recipient = $conversation->whatsapp_identifier ?: $conversation->customer()->value('whatsapp_id') ?: $conversation->customer()->value('phone');
         if (is_string($recipient) && trim($recipient) !== '') {
-            $this->whatsapp->sendTextMessage($company, $recipient, 'Nao conseguimos confirmar esse comprovante. Pode enviar um novo comprovante ou chamar a atendente?', [
+            $this->whatsapp->sendTextMessage($company, $recipient, 'Nao conseguimos validar essa evidência. Pode enviar um novo comprovante ou chamar a atendente?', [
                 'conversation' => $conversation,
                 'sender_type' => 'human',
                 'sent_by_user_id' => $user->id,

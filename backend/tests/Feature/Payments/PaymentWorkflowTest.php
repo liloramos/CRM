@@ -65,6 +65,70 @@ class PaymentWorkflowTest extends TestCase
         $this->assertSame($customer->id, $order->payer_customer_id);
     }
 
+    public function test_whatsapp_evidence_is_idempotent_per_media_and_keeps_multiple_files_auditable(): void
+    {
+        [, , $order] = $this->createOrderWithProduct('n8-casa');
+        $payments = app(PaymentWorkflowService::class);
+        $payment = $payments->recordPayment($order, ['method' => Payment::METHOD_PIX]);
+
+        $first = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 101],
+        ]);
+        $retry = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 101],
+        ]);
+        $second = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 102],
+        ]);
+
+        $this->assertSame($first->id, $retry->id);
+        $this->assertNotSame($first->id, $second->id);
+        $this->assertSame(2, $payment->proofs()->count());
+        $this->assertSame(Payment::STATUS_PROOF_RECEIVED, $payment->refresh()->status);
+        $this->assertSame(Order::STATUS_PAYMENT_PROOF_RECEIVED, $order->refresh()->status);
+    }
+
+    public function test_rejecting_evidence_preserves_media_and_keeps_payment_awaiting_human_review(): void
+    {
+        [, , $order] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create();
+        $payments = app(PaymentWorkflowService::class);
+        $payment = $payments->recordPayment($order, ['method' => Payment::METHOD_PIX]);
+        $proof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 303],
+        ]);
+
+        $rejected = $payments->rejectProof($proof, $user, 'arquivo_ilegivel');
+
+        $this->assertSame(PaymentProof::STATUS_REJECTED, $rejected->status);
+        $this->assertSame(303, $rejected->metadata['whatsapp_media_file_id']);
+        $this->assertSame(Payment::STATUS_AWAITING_PROOF, $payment->refresh()->status);
+        $this->assertNotSame(Payment::STATUS_REJECTED, $payment->status);
+        $this->assertSame(Order::STATUS_AWAITING_PAYMENT_PROOF, $order->refresh()->status);
+        $this->assertSame(0, $order->amount_paid_cents);
+    }
+
+    public function test_rejecting_one_of_multiple_evidences_does_not_reject_the_payment(): void
+    {
+        [, , $order] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create();
+        $payments = app(PaymentWorkflowService::class);
+        $payment = $payments->recordPayment($order, ['method' => Payment::METHOD_PIX]);
+        $first = $payments->attachProof($payment, ['metadata' => ['whatsapp_media_file_id' => 401]]);
+        $second = $payments->attachProof($payment, ['metadata' => ['whatsapp_media_file_id' => 402]]);
+
+        $payments->rejectProof($first, $user, 'imagem_errada');
+
+        $this->assertSame(Payment::STATUS_PROOF_RECEIVED, $payment->refresh()->status);
+        $this->assertSame(PaymentProof::STATUS_REJECTED, $first->refresh()->status);
+        $this->assertSame(PaymentProof::STATUS_RECEIVED, $second->refresh()->status);
+        $this->assertSame(Order::STATUS_PAYMENT_PROOF_RECEIVED, $order->refresh()->status);
+    }
+
     public function test_overpayment_can_generate_customer_credit_and_use_it_on_future_order(): void
     {
         [$company, $customer, $firstOrder] = $this->createOrderWithProduct('n8-casa');
