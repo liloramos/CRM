@@ -69,7 +69,7 @@ class CopilotOrderDraftValidator
             ? ($analysis->draftOrder['items'] ?? [])
             : [$this->resolvedPendingItem($pendingClarification)];
         $discardedN8Indexes = [];
-        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $applyNewOrderHistoryBoundary, $historicalMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
+        $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $applyNewOrderHistoryBoundary, $historicalMessages, $resolvedPendingClarification, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
             $providerItem = $item;
             if ($applyNewOrderHistoryBoundary) {
                 $item = $this->withoutHistoricalOnlyRemovals($item, $selectionMessages, $historicalMessages);
@@ -100,7 +100,9 @@ class CopilotOrderDraftValidator
                 return null;
             }
             $item = $this->products->enrichN8Traditional($product, $item, $selectionMessages);
-            $item = $this->selections->recoverExplicitDailyMeats($company, $product, $date, $item, $selectionMessages);
+            if ($resolvedPendingClarification === null) {
+                $item = $this->selections->recoverExplicitDailyMeats($company, $product, $date, $item, $selectionMessages);
+            }
             $dailyComponents = $this->selections->recoverExplicitDailyComponents($company, $product, $date, $item, $selectionMessages);
             $item = $dailyComponents['item'];
             $warnings = [...$warnings, ...$dailyComponents['warnings']];
