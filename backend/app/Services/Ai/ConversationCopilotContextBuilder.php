@@ -2,14 +2,17 @@
 
 namespace App\Services\Ai;
 
+use App\Models\AutomationEvent;
 use App\Models\Company;
 use App\Models\Conversation;
+use App\Models\Message;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\Menu\DailyStructuredMenuService;
 use App\Services\Orders\CustomerActiveOrderResolver;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 final class ConversationCopilotContextBuilder
@@ -37,13 +40,15 @@ final class ConversationCopilotContextBuilder
             ->reverse()
             ->values();
 
-        return $this->build(
+        $context = $this->build(
             $conversation->company,
             $messages->map(fn ($message): array => ['direction' => $message->direction, 'type' => $message->type, 'body' => (string) $message->content])->all(),
             $this->activeOrderSnapshot($activeOrder),
             CarbonImmutable::now($this->timezone($conversation->company)),
             $boundary,
         );
+
+        return [...$context, 'pending_clarification' => $this->pendingClarification($conversation, $messages, $activeOrder, $boundary, $context)];
     }
 
     /** @param list<array<string,mixed>> $messages @param array<string,mixed>|null $activeOrder @return array<string,mixed> */
@@ -274,5 +279,162 @@ final class ConversationCopilotContextBuilder
                     ])->values()->all(),
                 ];
             })->all();
+    }
+
+    /**
+     * Automation events are only an audit trail for a question previously offered in
+     * Shadow. Product availability and labels are always rebuilt from today's menu.
+     *
+     * @param  Collection<int, Message>  $messages
+     * @param  array<string, mixed>  $context
+     * @return array<string, mixed>|null
+     */
+    private function pendingClarification(Conversation $conversation, $messages, ?Order $activeOrder, ?array $boundary, array $context): ?array
+    {
+        $current = $messages->reverse()->first(fn ($message): bool => $message->direction === 'inbound' && $message->type === 'text');
+        if ($current === null) {
+            return null;
+        }
+
+        $event = AutomationEvent::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->where('event_type', AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION)
+            ->where('message_id', '<', $current->id)
+            ->latest('id')
+            ->limit(24)
+            ->get()
+            ->first(function (AutomationEvent $candidate): bool {
+                return data_get($candidate->payload, 'action') === 'send_safe_clarification'
+                    && data_get($candidate->payload, 'clarification_context.type') === 'ambiguous_meat';
+            });
+        if (! $event instanceof AutomationEvent) {
+            return null;
+        }
+
+        $terminalResolution = AutomationEvent::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->where('event_type', AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION)
+            ->where('message_id', '>', $event->message_id)
+            ->where('message_id', '<', $current->id)
+            ->latest('id')
+            ->limit(24)
+            ->get()
+            ->first(function (AutomationEvent $candidate) use ($event): bool {
+                return (int) data_get($candidate->payload, 'clarification_source_event_id') === (int) $event->id
+                    && in_array(data_get($candidate->payload, 'clarification_resolution'), ['resolved', 'stale', 'superseded'], true);
+            });
+        if ($terminalResolution instanceof AutomationEvent) {
+            return $this->invalidatedClarification($event, (string) data_get($terminalResolution->payload, 'clarification_resolution'));
+        }
+
+        $snapshot = (array) data_get($event->payload, 'clarification_context', []);
+        $sourceMessage = $event->message()->first();
+        if (! $sourceMessage || ($boundary !== null && isset($boundary['at'])
+            && ($boundary['inclusive'] ?? false ? $sourceMessage->created_at->lessThan($boundary['at']) : $sourceMessage->created_at->lessThanOrEqualTo($boundary['at'])))) {
+            return $this->staleClarification($event, 'cycle_boundary');
+        }
+
+        $expectedActiveOrderId = $snapshot['active_order_id'] ?? null;
+        $actualActiveOrderId = $activeOrder?->id;
+        if ((int) ($expectedActiveOrderId ?? 0) !== (int) ($actualActiveOrderId ?? 0)) {
+            return $this->staleClarification($event, 'active_order_changed');
+        }
+
+        $productId = (int) data_get($snapshot, 'candidate.product_id');
+        $product = collect((array) data_get($context, 'menu', []))->firstWhere('id', $productId);
+        if (! is_array($product) || ! in_array((string) ($product['rule'] ?? ''), ['n8_tradicional', 'n9_tradicional'], true)) {
+            return $this->staleClarification($event, 'product_unavailable');
+        }
+
+        $allowedIds = array_values(array_unique(array_filter(array_map('intval', (array) ($snapshot['option_component_ids'] ?? [])))));
+        $available = collect((array) data_get($context, 'daily_meats', []))->keyBy(fn (array $meat): int => (int) ($meat['id'] ?? 0));
+        $options = collect($allowedIds)
+            ->map(fn (int $id): ?array => $available->has($id) ? ['component_id' => $id, 'display_name' => (string) data_get($available->get($id), 'name')] : null)
+            ->filter()
+            ->values();
+        if (count($allowedIds) < 2 || $options->count() !== count($allowedIds) || $options->count() > 5) {
+            return $this->staleClarification($event, 'menu_changed');
+        }
+
+        $resolution = $this->clarificationResolution((string) $current->content, $options->all());
+
+        return [
+            'status' => 'eligible',
+            'source_event_id' => (int) $event->id,
+            'source_message_id' => (int) $event->message_id,
+            'type' => 'ambiguous_meat',
+            'scope' => ['product_id' => $productId, 'selection_group' => 'meat'],
+            'candidate' => [
+                'product_id' => $productId,
+                'product_slug' => (string) data_get($snapshot, 'candidate.product_slug'),
+                'quantity' => max(1, (int) data_get($snapshot, 'candidate.quantity', 1)),
+            ],
+            'options' => $options->all(),
+            'resolution' => $resolution,
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function staleClarification(AutomationEvent $event, string $reason): array
+    {
+        return [
+            'status' => 'stale',
+            'source_event_id' => (int) $event->id,
+            'source_message_id' => (int) $event->message_id,
+            'type' => 'ambiguous_meat',
+            'resolution' => ['status' => 'stale', 'reason' => $reason],
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function invalidatedClarification(AutomationEvent $event, string $resolution): array
+    {
+        return [
+            'status' => $resolution === 'superseded' ? 'superseded' : 'stale',
+            'source_event_id' => (int) $event->id,
+            'source_message_id' => (int) $event->message_id,
+            'type' => 'ambiguous_meat',
+            'resolution' => ['status' => $resolution],
+        ];
+    }
+
+    /** @param list<array{component_id:int,display_name:string}> $options @return array<string, mixed> */
+    private function clarificationResolution(string $body, array $options): array
+    {
+        $text = $this->clarificationKey($body);
+        foreach ($options as $option) {
+            if ($text !== '' && $text === $this->clarificationKey($option['display_name'])) {
+                return ['status' => 'resolved', 'match' => 'exact', 'component_id' => $option['component_id']];
+            }
+        }
+
+        $ordinal = match ($text) {
+            '1', 'primeira', 'a primeira' => 0,
+            '2', 'segunda', 'a segunda' => 1,
+            '3', 'terceira', 'a terceira' => 2,
+            '4', 'quarta', 'a quarta' => 3,
+            '5', 'quinta', 'a quinta' => 4,
+            default => null,
+        };
+        if ($ordinal !== null && isset($options[$ordinal])) {
+            return ['status' => 'resolved', 'match' => 'ordinal', 'component_id' => $options[$ordinal]['component_id']];
+        }
+
+        $matchingOptions = collect($options)->filter(function (array $option) use ($text): bool {
+            $tokens = preg_split('/[^a-z0-9]+/', $this->clarificationKey($option['display_name'])) ?: [];
+
+            return collect($tokens)
+                ->filter(fn (string $token): bool => strlen($token) >= 4)
+                ->contains(fn (string $token): bool => str_contains($text, $token));
+        });
+
+        return ['status' => $matchingOptions->count() > 1 ? 'ambiguous' : 'invalid'];
+    }
+
+    private function clarificationKey(string $value): string
+    {
+        return Str::of($value)->ascii()->lower()->squish()->toString();
     }
 }

@@ -54,7 +54,15 @@ class CopilotOrderDraftValidator
         $warnings = $analysis->warnings;
         $invalidQuantityDiscarded = false;
         $ungroundedProductDiscarded = false;
-        $proposedItems = $analysis->draftOrder['items'] ?? [];
+        $pendingClarification = data_get($context, 'pending_clarification');
+        $resolvedPendingClarification = $this->resolvedPendingClarification($pendingClarification);
+        if ($resolvedPendingClarification !== null) {
+            $selectionMessages[] = $this->resolvedPendingSelectionMessage($pendingClarification);
+            $warnings = array_values(array_filter($warnings, fn (array $warning): bool => ! in_array(strtoupper((string) ($warning['code'] ?? '')), ['AMBIGUOUS_MEAT', 'UNRESOLVED_MEAT'], true)));
+        }
+        $proposedItems = $resolvedPendingClarification === null
+            ? ($analysis->draftOrder['items'] ?? [])
+            : [$this->resolvedPendingItem($pendingClarification)];
         $discardedN8Indexes = [];
         $validateItem = function (array $item, int $index) use ($company, $date, $selectionMessages, $applyNewOrderHistoryBoundary, $historicalMessages, &$warnings, &$invalidQuantityDiscarded, &$ungroundedProductDiscarded, &$discardedN8Indexes): ?array {
             $providerItem = $item;
@@ -375,6 +383,50 @@ class CopilotOrderDraftValidator
         }
 
         return [];
+    }
+
+    /** @param mixed $pending @return array<string, mixed>|null */
+    private function resolvedPendingClarification(mixed $pending): ?array
+    {
+        if (! is_array($pending)
+            || ($pending['status'] ?? null) !== 'eligible'
+            || ($pending['type'] ?? null) !== 'ambiguous_meat'
+            || data_get($pending, 'resolution.status') !== 'resolved'
+            || (int) data_get($pending, 'resolution.component_id') < 1) {
+            return null;
+        }
+
+        return $pending;
+    }
+
+    /** @param array<string, mixed> $pending @return array<string, mixed> */
+    private function resolvedPendingItem(array $pending): array
+    {
+        $componentId = (int) data_get($pending, 'resolution.component_id');
+        $option = collect((array) ($pending['options'] ?? []))->firstWhere('component_id', $componentId);
+
+        return [
+            'menu_item_id' => (int) data_get($pending, 'candidate.product_id'),
+            'menu_item_slug' => (string) data_get($pending, 'candidate.product_slug'),
+            'quantity' => max(1, (int) data_get($pending, 'candidate.quantity', 1)),
+            'selections' => [
+                'meat_mode' => 'traditional',
+                'meat' => null,
+                'meats' => [(string) data_get($option, 'display_name')],
+            ],
+            'removed_components' => [],
+        ];
+    }
+
+    /** @param array<string, mixed> $pending @return array{direction:string,type:string,body:string} */
+    private function resolvedPendingSelectionMessage(array $pending): array
+    {
+        $componentId = (int) data_get($pending, 'resolution.component_id');
+        $option = collect((array) ($pending['options'] ?? []))->firstWhere('component_id', $componentId);
+
+        // This evidence exists only after the customer's exact or ordinal answer was
+        // matched against the prior event and revalidated against today's menu.
+        return ['direction' => 'inbound', 'type' => 'text', 'body' => (string) data_get($option, 'display_name')];
     }
 
     /**

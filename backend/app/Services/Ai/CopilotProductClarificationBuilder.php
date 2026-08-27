@@ -35,6 +35,74 @@ final class CopilotProductClarificationBuilder
         ];
     }
 
+    /** @param array<string,mixed> $safe @param array<string,mixed> $context @return array<string,mixed>|null */
+    public function forAmbiguousMeat(array $safe, array $context): ?array
+    {
+        $pending = $this->forPendingAmbiguousMeat($safe, $context);
+        if ($pending !== null) {
+            return $pending;
+        }
+
+        if ((string) ($safe['intent'] ?? '') !== 'ORDER_CREATE'
+            || data_get($context, 'active_order') !== null
+            || ! in_array('AMBIGUOUS_MEAT', array_column((array) ($safe['warnings'] ?? []), 'code'), true)) {
+            return null;
+        }
+
+        $item = data_get($safe, 'draft_order.items.0');
+        if (! is_array($item) || count((array) data_get($safe, 'draft_order.items', [])) !== 1) {
+            return null;
+        }
+        $menuItem = collect((array) data_get($context, 'menu', []))->firstWhere('id', (int) ($item['menu_item_id'] ?? 0));
+        if (! is_array($menuItem) || ! in_array((string) ($menuItem['rule'] ?? ''), ['n8_tradicional', 'n9_tradicional'], true)) {
+            return null;
+        }
+
+        $message = Str::of((string) data_get($context, 'latest_message.body', ''))->ascii()->lower()->toString();
+        $options = collect((array) data_get($context, 'daily_meats', []))
+            ->filter(fn (array $meat): bool => (int) ($meat['id'] ?? 0) > 0 && $this->matchesMeatReference($message, $meat))
+            ->map(fn (array $meat): array => ['component_id' => (int) $meat['id'], 'display_name' => (string) $meat['name']])
+            ->unique('component_id')->sortBy('display_name')->values();
+        if ($options->count() < 2 || $options->count() > 5) {
+            return null;
+        }
+
+        return [
+            'type' => 'MEAT',
+            'prompt' => 'Hoje temos '.$options->pluck('display_name')->implode(' e ').'. Qual você prefere?',
+            'options' => $options->all(),
+            'source' => 'DAILY_MENU',
+            'grounded' => true,
+            'scope' => ['product_id' => (int) $item['menu_item_id'], 'selection_group' => 'meat'],
+        ];
+    }
+
+    /** @param array<string,mixed> $safe @param array<string,mixed> $context @return array<string,mixed>|null */
+    private function forPendingAmbiguousMeat(array $safe, array $context): ?array
+    {
+        if ((string) ($safe['intent'] ?? '') !== 'ORDER_CONTINUE'
+            || data_get($context, 'pending_clarification.status') !== 'eligible'
+            || ! in_array(data_get($context, 'pending_clarification.resolution.status'), ['ambiguous', 'invalid'], true)) {
+            return null;
+        }
+
+        $options = collect((array) data_get($context, 'pending_clarification.options', []))
+            ->filter(fn (array $option): bool => (int) ($option['component_id'] ?? 0) > 0 && trim((string) ($option['display_name'] ?? '')) !== '')
+            ->values();
+        if ($options->count() < 2 || $options->count() > 5) {
+            return null;
+        }
+
+        return [
+            'type' => 'MEAT',
+            'prompt' => 'Para essa marmita, qual dessas carnes você prefere?',
+            'options' => $options->all(),
+            'source' => 'DAILY_MENU',
+            'grounded' => true,
+            'scope' => (array) data_get($context, 'pending_clarification.scope', []),
+        ];
+    }
+
     /** @param array<string,mixed> $clarification */
     public function reply(array $clarification): string
     {
@@ -93,5 +161,13 @@ final class CopilotProductClarificationBuilder
             ->unique('menu_item_id')
             ->sortBy('display_name')
             ->values();
+    }
+
+    /** @param array<string,mixed> $meat */
+    private function matchesMeatReference(string $message, array $meat): bool
+    {
+        return collect(preg_split('/[^a-z0-9]+/', Str::of((string) ($meat['name'] ?? ''))->ascii()->lower()->toString()) ?: [])
+            ->filter(fn (string $token): bool => strlen($token) >= 4)
+            ->contains(fn (string $token): bool => str_contains($message, $token));
     }
 }

@@ -4,7 +4,7 @@ namespace App\Services\Ai;
 
 final class CopilotAutomationEvaluationDataset
 {
-    public const VERSION = 1;
+    public const VERSION = 2;
 
     public static function fingerprint(): string
     {
@@ -28,6 +28,7 @@ final class CopilotAutomationEvaluationDataset
             self::readyOrder('n8_somente_bife'),
             self::readyOrder('n8_bife_adicional'),
             self::readyOrder('n9_validada'),
+            self::safeClarification('ambiguous_meat_safe_clarification'),
             self::humanReview('multi_item_incompleto', 'ORDER_CREATE', ['CARNE']),
             self::humanReview('pedido_ativo', 'ORDER_CREATE', [], 'EXISTING_ORDER'),
             self::humanReview('ORDER_CHANGE', 'ORDER_CHANGE'),
@@ -70,6 +71,20 @@ final class CopilotAutomationEvaluationDataset
                 'target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false],
             ],
         ]);
+    }
+
+    /** @return array<string,mixed> */
+    private static function safeClarification(string $id): array
+    {
+        return self::case($id, 'ORDER_CREATE', CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, [
+            'warnings' => [['code' => 'AMBIGUOUS_MEAT']],
+            'clarification' => [
+                'type' => 'MEAT',
+                'source' => 'DAILY_MENU',
+                'grounded' => true,
+                'options' => [['component_id' => 101], ['component_id' => 102]],
+            ],
+        ], CopilotAutomationAuthorityPolicy::DECISION_SHADOW);
     }
 
     /** @return array<string,mixed> */

@@ -59,6 +59,14 @@ final class CopilotAutomationAuthorityPolicy
             return $this->decision($rollout, self::DECISION_DENIED_AUTO, ['financial_or_administrative_action']);
         }
 
+        if ($this->isShadowSafeClarification($analysis)) {
+            if ($rollout === self::ROLLOUT_SHADOW) {
+                return $this->decision($rollout, self::DECISION_SHADOW, ['shadow_no_execution', 'safe_clarification_available'], 'send_safe_clarification');
+            }
+
+            return $this->decision($rollout, self::DECISION_HUMAN_REVIEW, ['safe_clarification_shadow_only']);
+        }
+
         if ($this->requiresHumanReview($intent, $analysis, $proposal)) {
             return $this->decision($rollout, self::DECISION_HUMAN_REVIEW, ['ambiguous_or_unsupported_request']);
         }
@@ -119,6 +127,19 @@ final class CopilotAutomationAuthorityPolicy
 
         return in_array($intent, ['ORDER_CREATE', 'ORDER_CONTINUE', 'ORDER_CONFIRMATION', 'ORDER_CHANGE'], true)
             && ($proposal['target']['state'] ?? null) === 'UNRESOLVED';
+    }
+
+    private function isShadowSafeClarification(array $analysis): bool
+    {
+        $clarification = $analysis['clarification'] ?? null;
+
+        return is_array($clarification)
+            && ($clarification['type'] ?? null) === 'MEAT'
+            && ($clarification['source'] ?? null) === 'DAILY_MENU'
+            && ($clarification['grounded'] ?? false) === true
+            && count((array) ($clarification['options'] ?? [])) >= 2
+            && count((array) ($clarification['options'] ?? [])) <= 5
+            && array_column((array) ($analysis['warnings'] ?? []), 'code') === ['AMBIGUOUS_MEAT'];
     }
 
     private function isFinancialOrAdministrative(string $intent, array $analysis, string $inboundContent): bool
