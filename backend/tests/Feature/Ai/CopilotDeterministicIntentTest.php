@@ -277,14 +277,17 @@ class CopilotDeterministicIntentTest extends TestCase
                         'draft_order' => ['items' => [[
                             'menu_item_slug' => 'n8',
                             'quantity' => 1,
-                            'selections' => ['meat' => 'porco'],
-                            'removed_components' => $this->calls === 1 ? [] : ['salada'],
+                            'selections' => [
+                                'meat' => 'porco',
+                                ...($this->calls === 3 ? ['salada' => 'none'] : []),
+                            ],
+                            'removed_components' => $this->calls === 2 ? ['salada'] : [],
                         ]], 'fulfillment' => 'pickup'],
                         'missing_information' => [],
-                        'warnings' => $this->calls === 1 ? [] : [[
+                        'warnings' => $this->calls === 2 ? [[
                             'code' => 'REMOVAL_NOT_SUPPORTED',
                             'message' => 'A montagem livre nao suporta remocao de salada.',
-                        ]],
+                        ]] : [],
                         'suggested_reply' => 'Resumo do pedido.',
                     ];
                 }
