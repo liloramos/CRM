@@ -299,6 +299,7 @@ export type ConversationOperationalStatus = {
 
 export type Conversation = {
   id: string
+  timezone?: string
   customer: CustomerSummary
   mode: AutomationMode
   automationMode?: 'assisted' | 'automatic' | 'manual'

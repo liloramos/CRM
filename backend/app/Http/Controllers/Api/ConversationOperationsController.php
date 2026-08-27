@@ -518,7 +518,8 @@ class ConversationOperationsController extends Controller
         $company = $this->resolveCompany($request);
         abort_unless((int) $media->company_id === (int) $company->id, 404);
 
-        if (! $media->storage_disk || ! $media->file_path || ! Storage::disk($media->storage_disk)->exists($media->file_path)) {
+        if ($media->status === WhatsAppMediaFile::STATUS_RECEIVED
+            && (! $media->storage_disk || ! $media->file_path || ! Storage::disk($media->storage_disk)->exists($media->file_path))) {
             $media = $mediaStorage->restoreIncomingMedia($media);
         }
 

@@ -7,6 +7,7 @@ use App\Models\Message;
 use App\Models\Order;
 use App\Models\WhatsAppMediaFile;
 use App\Services\Orders\CustomerActiveOrderResolver;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class PaymentProofCandidateClassifier
@@ -17,6 +18,13 @@ class PaymentProofCandidateClassifier
     public function classify(Conversation $conversation, Message $message, ?WhatsAppMediaFile $media): ?array
     {
         if (! $media instanceof WhatsAppMediaFile || ! in_array($media->media_type, ['image', 'document'], true)) {
+            return null;
+        }
+
+        if ($media->status !== WhatsAppMediaFile::STATUS_STORED
+            || ! $media->storage_disk
+            || ! $media->file_path
+            || ! Storage::disk($media->storage_disk)->exists($media->file_path)) {
             return null;
         }
 

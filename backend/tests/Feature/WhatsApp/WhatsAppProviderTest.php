@@ -25,9 +25,12 @@ use App\Models\WhatsAppWebhookEvent;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\PaymentProofCandidateClassifier;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\WhatsApp\Providers\MetaCloudWhatsAppProvider;
 use App\Services\WhatsApp\WhatsAppAudioNormalizer;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
+use App\Services\WhatsApp\WhatsAppMediaStorageService;
 use App\Services\WhatsApp\WhatsAppService;
+use Carbon\CarbonImmutable;
 use Database\Seeders\CompanySeeder;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Database\Seeders\WhatsAppSeeder;
@@ -337,6 +340,50 @@ class WhatsAppProviderTest extends TestCase
         $candidate = app(PaymentProofCandidateClassifier::class)->classify($conversation->fresh(), $message, $media);
 
         $this->assertSame($order->id, data_get($candidate, 'order.id'));
+    }
+
+    public function test_media_provider_auth_failure_is_sanitized_and_cannot_create_payment_evidence(): void
+    {
+        $company = $this->prepareWhatsApp();
+        Storage::fake('local');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fake([
+            'https://graph.facebook.com/v20.0/safe-media-auth-id' => Http::response([
+                'error' => ['type' => 'OAuthException'],
+            ], 403),
+        ]);
+
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente auth', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $this->createActiveOrder($company, $customer, $conversation);
+        $message = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND, 'content' => 'Enviei o Pix.', 'type' => 'image']);
+        $media = WhatsAppMediaFile::query()->create(['company_id' => $company->id, 'message_id' => $message->id, 'provider' => 'meta_cloud', 'provider_media_id' => 'safe-media-auth-id', 'media_type' => 'image', 'mime_type' => 'image/png', 'status' => WhatsAppMediaFile::STATUS_RECEIVED]);
+
+        $recovered = (new WhatsAppMediaStorageService(app(MetaCloudWhatsAppProvider::class)))->restoreIncomingMedia($media);
+
+        $this->assertSame(WhatsAppMediaFile::STATUS_FAILED, $recovered->status);
+        $this->assertSame(WhatsAppErrorClassifier::TOKEN_INVALID, data_get($recovered->metadata, 'download_result'));
+        $this->assertNull(app(PaymentProofCandidateClassifier::class)->classify($conversation->fresh(), $message, $recovered));
+        $this->assertSame(0, PaymentProof::query()->count());
+    }
+
+    public function test_conversation_presenter_uses_the_company_timezone_for_message_labels(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $company->setting()->updateOrCreate([], ['timezone' => 'America/Sao_Paulo']);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente horario', 'phone' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'started_at' => now()]);
+        $message = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND, 'content' => 'Horario sanitizado', 'type' => 'text']);
+        $timestamp = CarbonImmutable::parse('2026-08-27 22:55:00', 'UTC');
+        $message->forceFill(['created_at' => $timestamp, 'updated_at' => $timestamp])->save();
+
+        $presented = app(ConversationPresenter::class)->conversation($conversation->fresh());
+
+        $this->assertSame('America/Sao_Paulo', data_get($presented, 'timezone'));
+        $this->assertSame('19:55', data_get($presented, 'messages.0.timeLabel'));
     }
 
     public function test_webhook_verification_and_receive_persists_safe_event_and_message(): void

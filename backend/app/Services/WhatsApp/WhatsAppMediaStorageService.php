@@ -9,6 +9,7 @@ use App\Models\Message;
 use App\Models\WhatsAppAccount;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppWebhookEvent;
+use DomainException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -93,6 +94,15 @@ class WhatsAppMediaStorageService
         try {
             $download = $this->provider->downloadMedia($mediaId);
         } catch (Throwable $exception) {
+            $reason = $exception instanceof DomainException
+                && in_array($exception->getMessage(), [
+                    WhatsAppErrorClassifier::TOKEN_INVALID,
+                    WhatsAppErrorClassifier::TOKEN_EXPIRED,
+                    WhatsAppErrorClassifier::PROVIDER_REJECTED,
+                ], true)
+                ? $exception->getMessage()
+                : 'provider_exception';
+
             Log::warning('WhatsApp inbound media download failed.', [
                 'company_id' => $media->company_id,
                 'media_file_id' => $media->id,
@@ -100,9 +110,10 @@ class WhatsAppMediaStorageService
                 'media_type' => $media->media_type,
                 'provider' => $media->provider,
                 'error_class' => $exception::class,
+                'error_code' => $reason,
             ]);
 
-            return $this->markDownloadUnavailable($media, 'provider_exception');
+            return $this->markDownloadUnavailable($media, $reason);
         }
 
         if ($download === null) {

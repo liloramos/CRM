@@ -10,7 +10,9 @@ use App\Data\WhatsApp\WhatsAppMediaUploadResult;
 use App\Data\WhatsApp\WhatsAppSendResult;
 use App\Services\WhatsApp\MetaWebhookPayloadParser;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
+use DomainException;
 use Illuminate\Http\Client\PendingRequest;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Throwable;
 
@@ -356,21 +358,21 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
             ->get($metadataUrl);
 
         if (! $metadataResponse->successful()) {
-            return null;
+            $this->throwMediaDownloadFailure($metadataResponse);
         }
 
         $metadata = $metadataResponse->json();
         $downloadUrl = is_array($metadata) ? ($metadata['url'] ?? null) : null;
 
         if (! is_string($downloadUrl) || $downloadUrl === '') {
-            return null;
+            throw new DomainException(WhatsAppErrorClassifier::PROVIDER_REJECTED);
         }
 
         $mediaResponse = $this->request()
             ->get($downloadUrl);
 
         if (! $mediaResponse->successful()) {
-            return null;
+            $this->throwMediaDownloadFailure($mediaResponse);
         }
 
         $contents = $mediaResponse->body();
@@ -442,5 +444,16 @@ class MetaCloudWhatsAppProvider implements WhatsAppProviderInterface
         }
 
         return $request;
+    }
+
+    private function throwMediaDownloadFailure(Response $response): never
+    {
+        $payload = $response->json();
+        $errorPayload = is_array($payload) && is_array($payload['error'] ?? null)
+            ? $payload['error']
+            : [];
+        $error = $this->errors->providerRejection($response->status(), $errorPayload);
+
+        throw new DomainException($error['code']);
     }
 }

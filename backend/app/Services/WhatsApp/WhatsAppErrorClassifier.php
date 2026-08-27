@@ -105,7 +105,7 @@ class WhatsAppErrorClassifier
                 : self::TOKEN_INVALID;
         }
 
-        if ($httpStatus === 401) {
+        if (in_array($httpStatus, [401, 403], true)) {
             return self::TOKEN_INVALID;
         }
 
