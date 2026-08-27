@@ -56,9 +56,14 @@ class CopilotOrderDraftValidator
         $ungroundedProductDiscarded = false;
         $pendingClarification = data_get($context, 'pending_clarification');
         $resolvedPendingClarification = $this->resolvedPendingClarification($pendingClarification);
+        if ($this->hasAmbiguousPendingMeatClarification($pendingClarification)) {
+            $warnings[] = [
+                'code' => 'AMBIGUOUS_MEAT',
+                'message' => 'A escolha de carne permanece ambigua no contexto do cliente.',
+            ];
+        }
         if ($resolvedPendingClarification !== null) {
             $selectionMessages[] = $this->resolvedPendingSelectionMessage($pendingClarification);
-            $warnings = array_values(array_filter($warnings, fn (array $warning): bool => ! in_array(strtoupper((string) ($warning['code'] ?? '')), ['AMBIGUOUS_MEAT', 'UNRESOLVED_MEAT'], true)));
         }
         $proposedItems = $resolvedPendingClarification === null
             ? ($analysis->draftOrder['items'] ?? [])
@@ -399,6 +404,14 @@ class CopilotOrderDraftValidator
         return $pending;
     }
 
+    private function hasAmbiguousPendingMeatClarification(mixed $pending): bool
+    {
+        return is_array($pending)
+            && ($pending['status'] ?? null) === 'eligible'
+            && ($pending['type'] ?? null) === 'ambiguous_meat'
+            && data_get($pending, 'resolution.status') === 'ambiguous';
+    }
+
     /** @param array<string, mixed> $pending @return array<string, mixed> */
     private function resolvedPendingItem(array $pending): array
     {
@@ -423,10 +436,13 @@ class CopilotOrderDraftValidator
     {
         $componentId = (int) data_get($pending, 'resolution.component_id');
         $option = collect((array) ($pending['options'] ?? []))->firstWhere('component_id', $componentId);
+        $product = (string) data_get($pending, 'candidate.product_slug');
 
         // This evidence exists only after the customer's exact or ordinal answer was
-        // matched against the prior event and revalidated against today's menu.
-        return ['direction' => 'inbound', 'type' => 'text', 'body' => (string) data_get($option, 'display_name')];
+        // matched against the prior event and revalidated against today's menu. Keeping
+        // the product anchor here prevents the original ambiguous token from being used
+        // again by the product-specific selection guards.
+        return ['direction' => 'inbound', 'type' => 'text', 'body' => trim($product.' '.(string) data_get($option, 'display_name'))];
     }
 
     /**
