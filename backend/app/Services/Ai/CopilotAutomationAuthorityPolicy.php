@@ -132,14 +132,36 @@ final class CopilotAutomationAuthorityPolicy
     private function isShadowSafeClarification(array $analysis): bool
     {
         $clarification = $analysis['clarification'] ?? null;
+        $options = (array) data_get($clarification, 'options', []);
+        $optionIds = array_values(array_unique(array_filter(array_map(
+            fn (mixed $option): int => (int) data_get($option, 'component_id'),
+            $options,
+        ))));
+        $warningCodes = $this->codes((array) ($analysis['warnings'] ?? []));
+        $missingCodes = $this->codes((array) ($analysis['missing_information'] ?? []));
 
         return is_array($clarification)
+            && (string) ($analysis['intent'] ?? '') === 'ORDER_CREATE'
             && ($clarification['type'] ?? null) === 'MEAT'
             && ($clarification['source'] ?? null) === 'DAILY_MENU'
             && ($clarification['grounded'] ?? false) === true
-            && count((array) ($clarification['options'] ?? [])) >= 2
-            && count((array) ($clarification['options'] ?? [])) <= 5
-            && array_column((array) ($analysis['warnings'] ?? []), 'code') === ['AMBIGUOUS_MEAT'];
+            && (string) data_get($clarification, 'scope.selection_group') === 'meat'
+            && (int) data_get($clarification, 'scope.product_id') > 0
+            && count($options) >= 2
+            && count($options) <= 5
+            && count($optionIds) === count($options)
+            && in_array('AMBIGUOUS_MEAT', $warningCodes, true)
+            && array_diff($warningCodes, ['AMBIGUOUS_MEAT', 'DOMAIN_SELECTION_REJECTED']) === []
+            && array_diff($missingCodes, ['CARNE']) === [];
+    }
+
+    /** @param list<array<string,mixed>> $entries @return list<string> */
+    private function codes(array $entries): array
+    {
+        return array_values(array_unique(array_filter(array_map(
+            fn (mixed $entry): string => strtoupper(trim((string) data_get($entry, 'code', ''))),
+            $entries,
+        ))));
     }
 
     private function isFinancialOrAdministrative(string $intent, array $analysis, string $inboundContent): bool
