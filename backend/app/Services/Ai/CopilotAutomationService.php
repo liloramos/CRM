@@ -301,6 +301,13 @@ final class CopilotAutomationService
                 'safe_result_status' => (bool) ($analysis['requires_human_review'] ?? true) ? 'requires_human_review' : 'safe',
                 'target_state' => data_get($analysis, 'proposal.target.state'),
                 'guarded_reply_present' => trim((string) ($analysis['suggested_reply'] ?? '')) !== '',
+                'clarification_required' => is_array($analysis['clarification'] ?? null),
+                'clarification_type' => data_get($analysis, 'clarification.type'),
+                'clarification_option_count' => count((array) data_get($analysis, 'clarification.options', [])),
+                'clarification_context' => $this->clarificationContext($conversation, $message, $decision, $analysis),
+                'clarification_source_event_id' => data_get($analysis, 'metadata.clarification_continuity.source_event_id'),
+                'clarification_resolution' => data_get($analysis, 'metadata.clarification_continuity.resolution'),
+                'clarification_matched_option_id' => data_get($analysis, 'metadata.clarification_continuity.matched_option_id'),
                 'guard_results' => [
                     // Analysis is intentionally conservative. The policy decision above,
                     // not this telemetry field, controls whether a human action is required.
@@ -326,6 +333,41 @@ final class CopilotAutomationService
             fn (array $entry): string => trim((string) ($entry['code'] ?? '')),
             $entries,
         ))));
+    }
+
+    /** @param array<string, mixed> $decision @param array<string, mixed> $analysis @return array<string, mixed>|null */
+    private function clarificationContext(Conversation $conversation, Message $message, array $decision, array $analysis): ?array
+    {
+        $clarification = $analysis['clarification'] ?? null;
+        if (($decision['action'] ?? null) !== 'send_safe_clarification'
+            || ! is_array($clarification)
+            || ($clarification['type'] ?? null) !== 'MEAT'
+            || ($clarification['source'] ?? null) !== 'DAILY_MENU'
+            || ($clarification['grounded'] ?? false) !== true) {
+            return null;
+        }
+
+        $item = data_get($analysis, 'draft_order.items.0');
+        $optionIds = array_values(array_unique(array_filter(array_map(
+            fn (mixed $option): int => (int) data_get($option, 'component_id'),
+            (array) ($clarification['options'] ?? []),
+        ))));
+        if (! is_array($item) || count((array) data_get($analysis, 'draft_order.items', [])) !== 1 || count($optionIds) < 2 || count($optionIds) > 5) {
+            return null;
+        }
+
+        return [
+            'type' => 'ambiguous_meat',
+            'selection_group' => 'meat',
+            'source_message_id' => (int) $message->id,
+            'active_order_id' => $conversation->active_order_id === null ? null : (int) $conversation->active_order_id,
+            'candidate' => [
+                'product_id' => (int) ($item['menu_item_id'] ?? 0),
+                'product_slug' => (string) ($item['menu_item_slug'] ?? ''),
+                'quantity' => max(1, (int) ($item['quantity'] ?? 1)),
+            ],
+            'option_component_ids' => $optionIds,
+        ];
     }
 
     private function markSkipped(AutomationEvent $event, string $reasonCode): AutomationEvent

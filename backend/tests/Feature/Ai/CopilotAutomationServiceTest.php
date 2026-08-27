@@ -128,6 +128,43 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
+    public function test_shadow_safe_clarification_records_only_the_minimum_rehydratable_context(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('quero uma n8 com frango');
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company, CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW);
+        $product = $this->availableProduct($company);
+        $analysis = [
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [['menu_item_id' => $product->id, 'menu_item_slug' => $product->slug, 'quantity' => 1]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [['code' => 'AMBIGUOUS_MEAT']],
+            'clarification' => [
+                'type' => 'MEAT',
+                'source' => 'DAILY_MENU',
+                'grounded' => true,
+                'options' => [
+                    ['component_id' => 701, 'display_name' => 'Opção que não deve ser persistida'],
+                    ['component_id' => 702, 'display_name' => 'Outra opção que não deve ser persistida'],
+                ],
+            ],
+            'proposal' => ['target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false]],
+        ];
+        $this->app->instance(ConversationCopilotService::class, $this->copilotReturning($analysis));
+
+        $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $context = (array) data_get($event?->payload, 'clarification_context');
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($event?->payload, 'decision'));
+        $this->assertSame('send_safe_clarification', data_get($event?->payload, 'action'));
+        $this->assertSame('ambiguous_meat', data_get($context, 'type'));
+        $this->assertSame([$product->id, $product->slug, 1], [data_get($context, 'candidate.product_id'), data_get($context, 'candidate.product_slug'), data_get($context, 'candidate.quantity')]);
+        $this->assertSame([701, 702], $context['option_component_ids']);
+        $this->assertStringNotContainsString('Opção que não deve ser persistida', json_encode($context, JSON_THROW_ON_ERROR));
+        $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame(0, Order::count());
+    }
+
     public function test_switching_from_manual_to_automatic_enables_the_next_inbound_shadow_analysis(): void
     {
         [$company, $conversation] = $this->conversationWithInbound('mensagem anterior');

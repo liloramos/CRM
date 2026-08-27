@@ -48,6 +48,10 @@ final class CopilotLatestMessageIntentResolver
             return 'ORDER_CREATE';
         }
 
+        if ($this->hasEligiblePendingClarification($context)) {
+            return 'ORDER_CONTINUE';
+        }
+
         if ($this->hasCurrentPendingOrder($context)
             && preg_match('/^(?:sim|isso(?:\s+mesmo)?|pode\s+ser|confere|confirmo|correto|ok(?:ay)?)\b/', $text) === 1) {
             return 'ORDER_CONFIRMATION';
@@ -112,5 +116,12 @@ final class CopilotLatestMessageIntentResolver
         }
 
         return false;
+    }
+
+    /** @param array<string,mixed> $context */
+    private function hasEligiblePendingClarification(array $context): bool
+    {
+        return data_get($context, 'pending_clarification.status') === 'eligible'
+            && in_array(data_get($context, 'pending_clarification.resolution.status'), ['resolved', 'ambiguous', 'invalid'], true);
     }
 }

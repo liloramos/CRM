@@ -70,6 +70,7 @@ class ConversationCopilotService
             }
             $safe = $this->deltas->restrict($conversation->company, $safe, $context);
             $safe = $this->suggestedReplies->restrict($safe, $context);
+            $safe['metadata'] = [...(array) ($safe['metadata'] ?? []), ...$this->clarificationContinuity($context, $intent)];
 
             return [...$safe, 'proposal' => $this->proposals->present($conversation, $safe, $context)];
         } catch (\Throwable $exception) {
@@ -91,5 +92,25 @@ class ConversationCopilotService
             'deterministic',
             is_array($analysis['metadata'] ?? null) ? $analysis['metadata'] : [],
         )->toArray();
+    }
+
+    /** @param array<string, mixed> $context @return array<string, mixed> */
+    private function clarificationContinuity(array $context, string $intent): array
+    {
+        $pending = data_get($context, 'pending_clarification');
+        if (! is_array($pending) || ! isset($pending['source_event_id'])) {
+            return [];
+        }
+
+        $resolution = (string) data_get($pending, 'resolution.status', 'stale');
+        if ($intent === 'ORDER_CREATE') {
+            $resolution = 'superseded';
+        }
+
+        return ['clarification_continuity' => [
+            'source_event_id' => (int) $pending['source_event_id'],
+            'resolution' => $resolution,
+            'matched_option_id' => $resolution === 'resolved' ? (int) data_get($pending, 'resolution.component_id') : null,
+        ]];
     }
 }

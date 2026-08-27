@@ -17,7 +17,8 @@ final class CopilotSuggestedReplyGuard
         if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'product_catalog', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy'], true)) {
             return [...$safe, 'clarification' => null];
         }
-        $clarification = $this->clarifications->forSafe($safe, $context);
+        $clarification = $this->clarifications->forAmbiguousMeat($safe, $context)
+            ?? $this->clarifications->forSafe($safe, $context);
         if ($clarification !== null) {
             return [...$safe, 'clarification' => $clarification, 'suggested_reply' => $this->clarifications->reply($clarification)];
         }
