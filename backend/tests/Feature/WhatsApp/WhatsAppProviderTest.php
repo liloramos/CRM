@@ -2020,6 +2020,136 @@ class WhatsAppProviderTest extends TestCase
         $this->assertSame(1, $order->printJobs()->count());
     }
 
+    public function test_human_proof_rejection_replies_to_the_selected_evidence_and_is_idempotent(): void
+    {
+        [$company, $conversation, $order, $payment, $user] = $this->createPaymentProofReviewContext();
+        $this->configureMetaTextProvider();
+
+        $firstMessage = $this->createInboundEvidenceMessage($conversation, 'wamid.proof-rejection-first');
+        $secondMessage = $this->createInboundEvidenceMessage($conversation, 'wamid.proof-rejection-second');
+        $secondMedia = WhatsAppMediaFile::query()->create([
+            'company_id' => $company->id,
+            'message_id' => $secondMessage->id,
+            'provider' => 'meta_cloud',
+            'provider_media_id' => 'safe-proof-rejection-media',
+            'media_type' => 'image',
+            'mime_type' => 'image/png',
+            'status' => WhatsAppMediaFile::STATUS_STORED,
+        ]);
+        $firstProof = PaymentProof::query()->create([
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'status' => PaymentProof::STATUS_RECEIVED,
+            'received_at' => now(),
+            'metadata' => ['message_id' => $firstMessage->id],
+        ]);
+        $secondProof = PaymentProof::query()->create([
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'status' => PaymentProof::STATUS_RECEIVED,
+            'received_at' => now(),
+            'metadata' => ['whatsapp_media_file_id' => $secondMedia->id],
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$firstProof->id}/reject", ['reason' => 'Evidência inválida.'])
+            ->assertOk();
+
+        $firstOutbound = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('metadata->client_reference', 'payment-proof-rejection:'.$firstProof->id)
+            ->sole();
+        $this->assertSame($firstMessage->id, $firstOutbound->reply_to_message_id);
+        $this->assertSame('system', $firstOutbound->sender_type);
+        $this->assertSame('deterministic_payment_proof_rejection', data_get($firstOutbound->metadata, 'source'));
+        $this->assertSame('deterministic_payment_proof_rejection', data_get($firstOutbound->metadata, 'action_type'));
+        $this->assertSame(PaymentProof::STATUS_REJECTED, $firstProof->refresh()->status);
+        $this->assertSame(PaymentProof::STATUS_RECEIVED, $secondProof->refresh()->status);
+        $this->assertNotSame(Payment::STATUS_REJECTED, $payment->refresh()->status);
+        $this->assertNotSame(Payment::STATUS_CONFIRMED, $payment->status);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$secondProof->id}/reject", ['reason' => 'Nova evidência inválida.'])
+            ->assertOk();
+
+        $secondOutbound = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('metadata->client_reference', 'payment-proof-rejection:'.$secondProof->id)
+            ->sole();
+        $this->assertSame($secondMessage->id, $secondOutbound->reply_to_message_id);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$secondProof->id}/reject", ['reason' => 'Nova evidência inválida.'])
+            ->assertOk();
+
+        $this->assertSame(1, Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('metadata->client_reference', 'payment-proof-rejection:'.$secondProof->id)
+            ->count());
+        $this->assertNotSame(Payment::STATUS_CONFIRMED, $payment->refresh()->status);
+        Http::assertSentCount(2);
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'context.message_id') === $firstMessage->external_message_id);
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'context.message_id') === $secondMessage->external_message_id);
+    }
+
+    public function test_human_proof_rejection_without_a_valid_message_reference_sends_once_without_reply_context(): void
+    {
+        [$company, $conversation, $order, $payment, $user] = $this->createPaymentProofReviewContext();
+        $this->configureMetaTextProvider();
+        $proof = PaymentProof::query()->create([
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'status' => PaymentProof::STATUS_RECEIVED,
+            'received_at' => now(),
+            'metadata' => ['message_id' => 999999],
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$proof->id}/reject", ['reason' => 'Referência indisponível.'])
+            ->assertOk();
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$proof->id}/reject", ['reason' => 'Referência indisponível.'])
+            ->assertOk();
+
+        $outbound = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('metadata->client_reference', 'payment-proof-rejection:'.$proof->id)
+            ->sole();
+        $this->assertNull($outbound->reply_to_message_id);
+        $this->assertSame('system', $outbound->sender_type);
+        $this->assertSame(PaymentProof::STATUS_REJECTED, $proof->refresh()->status);
+        $this->assertNotSame(Payment::STATUS_CONFIRMED, $payment->refresh()->status);
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request): bool => data_get($request->data(), 'context') === null);
+    }
+
+    public function test_human_proof_rejection_cannot_change_a_confirmed_payment_or_send_an_acknowledgement(): void
+    {
+        [, $conversation, $order, $payment, $user] = $this->createPaymentProofReviewContext();
+        $payment->forceFill(['status' => Payment::STATUS_CONFIRMED])->save();
+        $proof = PaymentProof::query()->create([
+            'payment_id' => $payment->id,
+            'order_id' => $order->id,
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'status' => PaymentProof::STATUS_RECEIVED,
+            'received_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/payment-proofs/{$proof->id}/reject", ['reason' => 'Não deve alterar pagamento confirmado.'])
+            ->assertUnprocessable();
+
+        $this->assertSame(Payment::STATUS_CONFIRMED, $payment->refresh()->status);
+        $this->assertSame(PaymentProof::STATUS_RECEIVED, $proof->refresh()->status);
+        $this->assertSame(0, Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)
+            ->count());
+    }
+
     public function test_meta_provider_status_does_not_expose_token_value(): void
     {
         Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
@@ -2080,6 +2210,76 @@ class WhatsAppProviderTest extends TestCase
         $this->assertStringNotContainsString('safe-phone-number-id-never-print', $output);
         $this->assertStringNotContainsString('safe-waba-never-print', $output);
         $this->assertStringNotContainsString('safe-verify-token-never-print', $output);
+    }
+
+    /**
+     * @return array{Company, Conversation, Order, Payment, User}
+     */
+    private function createPaymentProofReviewContext(): array
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente revisão de evidência',
+            'phone' => '15550100011',
+            'whatsapp_id' => '15550100011',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'whatsapp_identifier' => '15550100011',
+            'started_at' => now(),
+        ]);
+        $order = $this->createActiveOrder($company, $customer, $conversation, totalCents: 3200);
+        $payment = Payment::query()->create([
+            'company_id' => $company->id,
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'method' => Payment::METHOD_PIX,
+            'provider' => Payment::PROVIDER_MANUAL,
+            'status' => Payment::STATUS_PROOF_RECEIVED,
+            'amount_cents' => 3200,
+            'confirmed_amount_cents' => 0,
+            'amount_due_after_payment_cents' => 3200,
+            'currency' => 'BRL',
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        return [$company, $conversation, $order, $payment, $user];
+    }
+
+    private function createInboundEvidenceMessage(Conversation $conversation, string $externalMessageId): Message
+    {
+        return Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => '[imagem recebida]',
+            'type' => 'image',
+            'provider' => 'meta_cloud',
+            'external_message_id' => $externalMessageId,
+        ]);
+    }
+
+    private function configureMetaTextProvider(): void
+    {
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fake([
+            'https://graph.facebook.com/v20.0/safe-phone-number-id/messages' => Http::sequence()
+                ->push(['messages' => [['id' => 'wamid.payment-proof-rejection-sent-1']]], 200)
+                ->push(['messages' => [['id' => 'wamid.payment-proof-rejection-sent-2']]], 200),
+        ]);
     }
 
     private function prepareWhatsApp(bool $withRoles = false): Company

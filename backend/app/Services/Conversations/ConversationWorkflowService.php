@@ -10,6 +10,7 @@ use App\Models\Message;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\User;
+use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Services\Ai\AiAutomationService;
 use App\Services\Payments\PaymentWorkflowService;
@@ -316,14 +317,61 @@ class ConversationWorkflowService
 
         $recipient = $conversation->whatsapp_identifier ?: $conversation->customer()->value('whatsapp_id') ?: $conversation->customer()->value('phone');
         if (is_string($recipient) && trim($recipient) !== '') {
+            $replyToMessage = $this->paymentProofSourceMessage($company, $conversation, $proof);
+
             $this->whatsapp->sendTextMessage($company, $recipient, 'Nao conseguimos validar essa evidência. Pode enviar um novo comprovante ou chamar a atendente?', [
                 'conversation' => $conversation,
-                'sender_type' => 'human',
-                'sent_by_user_id' => $user->id,
+                'sender_type' => 'system',
+                'message_source' => 'deterministic_payment_proof_rejection',
+                'action_type' => 'deterministic_payment_proof_rejection',
+                'client_reference' => 'payment-proof-rejection:'.$proof->id,
+                'reply_to_message_id' => $replyToMessage?->id,
+                'reply_to_provider_message_id' => $replyToMessage?->external_message_id,
             ]);
         }
 
         return $conversation->refresh();
+    }
+
+    private function paymentProofSourceMessage(Company $company, Conversation $conversation, PaymentProof $proof): ?Message
+    {
+        $metadata = (array) $proof->metadata;
+        $messageId = (int) ($metadata['message_id'] ?? 0);
+
+        if ($messageId > 0) {
+            $message = $this->replyablePaymentProofMessage($conversation, $messageId);
+            if ($message instanceof Message) {
+                return $message;
+            }
+        }
+
+        $mediaId = (int) ($metadata['whatsapp_media_file_id'] ?? 0);
+        if ($mediaId <= 0) {
+            return null;
+        }
+
+        $media = WhatsAppMediaFile::query()
+            ->whereKey($mediaId)
+            ->where('company_id', $company->id)
+            ->first();
+
+        return $media instanceof WhatsAppMediaFile
+            ? $this->replyablePaymentProofMessage($conversation, (int) $media->message_id)
+            : null;
+    }
+
+    private function replyablePaymentProofMessage(Conversation $conversation, int $messageId): ?Message
+    {
+        if ($messageId <= 0) {
+            return null;
+        }
+
+        return Message::query()
+            ->whereKey($messageId)
+            ->where('conversation_id', $conversation->id)
+            ->whereNotNull('external_message_id')
+            ->where('external_message_id', '!=', '')
+            ->first();
     }
 
     private function assertProofBelongsToConversation(Company $company, Conversation $conversation, PaymentProof $proof): void
