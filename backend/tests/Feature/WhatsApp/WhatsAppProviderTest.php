@@ -2005,6 +2005,8 @@ class WhatsAppProviderTest extends TestCase
             'id' => $proof->id,
             'status' => PaymentProof::STATUS_ACCEPTED,
         ]);
+        $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
+        $this->assertSame($payment->id, $proof->refresh()->payment_id);
         $this->assertDatabaseHas('print_jobs', [
             'order_id' => $order->id,
             'job_type' => 'order_ticket',

@@ -65,6 +65,79 @@ class PaymentWorkflowTest extends TestCase
         $this->assertSame($customer->id, $order->payer_customer_id);
     }
 
+    public function test_order_confirmation_reuses_the_single_reviewable_payment_and_preserves_its_evidence(): void
+    {
+        [, , $order] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create();
+        $payments = app(PaymentWorkflowService::class);
+        $payment = $payments->recordPayment($order, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $order->total_cents,
+        ]);
+        $rejectedProof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 501],
+        ]);
+        $receivedProof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 502],
+        ]);
+        $payments->rejectProof($rejectedProof, $user, 'Evidência inválida.');
+
+        $confirmed = $payments->confirmOrderPayment($order, $user, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $order->total_cents,
+        ]);
+        $retry = $payments->confirmOrderPayment($order, $user, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $order->total_cents,
+        ]);
+
+        $this->assertSame($payment->id, $confirmed->id);
+        $this->assertSame($payment->id, $retry->id);
+        $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
+        $this->assertSame(Payment::STATUS_CONFIRMED, $payment->refresh()->status);
+        $this->assertSame($user->id, $payment->confirmed_by_user_id);
+        $this->assertSame(PaymentProof::STATUS_REJECTED, $rejectedProof->refresh()->status);
+        $this->assertSame(PaymentProof::STATUS_RECEIVED, $receivedProof->refresh()->status);
+        $this->assertSame($payment->id, $receivedProof->payment_id);
+    }
+
+    public function test_order_confirmation_fails_closed_when_reviewable_payments_are_ambiguous(): void
+    {
+        [, , $order] = $this->createOrderWithProduct('n8-casa');
+        $payments = app(PaymentWorkflowService::class);
+        $payments->recordPayment($order, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $order->total_cents,
+        ]);
+        Payment::query()->create([
+            'company_id' => $order->company_id,
+            'order_id' => $order->id,
+            'customer_id' => $order->payer_customer_id,
+            'method' => Payment::METHOD_CASH,
+            'provider' => Payment::PROVIDER_MANUAL,
+            'status' => Payment::STATUS_PENDING,
+            'amount_cents' => $order->total_cents,
+            'confirmed_amount_cents' => 0,
+            'amount_due_after_payment_cents' => $order->total_cents,
+            'currency' => $order->currency,
+        ]);
+
+        try {
+            $payments->confirmOrderPayment($order, null, ['method' => Payment::METHOD_PIX]);
+            $this->fail('A confirmação deveria falhar diante de cobranças abertas ambíguas.');
+        } catch (DomainException $exception) {
+            $this->assertSame('Existe mais de uma cobrança aberta ou uma cobrança com outra forma de pagamento. Confirme o comprovante pela conversa vinculada.', $exception->getMessage());
+        }
+
+        $this->assertSame(2, Payment::query()->where('order_id', $order->id)->count());
+        $this->assertSame(0, Payment::query()
+            ->where('order_id', $order->id)
+            ->where('status', Payment::STATUS_CONFIRMED)
+            ->count());
+    }
+
     public function test_whatsapp_evidence_is_idempotent_per_media_and_keeps_multiple_files_auditable(): void
     {
         [, , $order] = $this->createOrderWithProduct('n8-casa');

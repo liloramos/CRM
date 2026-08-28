@@ -10,6 +10,7 @@ use App\Models\DailyComponentAvailability;
 use App\Models\MenuComponent;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentProof;
 use App\Models\Product;
 use App\Models\ProductGroupComponent;
 use App\Models\ProductOption;
@@ -1008,6 +1009,45 @@ class OrderWorkflowTest extends TestCase
 
         $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
         $this->assertSame(800, $order->refresh()->amount_paid_cents);
+    }
+
+    public function test_order_payment_confirmation_reuses_the_existing_payment_proof_review(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $orders->addItem($order, $product);
+        $order->forceFill(['status' => Order::STATUS_AWAITING_PAYMENT])->save();
+
+        $payment = $payments->recordPayment($order, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 800,
+        ]);
+        $proof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 901],
+        ]);
+
+        foreach ([1, 2] as $attempt) {
+            $this->actingAs($user)
+                ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                    'method' => Payment::METHOD_PIX,
+                    'amount_cents' => 800,
+                ])
+                ->assertOk()
+                ->assertJsonPath('data.paymentStatus', 'pago');
+        }
+
+        $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
+        $this->assertSame(Payment::STATUS_CONFIRMED, $payment->refresh()->status);
+        $this->assertSame($user->id, $payment->confirmed_by_user_id);
+        $this->assertSame($payment->id, $proof->refresh()->payment_id);
+        $this->assertSame(PaymentProof::STATUS_RECEIVED, $proof->status);
     }
 
     public function test_empty_draft_order_can_be_deleted_safely(): void
