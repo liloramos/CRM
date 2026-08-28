@@ -213,6 +213,7 @@ class ConversationPresenter
         return match ($message->sender_type ?: $message->sender) {
             'human', 'attendant', 'agent', 'user' => 'attendant',
             'ai', 'assistant' => 'ai',
+            'system' => 'system',
             default => 'customer',
         };
     }

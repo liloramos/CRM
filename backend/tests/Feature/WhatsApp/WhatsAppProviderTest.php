@@ -25,6 +25,7 @@ use App\Models\WhatsAppWebhookEvent;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\PaymentProofCandidateClassifier;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\Payments\PaymentWorkflowService;
 use App\Services\WhatsApp\Providers\MetaCloudWhatsAppProvider;
 use App\Services\WhatsApp\WhatsAppAudioNormalizer;
 use App\Services\WhatsApp\WhatsAppErrorClassifier;
@@ -1697,9 +1698,16 @@ class WhatsAppProviderTest extends TestCase
         ]);
         $this->assertDatabaseHas('messages', [
             'conversation_id' => $conversation->id,
-            'sender_type' => 'ai',
+            'sender_type' => 'system',
             'content' => 'Recebemos seu comprovante. Vamos conferir o pagamento e avisaremos assim que ele for confirmado.',
         ]);
+        $acknowledgement = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('sender_type', 'system')
+            ->sole();
+        $this->assertSame('deterministic_payment_proof_ack', data_get($acknowledgement->metadata, 'source'));
+        $this->assertSame('deterministic_payment_proof_ack', data_get($acknowledgement->metadata, 'action_type'));
+        $this->assertSame('payment-proof-ack:'.$order->payments()->sole()->id, data_get($acknowledgement->metadata, 'client_reference'));
     }
 
     public function test_non_payment_media_and_normal_text_do_not_create_payment_proof_alerts(): void
@@ -1772,6 +1780,11 @@ class WhatsAppProviderTest extends TestCase
             data_get($proofs->last()->metadata, 'whatsapp_media_file_id'),
         );
         $this->assertSame(0, $order->amount_paid_cents);
+        $this->assertSame(1, Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)
+            ->where('metadata->client_reference', 'payment-proof-ack:'.$payment->id)
+            ->count());
     }
 
     public function test_payment_context_document_is_saved_as_evidence_without_financial_confirmation(): void
@@ -1818,6 +1831,50 @@ class WhatsAppProviderTest extends TestCase
         $this->assertSame(1, $order->payments()->count());
         $this->assertSame(1, $order->paymentProofs()->count());
         $this->assertSame(0, $order->refresh()->amount_paid_cents);
+        $payment = $order->payments()->sole();
+        $this->assertSame(1, Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)
+            ->where('metadata->client_reference', 'payment-proof-ack:'.$payment->id)
+            ->count());
+    }
+
+    public function test_confirmed_payment_ignores_later_payment_evidence_without_sending_an_acknowledgement(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente pagamento confirmado', 'phone' => '15550100001', 'whatsapp_id' => '15550100001', 'source_channel' => 'whatsapp']);
+        $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED, 'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE, 'whatsapp_identifier' => '15550100001', 'started_at' => now()]);
+        $order = $this->createActiveOrder($company, $customer, $conversation);
+
+        app(PaymentWorkflowService::class)->confirmOrderPayment($order, null, [
+            'method' => Payment::METHOD_PIX,
+        ]);
+
+        $this->postJson('/api/webhooks/whatsapp', $this->imagePayload('wamid.confirmed-order-proof'))->assertOk();
+        $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+
+        $this->assertSame(Order::STATUS_PAYMENT_CONFIRMED, $order->refresh()->status);
+        $this->assertSame(1, $order->payments()->count());
+        $this->assertSame(0, $order->paymentProofs()->count());
+        $this->assertSame(0, Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)
+            ->where('metadata->source', 'deterministic_payment_proof_ack')
+            ->count());
+    }
+
+    public function test_explicit_ai_outbound_keeps_its_ai_sender_type(): void
+    {
+        $company = $this->prepareWhatsApp();
+        $delivery = app(WhatsAppService::class)->sendTextMessage(
+            $company,
+            '15550100001',
+            'Resposta automática de teste.',
+            ['sender_type' => 'ai'],
+        );
+
+        $this->assertSame('ai', $delivery->message()->value('sender_type'));
     }
 
     public function test_already_paid_text_never_confirms_a_payment(): void
