@@ -2775,6 +2775,10 @@ function senderLabel(sender: ConversationMessage['sender']): string {
     return 'Atendente'
   }
 
+  if (sender === 'system') {
+    return 'Sistema'
+  }
+
   return 'Cliente'
 }
 
@@ -2883,7 +2887,7 @@ function formatMessageDate(value?: string | null, timezone?: string): string {
 }
 
 function quotedSenderLabel(sender: ConversationMessage['sender']): string {
-  return sender === 'customer' ? 'Cliente' : sender === 'ai' ? 'Assistente' : 'Você'
+  return sender === 'customer' ? 'Cliente' : sender === 'ai' ? 'Assistente' : sender === 'system' ? 'Sistema' : 'Você'
 }
 
 function quotedMessageLabel(message: Pick<ConversationMessage, 'body' | 'type'>): string {

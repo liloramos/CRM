@@ -269,6 +269,17 @@ class WhatsAppService
             $recipientResolution = $this->resolveOutboundRecipient($conversation, $recipient);
             $recipient = $recipientResolution['value'];
             $clientReference = trim((string) ($attributes['client_reference'] ?? ''));
+            $messageMetadata = [
+                'source' => $attributes['message_source'] ?? 'whatsapp_service',
+                'provider' => $this->provider->name(),
+                'sender_type' => $attributes['sender_type'] ?? 'human',
+                'sent_by_user_id' => $attributes['sent_by_user_id'] ?? null,
+                'client_reference' => $clientReference !== '' ? $clientReference : null,
+            ];
+
+            if (is_string($attributes['action_type'] ?? null) && $attributes['action_type'] !== '') {
+                $messageMetadata['action_type'] = $attributes['action_type'];
+            }
 
             if ($clientReference !== '') {
                 $existingMessage = Message::query()
@@ -297,13 +308,7 @@ class WhatsAppService
                 'provider' => $this->provider->name(),
                 'external_recipient_id' => $recipient,
                 'delivery_status' => WhatsAppMessageDelivery::STATUS_QUEUED,
-                'metadata' => [
-                    'source' => 'whatsapp_service',
-                    'provider' => $this->provider->name(),
-                    'sender_type' => $attributes['sender_type'] ?? 'human',
-                    'sent_by_user_id' => $attributes['sent_by_user_id'] ?? null,
-                    'client_reference' => $clientReference !== '' ? $clientReference : null,
-                ],
+                'metadata' => $messageMetadata,
             ]);
 
             $delivery = WhatsAppMessageDelivery::query()->create([
@@ -1216,7 +1221,10 @@ class WhatsAppService
                     'Recebemos seu comprovante. Vamos conferir o pagamento e avisaremos assim que ele for confirmado.',
                     [
                         'conversation' => $conversation,
-                        'sender_type' => 'ai',
+                        'sender_type' => 'system',
+                        'message_source' => 'deterministic_payment_proof_ack',
+                        'action_type' => 'deterministic_payment_proof_ack',
+                        'client_reference' => 'payment-proof-ack:'.$payment->id,
                     ],
                 );
             }

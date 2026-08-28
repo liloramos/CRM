@@ -175,7 +175,7 @@ export type Order = {
 
 export type ConversationMessage = {
   id: string
-  sender: 'customer' | 'attendant' | 'ai'
+  sender: 'customer' | 'attendant' | 'ai' | 'system'
   direction?: 'inbound' | 'outbound'
   type?: 'text' | 'image' | 'video' | 'document' | 'audio' | 'location' | 'interactive' | 'unsupported' | string
   body: string | null
@@ -195,7 +195,7 @@ export type ConversationMessage = {
   failedAt?: string | null
   replyTo?: {
     id: string
-    sender: 'customer' | 'attendant' | 'ai'
+    sender: 'customer' | 'attendant' | 'ai' | 'system'
     type?: ConversationMessage['type']
     body: string
   } | null
