@@ -194,6 +194,34 @@ class PaymentWorkflowService
             $method = (string) ($attributes['method'] ?? Payment::METHOD_PIX);
             $this->assertPaymentMethod($method);
 
+            $reviewablePayments = $order->payments()
+                ->whereIn('status', [
+                    Payment::STATUS_PENDING,
+                    Payment::STATUS_AWAITING_PROOF,
+                    Payment::STATUS_PROOF_RECEIVED,
+                ])
+                ->lockForUpdate()
+                ->get();
+
+            if ($reviewablePayments->isNotEmpty()) {
+                $matchingPayments = $reviewablePayments
+                    ->where('method', $method)
+                    ->values();
+
+                if ($reviewablePayments->count() !== 1 || $matchingPayments->count() !== 1) {
+                    throw new DomainException('Existe mais de uma cobrança aberta ou uma cobrança com outra forma de pagamento. Confirme o comprovante pela conversa vinculada.');
+                }
+
+                return $this->confirmPayment($matchingPayments->sole(), $user, [
+                    'confirmed_amount_cents' => $attributes['amount_cents'] ?? null,
+                    'notes' => $attributes['notes'] ?? null,
+                    'overpayment_action' => $attributes['overpayment_action'] ?? Payment::OVERPAYMENT_PENDING_REVIEW,
+                    'credit_notes' => $attributes['credit_notes'] ?? null,
+                    'confirmed_at' => $attributes['confirmed_at'] ?? null,
+                    'paid_at' => $attributes['paid_at'] ?? null,
+                ]);
+            }
+
             $amountCents = $this->positiveOrDefault(
                 $attributes['amount_cents'] ?? null,
                 $this->defaultAmountFor($order),
