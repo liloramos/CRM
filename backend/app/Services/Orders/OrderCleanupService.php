@@ -6,8 +6,10 @@ use App\Models\Company;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PrintJob;
+use App\Models\Role;
 use App\Models\User;
 use DomainException;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 
 class OrderCleanupService
@@ -32,26 +34,33 @@ class OrderCleanupService
         $canManageOrders = (bool) $actor?->hasPermissionTo('orders.manage');
 
         return [
-            'can_permanently_delete_orders' => $canManageOrders,
+            'can_permanently_delete_orders' => $this->canPermanentlyDeleteOrders($actor),
             'can_run_destructive_test_cleanup' => $canManageOrders && $this->destructiveTestCleanupEnabled(),
             'destructive_cleanup_environment' => $this->currentEnvironment(),
         ];
     }
 
+    public function canPermanentlyDeleteOrders(?User $actor): bool
+    {
+        return (bool) $actor?->hasPermissionTo('orders.manage')
+            && $actor->hasAnyRole([Role::SUPER_ADMIN, Role::ADMIN_GERENTE]);
+    }
+
     /**
      * @return array{deleted: int, order_ids: list<string>, eligible: list<array<string, mixed>>, blocked: list<array<string, mixed>>}
      */
-    public function deleteOnePermanently(Company $company, Order $order): array
+    public function deleteOnePermanently(Company $company, Order $order, User $actor): array
     {
-        return $this->deleteManyPermanently($company, [(int) $order->id]);
+        return $this->deleteManyPermanently($company, [(int) $order->id], $actor);
     }
 
     /**
      * @param  list<int>  $orderIds
      * @return array{deleted: int, order_ids: list<string>, eligible: list<array<string, mixed>>, blocked: list<array<string, mixed>>}
      */
-    public function deleteManyPermanently(Company $company, array $orderIds): array
+    public function deleteManyPermanently(Company $company, array $orderIds, User $actor): array
     {
+        $this->assertCanPermanentlyDeleteOrders($actor);
         $orderIds = $this->normalizeOrderIds($orderIds);
 
         return DB::transaction(function () use ($company, $orderIds): array {
@@ -91,6 +100,17 @@ class OrderCleanupService
      * @param  list<int>  $orderIds
      * @return array{eligible: list<array<string, mixed>>, blocked: list<array<string, mixed>>}
      */
+    public function previewManyPermanently(Company $company, array $orderIds, User $actor): array
+    {
+        $this->assertCanPermanentlyDeleteOrders($actor);
+
+        return $this->previewPermanentDeletion($company, $orderIds);
+    }
+
+    /**
+     * @param  list<int>  $orderIds
+     * @return array{eligible: list<array<string, mixed>>, blocked: list<array<string, mixed>>}
+     */
     public function previewPermanentDeletion(Company $company, array $orderIds, bool $lockForUpdate = false): array
     {
         $orderIds = $this->normalizeOrderIds($orderIds);
@@ -112,6 +132,10 @@ class OrderCleanupService
                 ]),
                 'payments as confirmed_payments_count' => fn ($query) => $query->whereIn('status', [
                     Payment::STATUS_CONFIRMED,
+                ]),
+                'payments as reviewable_payments_count' => fn ($query) => $query->whereIn('status', [
+                    Payment::STATUS_PENDING,
+                    Payment::STATUS_AWAITING_PROOF,
                     Payment::STATUS_PROOF_RECEIVED,
                 ]),
             ]);
@@ -218,7 +242,7 @@ class OrderCleanupService
     {
         $reasons = [];
 
-        if (! in_array($order->status, [Order::STATUS_DRAFT, Order::STATUS_CANCELLED], true)) {
+        if ($order->status !== Order::STATUS_CANCELLED) {
             $reasons[] = 'status_not_eligible';
         }
 
@@ -245,8 +269,8 @@ class OrderCleanupService
             $reasons[] = 'payment_confirmed';
         }
 
-        if ((int) ($order->payments_count ?? 0) > 0) {
-            $reasons[] = 'payment_record_exists';
+        if ((int) ($order->reviewable_payments_count ?? 0) > 0) {
+            $reasons[] = 'payment_review_pending';
         }
 
         if ((int) ($order->credit_movements_count ?? 0) > 0) {
@@ -308,6 +332,13 @@ class OrderCleanupService
         $order->printJobEvents()->delete();
         $order->printJobs()->delete();
         $order->delete();
+    }
+
+    private function assertCanPermanentlyDeleteOrders(User $actor): void
+    {
+        if (! $this->canPermanentlyDeleteOrders($actor)) {
+            throw new AuthorizationException('A exclusao permanente exige acesso administrativo privilegiado.');
+        }
     }
 
     private function assertDestructiveCleanupAllowed(): void

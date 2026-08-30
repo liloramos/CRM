@@ -85,6 +85,12 @@ class OpenAiConversationCopilotProviderTest extends TestCase
                 && data_get($format, 'type') === 'json_schema'
                 && data_get($format, 'strict') === true
                 && data_get($format, 'schema') === $provider->schema()
+                && str_contains($instruction, 'WhatsApp attendant for Sol Restaurante')
+                && str_contains($instruction, 'concise Brazilian Portuguese')
+                && str_contains($instruction, 'never mention AI, models, prompts, backend, tools, or automation')
+                && str_contains($instruction, 'ask a brief natural question instead of guessing')
+                && str_contains($instruction, 'persona never changes business rules or authority')
+                && str_contains($instruction, 'Never approve payment or perform mutations')
                 && str_contains($instruction, 'must not create a draft item');
         });
     }

@@ -8,9 +8,12 @@ use App\Models\AiAutomationSetting;
 use App\Models\AutomationEvent;
 use App\Models\Company;
 use App\Models\Conversation;
+use App\Models\ConversationAlert;
 use App\Models\Customer;
+use App\Models\DeliverySetting;
 use App\Models\Message;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\WhatsAppMessageDelivery;
@@ -20,9 +23,12 @@ use App\Services\Ai\CopilotAutomationService;
 use App\Services\Ai\CopilotAutomationSettings;
 use App\Services\Ai\Providers\FakeConversationCopilotProvider;
 use App\Services\Conversations\ConversationAiService;
+use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationWorkflowService;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppService;
+use Carbon\CarbonImmutable;
+use Database\Seeders\SolRestaurantStructuredMenuSeeder;
 use Database\Seeders\WhatsAppSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
@@ -174,6 +180,257 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame(0, Order::count());
     }
 
+    public function test_act_safe_sends_one_grounded_clarification_without_mutating_orders_or_payments(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('Quero uma N8 de 16 com uma carne.');
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company);
+        $product = $this->availableProduct($company);
+        $analysis = [
+            'intent' => 'ORDER_CREATE',
+            'suggested_reply' => 'Qual carne disponivel hoje voce prefere?',
+            'draft_order' => ['items' => [['menu_item_id' => $product->id, 'menu_item_slug' => $product->slug, 'quantity' => 1]], 'fulfillment' => 'pickup'],
+            'missing_information' => [['code' => 'CARNE', 'label' => 'Carnes']],
+            'warnings' => [
+                ['code' => 'AMBIGUOUS_MEAT'],
+                ['code' => 'DOMAIN_SELECTION_REJECTED'],
+            ],
+            'clarification' => [
+                'type' => 'MEAT',
+                'source' => 'DAILY_MENU',
+                'grounded' => true,
+                'options' => [
+                    ['component_id' => 701, 'display_name' => 'Frango'],
+                    ['component_id' => 702, 'display_name' => 'Porco'],
+                ],
+                'scope' => ['product_id' => $product->id, 'selection_group' => 'meat'],
+            ],
+            'proposal' => ['target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false]],
+        ];
+        $this->app->instance(ConversationCopilotService::class, $this->copilotReturning($analysis));
+
+        $first = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+        $second = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($first?->payload, 'decision'));
+        $this->assertSame('send_safe_clarification', data_get($first?->payload, 'action'));
+        $this->assertSame($first?->id, $second?->id);
+        $this->assertSame(AutomationEvent::STATUS_DISPATCHED, $first?->fresh()->status);
+        $this->assertSame(1, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame($message->id, Message::query()->where('direction', 'outbound')->firstOrFail()->reply_to_message_id);
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_act_safe_asks_for_the_configured_n5_meat_once_instead_of_opening_generic_review(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('quero uma N5 da casa mesmo');
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company);
+        $n5 = Product::query()->where('company_id', $company->id)->where('menu_rule_code', 'n5_casa')->firstOrFail();
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'confidence' => 0.99,
+            'draft_order' => ['items' => [['menu_item_id' => $n5->id, 'menu_item_slug' => $n5->slug, 'quantity' => 1, 'selections' => []]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [],
+            'suggested_reply' => 'Qual carne você prefere?',
+        ]));
+
+        $first = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+        $second = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($first?->payload, 'decision'), json_encode($first?->payload, JSON_PRETTY_PRINT));
+        $outbound = Message::query()->where('direction', 'outbound')->firstOrFail();
+        $this->assertSame('send_safe_clarification', data_get($first?->payload, 'action'));
+        $this->assertSame('PRODUCT_CONFIGURATION', data_get($first?->payload, 'clarification_context.source'));
+        $this->assertSame($first?->id, $second?->id);
+        $this->assertStringContainsString('Qual carne você prefere?', $outbound->content);
+        $this->assertStringContainsString('Porco', $outbound->content);
+        $this->assertSame(1, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame(0, ConversationAlert::query()->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)->count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_act_safe_resolves_the_configured_n5_meat_and_continues_without_human_review(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('quero uma N5 da casa');
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company);
+        $n5 = Product::query()->where('company_id', $company->id)->where('menu_rule_code', 'n5_casa')->firstOrFail();
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'confidence' => 0.99,
+            'draft_order' => ['items' => [['menu_item_id' => $n5->id, 'menu_item_slug' => $n5->slug, 'quantity' => 1, 'selections' => []]], 'fulfillment' => null],
+            'missing_information' => [],
+            'warnings' => [],
+            'suggested_reply' => 'Qual carne você prefere?',
+        ]));
+
+        $clarification = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+        DeliverySetting::query()->updateOrCreate(
+            ['company_id' => $company->id],
+            ['provider_options' => ['origin' => ['address' => 'Rua Configurada, 123', 'latitude' => -16.0, 'longitude' => -49.0]]],
+        );
+        $locationQuestion = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'sender_type' => 'customer',
+            'direction' => 'inbound',
+            'content' => 'onde fica o restaurante?',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.n5-location.'.uniqid(),
+            'received_at' => now(),
+        ]);
+        $location = app(CopilotAutomationService::class)->handle($locationQuestion->id, (int) $conversation->automation_version);
+        app(ConversationAlertService::class)->open(
+            company: $company,
+            type: ConversationAlert::TYPE_LOW_CONFIDENCE_AI,
+            severity: ConversationAlert::SEVERITY_WARNING,
+            title: 'Revisão necessária — Cliente de teste',
+            message: 'N5 Casa precisa de confirmação: falta escolher a carne.',
+            conversation: $conversation,
+            messageModel: $message,
+            deduplicationKey: 'copilot-act-safe-review:'.$conversation->id.':missing-meat',
+        );
+        $conversation->forceFill(['human_review_required' => true])->save();
+        $reply = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'sender_type' => 'customer',
+            'direction' => 'inbound',
+            'content' => 'Porco',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.n5-meat.'.uniqid(),
+            'received_at' => now(),
+        ]);
+
+        $resolved = app(CopilotAutomationService::class)->handle($reply->id, (int) $conversation->automation_version);
+        $retried = app(CopilotAutomationService::class)->handle($reply->id, (int) $conversation->automation_version);
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CONTINUE',
+            'confidence' => 0.99,
+            'draft_order' => ['items' => [[
+                'menu_item_id' => $n5->id,
+                'menu_item_slug' => $n5->slug,
+                'quantity' => 1,
+                'selections' => ['meat' => 'porco'],
+            ]], 'fulfillment' => 'pickup'],
+            'missing_information' => [],
+            'warnings' => [],
+            'suggested_reply' => 'Certo, vou organizar para retirada.',
+        ]));
+        $pickupReply = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'sender_type' => 'customer',
+            'direction' => 'inbound',
+            'content' => 'retirada',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.n5-pickup.'.uniqid(),
+            'received_at' => now(),
+        ]);
+        $staged = app(CopilotAutomationService::class)->handle($pickupReply->id, (int) $conversation->automation_version);
+        $stagedRetry = app(CopilotAutomationService::class)->handle($pickupReply->id, (int) $conversation->automation_version);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($clarification?->payload, 'decision'));
+        $this->assertTrue((bool) data_get($clarification?->payload, 'waiting_for_customer'));
+        $this->assertSame('LOCATION_REQUEST', data_get($location?->payload, 'intent'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($location?->payload, 'decision'));
+        $this->assertStringContainsString('Rua Configurada, 123', Message::query()->where('reply_to_message_id', $locationQuestion->id)->firstOrFail()->content);
+        $this->assertSame('ORDER_CONTINUE', data_get($resolved?->payload, 'intent'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($resolved?->payload, 'decision'), json_encode($resolved?->payload, JSON_PRETTY_PRINT));
+        $this->assertSame('send_grounded_reply', data_get($resolved?->payload, 'action'));
+        $this->assertSame(['fulfillment_required'], data_get($resolved?->payload, 'reason_codes'));
+        $this->assertSame('resolved', data_get($resolved?->payload, 'clarification_resolution'));
+        $this->assertSame([], data_get($resolved?->payload, 'guard_results.missing_information_codes'));
+        $this->assertSame([], data_get($resolved?->payload, 'guard_results.warning_codes'));
+        $this->assertTrue((bool) data_get($resolved?->payload, 'waiting_for_customer'));
+        $this->assertSame($resolved?->id, $retried?->id);
+        $resolvedReply = Message::query()->where('direction', 'outbound')->where('reply_to_message_id', $reply->id)->firstOrFail();
+        $this->assertStringContainsString('Porco', $resolvedReply->content);
+        $this->assertStringContainsString('retirada ou entrega', $resolvedReply->content);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_ACTION, data_get($staged?->payload, 'decision'), json_encode($staged?->payload, JSON_PRETTY_PRINT));
+        $this->assertSame('stage_new_order', data_get($staged?->payload, 'action'));
+        $this->assertSame($staged?->id, $stagedRetry?->id);
+        $this->assertSame(4, Message::query()->where('direction', 'outbound')->count());
+        $this->assertFalse($conversation->fresh()->human_review_required);
+        $this->assertSame(ConversationAlert::STATUS_RESOLVED, ConversationAlert::query()->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)->firstOrFail()->status);
+        $this->assertSame(1, Order::count());
+        $this->assertSame(Order::FULFILLMENT_PICKUP, Order::query()->firstOrFail()->fulfillment_type);
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_pending_human_review_still_allows_grounded_location_reply(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('onde fica o restaurante?');
+        $conversation->forceFill([
+            'automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
+            'human_review_required' => true,
+        ])->save();
+        DeliverySetting::query()->updateOrCreate(
+            ['company_id' => $company->id],
+            ['provider_options' => ['origin' => ['address' => 'Rua Configurada, 123', 'latitude' => -16.0, 'longitude' => -49.0]]],
+        );
+        $this->enableActSafe($company);
+
+        $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+        $outbound = Message::query()->where('direction', 'outbound')->firstOrFail();
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($event?->payload, 'decision'));
+        $this->assertSame('send_grounded_reply', data_get($event?->payload, 'action'));
+        $this->assertStringContainsString('Rua Configurada, 123', $outbound->content);
+        $this->assertTrue($conversation->fresh()->human_review_required);
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_equivalent_human_review_alerts_are_deduplicated_with_operational_copy(): void
+    {
+        [$company, $conversation, $firstMessage] = $this->conversationWithInbound('pedido incompleto');
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company);
+        $analysis = [
+            'intent' => 'ORDER_CREATE',
+            'suggested_reply' => 'Qual carne você deseja?',
+            'draft_order' => ['items' => [], 'fulfillment' => 'pickup'],
+            'missing_information' => [['code' => 'CARNE']],
+            'warnings' => [['code' => 'UNRESOLVED_MEAT']],
+            'proposal' => ['items' => [['product_name' => 'N5 Casa']], 'target' => ['state' => 'NEW_ORDER']],
+        ];
+        $copilot = Mockery::mock(ConversationCopilotService::class);
+        $copilot->shouldReceive('analyze')->twice()->andReturn($analysis);
+        $this->app->instance(ConversationCopilotService::class, $copilot);
+
+        app(CopilotAutomationService::class)->handle($firstMessage->id, (int) $conversation->automation_version);
+        $secondMessage = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'sender_type' => 'customer',
+            'direction' => 'inbound',
+            'content' => 'ainda não sei a carne',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.review.'.uniqid(),
+            'received_at' => now(),
+        ]);
+        app(CopilotAutomationService::class)->handle($secondMessage->id, (int) $conversation->automation_version);
+
+        $alert = ConversationAlert::query()->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)->firstOrFail();
+        $this->assertSame(1, ConversationAlert::query()->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)->count());
+        $this->assertSame($secondMessage->id, $alert->message_id);
+        $this->assertSame('Revisão necessária — Cliente de teste', $alert->title);
+        $this->assertSame('N5 Casa precisa de confirmação: falta escolher a carne.', $alert->message);
+        $this->assertStringNotContainsString('no_safe_action_candidate', $alert->message);
+        $this->assertSame(['CARNE'], data_get($alert->metadata, 'missing_information_codes'));
+    }
+
     public function test_switching_from_manual_to_automatic_enables_the_next_inbound_shadow_analysis(): void
     {
         [$company, $conversation] = $this->conversationWithInbound('mensagem anterior');
@@ -221,6 +478,73 @@ class CopilotAutomationServiceTest extends TestCase
         $this->assertSame($first?->id, $second?->id);
         $this->assertSame(1, Message::query()->where('direction', 'outbound')->count());
         $this->assertSame(AutomationEvent::STATUS_DISPATCHED, $first?->fresh()->status);
+    }
+
+    public function test_closed_sunday_menu_reply_is_deduplicated_without_review_order_or_payment(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-30 12:00:00', 'America/Sao_Paulo'));
+        try {
+            [$company, $conversation, $message] = $this->conversationWithInbound('Qual o cardápio de hoje?');
+            $this->seed(SolRestaurantStructuredMenuSeeder::class);
+            $this->configureOfficialHours($company);
+            $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+            $this->enableActSafe($company);
+
+            $first = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+            $second = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+            $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($first?->payload, 'decision'));
+            $this->assertSame('CLOSED', data_get($first?->payload, 'operational_status'));
+            $this->assertSame($first?->id, $second?->id);
+            $this->assertSame(1, Message::query()->where('direction', 'outbound')->count());
+            $this->assertStringContainsString('Hoje estamos fechados', Message::query()->where('direction', 'outbound')->firstOrFail()->content);
+            $this->assertSame(0, ConversationAlert::query()->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)->count());
+            $this->assertSame(0, Order::count());
+            $this->assertSame(0, Payment::count());
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_act_safe_sends_one_safe_general_reply_without_operational_mutation(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('Oi');
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company);
+        $this->app->instance(
+            ConversationCopilotProviderInterface::class,
+            new FakeConversationCopilotProvider($this->generalReplyAnalysis()),
+        );
+
+        $first = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+        $second = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, data_get($first?->payload, 'decision'));
+        $this->assertSame('send_grounded_reply', data_get($first?->payload, 'action'));
+        $this->assertContains('safe_conversational_reply', data_get($first?->payload, 'reason_codes', []));
+        $this->assertSame($first?->id, $second?->id);
+        $this->assertSame(1, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
+    }
+
+    public function test_shadow_general_reply_remains_observation_only(): void
+    {
+        [$company, $conversation, $message] = $this->conversationWithInbound('Boa tarde');
+        $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
+        $this->enableActSafe($company, CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW);
+        $this->app->instance(
+            ConversationCopilotProviderInterface::class,
+            new FakeConversationCopilotProvider($this->generalReplyAnalysis()),
+        );
+
+        $event = app(CopilotAutomationService::class)->handle($message->id, (int) $conversation->automation_version);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($event?->payload, 'decision'));
+        $this->assertSame('send_grounded_reply', data_get($event?->payload, 'action'));
+        $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
+        $this->assertSame(0, Order::count());
+        $this->assertSame(0, Payment::count());
     }
 
     public function test_act_safe_stages_only_a_fully_validated_new_order_using_backend_price(): void
@@ -479,6 +803,17 @@ class CopilotAutomationServiceTest extends TestCase
         );
     }
 
+    private function configureOfficialHours(Company $company): void
+    {
+        foreach (range(0, 6) as $weekday) {
+            $open = $weekday !== 0;
+            $company->operatingHours()->updateOrCreate(
+                ['weekday' => $weekday],
+                ['is_open' => $open, 'opens_at' => $open ? '10:30' : null, 'closes_at' => $open ? '14:00' : null],
+            );
+        }
+    }
+
     /** @return array<string,mixed> */
     private function safeReplyAnalysis(): array
     {
@@ -489,6 +824,21 @@ class CopilotAutomationServiceTest extends TestCase
             'missing_information' => [],
             'warnings' => [],
             'proposal' => ['target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false]],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function generalReplyAnalysis(): array
+    {
+        return [
+            'intent' => 'GREETING',
+            'confidence' => 0.99,
+            'summary' => 'Saudacao simples.',
+            'suggested_reply' => 'Oi! Como posso ajudar? 😊',
+            'draft_order' => ['items' => [], 'fulfillment' => null, 'address' => null, 'payment_method' => null],
+            'missing_information' => [],
+            'warnings' => [],
+            'requires_human_review' => true,
         ];
     }
 

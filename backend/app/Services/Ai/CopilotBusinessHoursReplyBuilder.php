@@ -3,59 +3,50 @@
 namespace App\Services\Ai;
 
 use App\Models\Company;
-use Carbon\CarbonImmutable;
+use App\Services\Operational\CompanyOperatingHoursService;
 
 final class CopilotBusinessHoursReplyBuilder
 {
+    public function __construct(private readonly CompanyOperatingHoursService $operatingHours) {}
+
     /** @return array<string,mixed> */
     public function build(Company $company): array
     {
-        $timezone = $company->setting?->timezone ?: config('app.timezone');
-        $now = CarbonImmutable::now($timezone);
-        $hours = $company->operatingHours()
-            ->where('weekday', $now->dayOfWeek)
-            ->where('is_open', true)
-            ->whereNotNull('opens_at')
-            ->whereNotNull('closes_at')
-            ->get();
-        $hasConfiguredSchedule = $company->operatingHours()
-            ->where('is_open', true)
-            ->whereNotNull('opens_at')
-            ->whereNotNull('closes_at')
-            ->exists();
+        $status = $this->operatingHours->status($company);
+        $reply = match ($status['status']) {
+            CompanyOperatingHoursService::STATUS_OPEN => 'Sim, estamos abertos agora 😊 Nosso atendimento funciona '.$status['schedule'].'.',
+            CompanyOperatingHoursService::STATUS_CLOSED => $this->operatingHours->closedReply($status),
+            default => 'O horário de funcionamento ainda não está configurado aqui.',
+        };
 
-        if (! $hasConfiguredSchedule) {
-            return $this->analysis('Vou confirmar o horário de funcionamento para você.', 'operating_hours_unconfigured');
-        }
-
-        $open = $hours->contains(function ($hour) use ($now): bool {
-            $opens = CarbonImmutable::parse($now->toDateString().' '.$hour->opens_at, $now->timezone);
-            $closes = CarbonImmutable::parse($now->toDateString().' '.$hour->closes_at, $now->timezone);
-            if ($closes->lessThanOrEqualTo($opens)) {
-                $closes = $closes->addDay();
-            }
-
-            return $now->betweenIncluded($opens, $closes);
-        });
-
-        return $this->analysis(
-            $open ? 'Sim, estamos funcionando neste momento.' : 'No momento estamos fechados.',
-            'operating_hours',
-        );
+        return $this->analysis($reply, $status);
     }
 
-    /** @return array<string,mixed> */
-    private function analysis(string $reply, string $source): array
+    /** @param array<string,mixed>|null $status @return array<string,mixed> */
+    public function closedOrder(Company $company, ?array $status = null): array
+    {
+        $status ??= $this->operatingHours->status($company);
+
+        return $this->analysis($this->operatingHours->closedReply($status), $status, 'ORDER_CREATE');
+    }
+
+    /** @param array<string,mixed> $status @return array<string,mixed> */
+    private function analysis(string $reply, array $status, string $intent = 'BUSINESS_HOURS_REQUEST'): array
     {
         return [
-            'intent' => 'BUSINESS_HOURS_REQUEST',
+            'intent' => $intent,
             'confidence' => 1,
             'summary' => 'Consulta de horário de funcionamento.',
             'draft_order' => ['items' => [], 'fulfillment' => null, 'address' => '', 'payment_method' => ''],
             'missing_information' => [],
             'warnings' => [],
             'suggested_reply' => $reply,
-            'metadata' => ['reply_source' => $source],
+            'metadata' => [
+                'reply_source' => $status['status'] === CompanyOperatingHoursService::STATUS_UNKNOWN
+                    ? 'operating_hours_unconfigured'
+                    : 'operating_hours',
+                ...$this->operatingHours->metadata($status),
+            ],
         ];
     }
 }

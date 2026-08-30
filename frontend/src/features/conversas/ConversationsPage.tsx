@@ -56,12 +56,10 @@ type ConversationsPageProps = {
   alerts: ConversationAlert[]
   conversations: Conversation[]
   error: string | null
-  hydrationVersion: number
   isActionBusy: boolean
   isLoading: boolean
   linkedOrder?: Order | null
   selectedConversation?: Conversation
-  onAcknowledgeAlert: (conversationId: string, alertId: string) => void
   onAnalyzeCopilot: (conversationId: string) => Promise<CopilotAnalysis>
   onApplyCopilotProposal: (conversation: Conversation, proposal: CopilotOrderProposal, targetChoice: 'NEW_ORDER' | 'ACTIVE_ORDER') => boolean
   onApprovePayment: (conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) => Promise<void>
@@ -73,7 +71,6 @@ type ConversationsPageProps = {
   onOpenOrder: (orderId: string) => void
   onPreviewTicket: (orderId: string) => void
   onRejectPayment: (conversationId: string, proofId: string, reason: string) => Promise<void>
-  onResolveAlert: (conversationId: string, alertId: string) => void
   onSelectConversation: (conversationId: string) => void
   onRetryMessage: (conversationId: string, messageId: string) => Promise<void>
   onReactMessage: (conversationId: string, messageId: string, emoji: string) => Promise<void>
@@ -88,11 +85,9 @@ export function ConversationsPage({
   alerts,
   conversations,
   error,
-  hydrationVersion,
   isActionBusy,
   isLoading,
   linkedOrder,
-  onAcknowledgeAlert,
   onAnalyzeCopilot,
   onApplyCopilotProposal,
   onApprovePayment,
@@ -104,7 +99,6 @@ export function ConversationsPage({
   onOpenOrder,
   onPreviewTicket,
   onRejectPayment,
-  onResolveAlert,
   onSelectConversation,
   onRetryMessage,
   onReactMessage,
@@ -173,16 +167,8 @@ export function ConversationsPage({
   const [alertSeverityFilter, setAlertSeverityFilter] = useState<AlertSeverityFilter>('all')
   const [toasts, setToasts] = useState<ConversationToast[]>([])
   const [quickReplyPosition, setQuickReplyPosition] = useState<{ top: number; left: number; width: number } | null>(null)
-  const [soundEnabled, setSoundEnabled] = useState(() => readBooleanPreference('conversation-sound-enabled'))
-  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] = useState(() => (
-    readBooleanPreference('conversation-browser-notifications')
-      && typeof Notification !== 'undefined'
-      && Notification.permission === 'granted'
-  ))
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const clientReferenceRef = useRef<string | null>(null)
-  const knownNotificationEventsRef = useRef<Set<string>>(new Set())
-  const notificationHydrationVersionRef = useRef<number | null>(null)
   const contextPanelRef = useRef<HTMLElement>(null)
   const contextTriggerRef = useRef<HTMLElement | null>(null)
   const statusLegendRef = useRef<HTMLDivElement>(null)
@@ -378,11 +364,14 @@ export function ConversationsPage({
     })
   }, [activeFilter, conversations, search])
 
-  const activeAlerts = (selectedConversation?.alerts ?? []).filter((alert) => isOperationalAlert(alert) && alert.status !== 'resolved')
+  const activeAlerts = (selectedConversation?.alerts ?? []).filter(isOperationalAlert)
   const bannerAlert = selectBannerAlert(activeAlerts)
   const filteredActiveAlerts = activeAlerts.filter((alert) => (
     alertSeverityFilter === 'all' || alert.severity === alertSeverityFilter
   ))
+  const historicalAlerts = (selectedConversation?.alerts ?? [])
+    .filter((alert) => !isOperationalAlert(alert))
+    .slice(0, 8)
   const review = selectedConversation?.paymentReview ?? null
   const reviewEvidence = review?.evidences.find((evidence) => evidence.proofId === selectedPaymentProofId)
     ?? review?.evidences[0]
@@ -450,38 +439,6 @@ export function ConversationsPage({
 
     return () => window.clearTimeout(timeout)
   }, [toasts])
-
-  useEffect(() => {
-    const nextEvents = collectNotificationEvents(conversations)
-    const knownEvents = knownNotificationEventsRef.current
-
-    if (notificationHydrationVersionRef.current !== hydrationVersion) {
-      knownEvents.clear()
-      nextEvents.forEach((event) => knownEvents.add(event.key))
-      notificationHydrationVersionRef.current = hydrationVersion
-      return
-    }
-
-    nextEvents.forEach((event) => {
-      if (knownEvents.has(event.key)) {
-        return
-      }
-
-      knownEvents.add(event.key)
-      addToast(event.message, event.tone, event.key)
-
-      const conversationIsOpen = document.visibilityState === 'visible'
-        && selectedConversation?.id === event.conversationId
-
-      if (browserNotificationsEnabled && !conversationIsOpen && typeof Notification !== 'undefined') {
-        new Notification('Conversas WhatsApp', { body: event.message, tag: event.key })
-      }
-
-      if (soundEnabled && !conversationIsOpen) {
-        playNotificationSound()
-      }
-    })
-  }, [addToast, browserNotificationsEnabled, conversations, hydrationVersion, selectedConversation?.id, soundEnabled])
 
   useEffect(() => {
     if (!isContextOpen) {
@@ -1129,44 +1086,6 @@ export function ConversationsPage({
     window.requestAnimationFrame(() => composerRef.current?.focus())
   }
 
-  async function handleToggleBrowserNotifications() {
-    if (typeof Notification === 'undefined') {
-      addToast('Este navegador não oferece notificações do sistema.', 'warning', 'notification-api-unavailable')
-      return
-    }
-
-    if (browserNotificationsEnabled) {
-      setBrowserNotificationsEnabled(false)
-      writeBooleanPreference('conversation-browser-notifications', false)
-      addToast('Notificações do navegador desativadas.', 'info', `browser-notifications-off:${Date.now()}`)
-      return
-    }
-
-    const permission = await Notification.requestPermission()
-    const enabled = permission === 'granted'
-    setBrowserNotificationsEnabled(enabled)
-    writeBooleanPreference('conversation-browser-notifications', enabled)
-    addToast(
-      enabled ? 'Notificações do navegador ativadas.' : 'Permissão de notificação não concedida.',
-      enabled ? 'success' : 'warning',
-      `browser-notifications:${permission}`,
-    )
-  }
-
-  function handleToggleSound() {
-    const enabled = !soundEnabled
-    setSoundEnabled(enabled)
-    writeBooleanPreference('conversation-sound-enabled', enabled)
-    if (enabled) {
-      playNotificationSound()
-    }
-    addToast(
-      enabled ? 'Som de novas conversas ativado.' : 'Som de novas conversas desativado.',
-      'info',
-      `conversation-sound:${enabled}:${Date.now()}`,
-    )
-  }
-
   const visibleQuickReplies = quickReplies.filter((reply) => {
     const needle = normalize(quickReplySearch)
     return needle === ''
@@ -1217,20 +1136,6 @@ export function ConversationsPage({
               <Button icon="orders" onClick={onOpenOrders} variant="secondary">
                 Abrir pedidos
               </Button>
-              <IconButton
-                className={browserNotificationsEnabled ? 'is-active' : ''}
-                icon="bell"
-                label={browserNotificationsEnabled ? 'Desativar notificações' : 'Ativar notificações'}
-                onClick={() => void handleToggleBrowserNotifications()}
-                variant="ghost"
-              />
-              <IconButton
-                className={soundEnabled ? 'is-active' : ''}
-                icon={soundEnabled ? 'sound' : 'sound-off'}
-                label={soundEnabled ? 'Desativar som' : 'Ativar som'}
-                onClick={handleToggleSound}
-                variant="ghost"
-              />
               <IconButton
                 icon="settings"
                 label="Configurar atendimento"
@@ -1366,7 +1271,11 @@ export function ConversationsPage({
                     <small>{conversation.customer.phoneLabel || 'Sem telefone cadastrado'}</small>
                     <span className="conversation-item__preview">{conversation.lastMessage}</span>
                     <span className="conversation-item__badges">
-                      {conversation.unread > 0 ? <Badge tone="brand" size="sm">{`${conversation.unread} não lida${conversation.unread > 1 ? 's' : ''}`}</Badge> : null}
+                      {conversation.unread > 0 ? (
+                        <span title={`${conversation.unread} mensagem${conversation.unread > 1 ? 's' : ''} não lida${conversation.unread > 1 ? 's' : ''}`}>
+                          <Badge tone="danger" size="sm">{String(conversation.unread)}</Badge>
+                        </span>
+                      ) : null}
                     </span>
                   </span>
                 </button>
@@ -2007,14 +1916,20 @@ export function ConversationsPage({
                       <ConversationAlertCard
                         alert={alert}
                         key={alert.id}
-                        onAcknowledge={() => onAcknowledgeAlert(selectedConversation.id, alert.id)}
-                        onResolve={() => onResolveAlert(selectedConversation.id, alert.id)}
                       />
                     ))}
                   </div>
                 ) : (
-                  <p className="muted-text">Nenhum alerta aberto nesta conversa.</p>
+                  <p className="muted-text">Nenhuma pendência exige ação nesta conversa.</p>
                 )}
+                {historicalAlerts.length > 0 ? (
+                  <details className="conversation-alert-history">
+                    <summary>Histórico ({historicalAlerts.length})</summary>
+                    <div className="conversation-global-alerts">
+                      {historicalAlerts.map((alert) => <ConversationAlertCard alert={alert} key={alert.id} />)}
+                    </div>
+                  </details>
+                ) : null}
               </div>
               </>
             ) : (
@@ -2116,12 +2031,8 @@ function ConversationAlertBanner({
 
 function ConversationAlertCard({
   alert,
-  onAcknowledge,
-  onResolve,
 }: {
   alert: ConversationAlert
-  onAcknowledge: () => void
-  onResolve: () => void
 }) {
   return (
     <div className={`conversation-alert conversation-alert--${alert.severity}`}>
@@ -2129,16 +2040,7 @@ function ConversationAlertCard({
         <strong>{alert.title}</strong>
         <span>{alert.message}</span>
       </div>
-      <div className="conversation-alert__actions">
-        {alert.status === 'open' ? (
-          <Button onClick={onAcknowledge} size="sm" variant="secondary">
-            Reconhecer
-          </Button>
-        ) : null}
-        <Button onClick={onResolve} size="sm" variant="secondary">
-          Resolver
-        </Button>
-      </div>
+      <small>{alert.isActionable ? 'Pendência atual' : 'Registro histórico'}</small>
     </div>
   )
 }
@@ -2726,7 +2628,15 @@ function openAlertCount(conversation: Conversation): number {
 }
 
 function isOperationalAlert(alert: ConversationAlert): boolean {
-  return alert.type !== 'unread_message'
+  if (typeof alert.isActionable === 'boolean') return alert.isActionable
+
+  return alert.status !== 'resolved' && [
+    'human_requested',
+    'low_confidence_ai',
+    'payment_proof_received',
+    'payment_rejected',
+    'message_send_failed',
+  ].includes(alert.type)
 }
 
 function operationalStatusFor(conversation: Conversation): ConversationOperationalStatus {
@@ -2983,52 +2893,6 @@ function alertSeverityLabel(severity: AlertSeverityFilter): string {
   return labels[severity]
 }
 
-type NotificationEvent = {
-  key: string
-  conversationId: string
-  message: string
-  tone: ConversationToastTone
-}
-
-function collectNotificationEvents(conversations: Conversation[]): NotificationEvent[] {
-  return conversations.flatMap((conversation) => {
-    const messageEvents = conversation.messages
-      .filter((message) => message.direction === 'inbound' || message.sender === 'customer')
-      .map((message) => ({
-        key: `conversation-message:${message.id}`,
-        conversationId: conversation.id,
-        message: `Nova mensagem de ${conversation.customer.name}.`,
-        tone: 'info' as const,
-      }))
-    const alertEvents = (conversation.alerts ?? [])
-      .filter((alert) => isOperationalAlert(alert) && alert.status === 'open')
-      .map((alert) => ({
-        key: `conversation-alert:${alert.id}`,
-        conversationId: conversation.id,
-        message: `${alert.title}: ${alert.message}`,
-        tone: alert.severity === 'critical' ? 'error' as const : alert.severity === 'warning' ? 'warning' as const : 'info' as const,
-      }))
-
-    return [...messageEvents, ...alertEvents]
-  })
-}
-
-function readBooleanPreference(key: string): boolean {
-  try {
-    return window.localStorage.getItem(key) === 'true'
-  } catch {
-    return false
-  }
-}
-
-function writeBooleanPreference(key: string, value: boolean): void {
-  try {
-    window.localStorage.setItem(key, String(value))
-  } catch {
-    // Preferences remain valid for the current session when storage is unavailable.
-  }
-}
-
 function inferAttachmentType(file: File): 'image' | 'video' | 'document' | 'audio' | 'sticker' | null {
   if (file.type === 'image/webp') return 'sticker'
   if (file.type.startsWith('image/')) return 'image'
@@ -3046,25 +2910,3 @@ function createClientReference(): string {
   return `conversation-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
-function playNotificationSound(): void {
-  if (typeof window === 'undefined' || typeof window.AudioContext === 'undefined') {
-    return
-  }
-
-  try {
-    const context = new window.AudioContext()
-    const oscillator = context.createOscillator()
-    const gain = context.createGain()
-    oscillator.frequency.value = 640
-    gain.gain.setValueAtTime(0.0001, context.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.015)
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.16)
-    oscillator.connect(gain)
-    gain.connect(context.destination)
-    oscillator.start()
-    oscillator.stop(context.currentTime + 0.18)
-    oscillator.addEventListener('ended', () => void context.close(), { once: true })
-  } catch {
-    // Browser audio policies can block playback; the visual notification still works.
-  }
-}

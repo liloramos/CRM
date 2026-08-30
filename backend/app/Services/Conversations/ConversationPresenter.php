@@ -58,7 +58,7 @@ class ConversationPresenter
 
         $alerts = $conversation->alerts
             ->reject(fn (ConversationAlert $alert): bool => $alert->type === ConversationAlert::TYPE_UNREAD_MESSAGE)
-            ->sortByDesc('created_at')
+            ->sortByDesc(fn (ConversationAlert $alert): string => ($alert->isCurrentActionable() ? '1' : '0').($alert->created_at?->format('YmdHis.u') ?? ''))
             ->map(fn (ConversationAlert $alert): array => $this->alert($alert))
             ->values();
 
@@ -117,6 +117,7 @@ class ConversationPresenter
             'createdAt' => $alert->created_at?->toIso8601String(),
             'acknowledgedAt' => $alert->acknowledged_at?->toIso8601String(),
             'resolvedAt' => $alert->resolved_at?->toIso8601String(),
+            'isActionable' => $alert->isCurrentActionable(),
         ];
     }
 

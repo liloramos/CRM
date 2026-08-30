@@ -6,13 +6,12 @@ use App\Contracts\Ai\ConversationCopilotProviderInterface;
 use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\Customer;
+use App\Models\DeliverySetting;
 use App\Models\Message;
-use App\Models\OperatingHour;
 use App\Models\Product;
 use App\Models\User;
 use App\Services\Ai\ConversationCopilotService;
 use App\Services\Ai\CopilotAutomationAuthorityPolicy;
-use App\Services\Ai\CopilotBusinessHoursReplyBuilder;
 use App\Services\Ai\CopilotLatestMessageIntentResolver;
 use App\Services\Ai\CopilotProductGroundingGuard;
 use App\Services\Ai\CopilotResolvedProductConfigurationService;
@@ -86,6 +85,42 @@ class CopilotDeterministicIntentTest extends TestCase
         foreach (['Quero uma N8', 'Me ve uma N8', 'Pode fazer uma N8', 'Vou querer uma N8', 'Adiciona uma Coca'] as $message) {
             $this->assertSame('ORDER_CREATE', $resolver->resolve(['messages' => [['direction' => 'inbound', 'type' => 'text', 'body' => $message]]]), $message);
         }
+    }
+
+    public function test_bare_order_start_request_gets_a_safe_deterministic_reply_without_human_review(): void
+    {
+        $company = $this->seededCompany();
+        $conversation = $this->conversation($company);
+        Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Queria fazer um pedido.', 'type' => 'text', 'received_at' => now()]);
+        $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+        {
+            public function name(): string
+            {
+                return 'test';
+            }
+
+            public function analyze(array $context): array
+            {
+                throw new \LogicException('Provider must not be called for a bare order start request.');
+            }
+        });
+
+        $result = app(ConversationCopilotService::class)->analyze($conversation);
+        $decision = app(CopilotAutomationAuthorityPolicy::class)->decide(
+            $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]),
+            $result,
+            CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE,
+            true,
+            'Queria fazer um pedido.',
+        );
+
+        $this->assertSame('ORDER_CREATE', $result['intent']);
+        $this->assertSame('order_start', data_get($result, 'metadata.reply_source'));
+        $this->assertSame([], $result['draft_order']['items']);
+        $this->assertSame('Claro! O que você gostaria de pedir?', $result['suggested_reply']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, $decision['decision']);
+        $this->assertSame('send_grounded_reply', $decision['action']);
+        $this->assertFalse($decision['requires_human_review']);
     }
 
     public function test_product_availability_uses_the_catalog_component_and_never_calls_the_provider(): void
@@ -347,8 +382,82 @@ class CopilotDeterministicIntentTest extends TestCase
 
         $this->assertSame('MENU_REQUEST', $result['intent']);
         $this->assertSame([], $result['draft_order']['items']);
-        $this->assertStringContainsString('Cardápio de hoje', $result['suggested_reply']);
+        $this->assertStringContainsString('*MARMITEX – SOL RESTAURANTE*', $result['suggested_reply']);
+        $this->assertStringContainsString('*N5 Casa – R$ 8,00*', $result['suggested_reply']);
+        $this->assertStringContainsString('Marmitex de aproximadamente 500 ml', $result['suggested_reply']);
+        $this->assertStringContainsString('N5 Casa', $result['suggested_reply']);
+        $this->assertStringContainsString('N8 Livre', $result['suggested_reply']);
+        $this->assertStringContainsString('Também temos', $result['suggested_reply']);
+        $this->assertStringContainsString('Bebidas', $result['suggested_reply']);
+        $this->assertStringNotContainsString('Coca-Cola 2L', $result['suggested_reply']);
         $this->assertStringNotContainsString('Qual carne', $result['suggested_reply']);
+        $this->assertLessThanOrEqual(24, substr_count($result['suggested_reply'], "\n") + 1);
+        $this->assertSame(0, $company->orders()->count());
+    }
+
+    public function test_explicit_complete_menu_is_grouped_by_backend_categories(): void
+    {
+        $company = $this->seededCompany();
+        $conversation = $this->conversation($company);
+        Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Me manda o cardápio completo', 'type' => 'text', 'received_at' => now()]);
+        $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+        {
+            public function name(): string
+            {
+                return 'test';
+            }
+
+            public function analyze(array $context): array
+            {
+                throw new \LogicException('Provider must not be called for MENU_REQUEST.');
+            }
+        });
+
+        $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+        $this->assertSame('MENU_REQUEST', $result['intent']);
+        $this->assertStringContainsString('cardápio completo de hoje', $result['suggested_reply']);
+        $this->assertStringContainsString('*MARMITAS*', $result['suggested_reply']);
+        $this->assertStringContainsString('*BEBIDAS*', $result['suggested_reply']);
+        $this->assertStringContainsString('N5 Casa', $result['suggested_reply']);
+        $this->assertStringContainsString('Coca-Cola 2L', $result['suggested_reply']);
+        $this->assertLessThan(
+            strpos($result['suggested_reply'], '*BEBIDAS*'),
+            strpos($result['suggested_reply'], '*MARMITAS*'),
+        );
+        $this->assertSame([], $result['draft_order']['items']);
+        $this->assertSame(0, $company->orders()->count());
+    }
+
+    public function test_restaurant_location_uses_the_configured_delivery_origin_without_calling_the_provider(): void
+    {
+        $company = $this->seededCompany();
+        DeliverySetting::query()->updateOrCreate(
+            ['company_id' => $company->id],
+            ['provider_options' => ['origin' => ['address' => 'Rua Configurada, 123', 'latitude' => -16.0, 'longitude' => -49.0]]],
+        );
+        $conversation = $this->conversation($company);
+        Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'onde fica o restaurante?', 'type' => 'text', 'received_at' => now()]);
+        $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+        {
+            public function name(): string
+            {
+                return 'test';
+            }
+
+            public function analyze(array $context): array
+            {
+                throw new \LogicException('Provider must not be called for LOCATION_REQUEST.');
+            }
+        });
+
+        $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+        $this->assertSame('LOCATION_REQUEST', $result['intent']);
+        $this->assertStringContainsString('Rua Configurada, 123', $result['suggested_reply']);
+        $this->assertSame('customer_facing_policy', data_get($result, 'metadata.reply_source'));
+        $this->assertSame([], $result['draft_order']['items']);
+        $this->assertSame(0, $company->orders()->count());
     }
 
     public function test_business_hours_falls_back_safely_when_no_hours_are_configured(): void
@@ -373,20 +482,151 @@ class CopilotDeterministicIntentTest extends TestCase
         $result = app(ConversationCopilotService::class)->analyze($conversation);
 
         $this->assertSame('BUSINESS_HOURS_REQUEST', $result['intent']);
-        $this->assertSame('Vou confirmar o horário de funcionamento para você.', $result['suggested_reply']);
+        $this->assertSame('O horário de funcionamento ainda não está configurado aqui.', $result['suggested_reply']);
+        $this->assertSame('UNKNOWN', data_get($result, 'metadata.operational_status'));
     }
 
     public function test_business_hours_uses_configured_schedule_deterministically(): void
     {
-        CarbonImmutable::setTestNow('2026-08-24 14:00:00');
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-24 11:00:00', 'America/Sao_Paulo'));
         try {
             $company = $this->seededCompany();
-            $company->operatingHours()->delete();
-            OperatingHour::query()->create(['company_id' => $company->id, 'weekday' => 1, 'is_open' => true, 'opens_at' => '10:00', 'closes_at' => '14:00']);
+            $this->configureOfficialHours($company);
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Vocês estão abertos?', 'type' => 'text', 'received_at' => now()]);
+            $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+            {
+                public function name(): string
+                {
+                    return 'test';
+                }
 
-            $result = app(CopilotBusinessHoursReplyBuilder::class)->build($company);
+                public function analyze(array $context): array
+                {
+                    throw new \LogicException('Provider must not be called for BUSINESS_HOURS_REQUEST.');
+                }
+            });
 
-            $this->assertSame('Sim, estamos funcionando neste momento.', $result['suggested_reply']);
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+            $this->assertSame('BUSINESS_HOURS_REQUEST', $result['intent']);
+            $this->assertStringContainsString('Sim, estamos abertos agora', $result['suggested_reply']);
+            $this->assertStringContainsString('de segunda-feira a sábado, das 10:30 às 14:00', $result['suggested_reply']);
+            $this->assertSame('OPEN', data_get($result, 'metadata.operational_status'));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_sunday_menu_request_reports_closed_from_canonical_hours_without_review_or_mutation(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-30 12:00:00', 'America/Sao_Paulo'));
+        try {
+            $company = $this->seededCompany();
+            $this->configureOfficialHours($company);
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Qual o cardápio de hoje?', 'type' => 'text', 'received_at' => now()]);
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+            $decision = app(CopilotAutomationAuthorityPolicy::class)->decide(
+                $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]),
+                $result,
+                CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE,
+                true,
+                'Qual o cardápio de hoje?',
+            );
+
+            $this->assertSame('MENU_REQUEST', $result['intent']);
+            $this->assertSame('CLOSED', data_get($result, 'metadata.operational_status'));
+            $this->assertStringContainsString('Hoje estamos fechados', $result['suggested_reply']);
+            $this->assertStringContainsString('de segunda-feira a sábado, das 10:30 às 14:00', $result['suggested_reply']);
+            $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, $decision['decision']);
+            $this->assertFalse($decision['requires_human_review']);
+            $this->assertSame(0, $company->orders()->count());
+            $this->assertSame(0, $company->payments()->count());
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_open_restaurant_with_available_menu_keeps_the_current_menu_flow(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-24 11:00:00', 'America/Sao_Paulo'));
+        try {
+            $company = $this->seededCompany();
+            $this->configureOfficialHours($company);
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Qual o cardápio de hoje?', 'type' => 'text', 'received_at' => now()]);
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+            $this->assertSame('OPEN', data_get($result, 'metadata.operational_status'));
+            $this->assertTrue((bool) data_get($result, 'metadata.menu_available'));
+            $this->assertStringContainsString('*MARMITEX – SOL RESTAURANTE*', $result['suggested_reply']);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_order_attempt_while_closed_gets_hours_without_calling_the_provider_or_creating_an_order(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-30 12:00:00', 'America/Sao_Paulo'));
+        try {
+            $company = $this->seededCompany();
+            $this->configureOfficialHours($company);
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Quero uma N8.', 'type' => 'text', 'received_at' => now()]);
+            $this->app->instance(ConversationCopilotProviderInterface::class, new class implements ConversationCopilotProviderInterface
+            {
+                public function name(): string
+                {
+                    return 'test';
+                }
+
+                public function analyze(array $context): array
+                {
+                    throw new \LogicException('Provider must not be called for an order while the restaurant is closed.');
+                }
+            });
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+            $decision = app(CopilotAutomationAuthorityPolicy::class)->decide(
+                $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]),
+                $result,
+                CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE,
+                true,
+                'Quero uma N8.',
+            );
+
+            $this->assertSame('ORDER_CREATE', $result['intent']);
+            $this->assertSame('CLOSED', data_get($result, 'metadata.operational_status'));
+            $this->assertSame([], $result['draft_order']['items']);
+            $this->assertStringContainsString('Hoje estamos fechados', $result['suggested_reply']);
+            $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, $decision['decision']);
+            $this->assertContains('restaurant_closed', $decision['reason_codes']);
+            $this->assertSame(0, $company->orders()->count());
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_open_restaurant_without_available_menu_does_not_claim_it_is_closed(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-24 11:00:00', 'America/Sao_Paulo'));
+        try {
+            $company = $this->seededCompany();
+            $this->configureOfficialHours($company);
+            Product::query()->where('company_id', $company->id)->update(['is_active' => false]);
+            $conversation = $this->conversation($company);
+            Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'Tem almoço hoje?', 'type' => 'text', 'received_at' => now()]);
+
+            $result = app(ConversationCopilotService::class)->analyze($conversation);
+
+            $this->assertSame('MENU_REQUEST', $result['intent']);
+            $this->assertSame('OPEN', data_get($result, 'metadata.operational_status'));
+            $this->assertFalse((bool) data_get($result, 'metadata.menu_available'));
+            $this->assertSame('Ainda não tenho o cardápio de hoje disponível aqui 😊', $result['suggested_reply']);
+            $this->assertStringNotContainsString('fechado', mb_strtolower($result['suggested_reply']));
         } finally {
             CarbonImmutable::setTestNow();
         }
@@ -725,6 +965,17 @@ class CopilotDeterministicIntentTest extends TestCase
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
 
         return Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+    }
+
+    private function configureOfficialHours(Company $company): void
+    {
+        foreach (range(0, 6) as $weekday) {
+            $open = $weekday !== 0;
+            $company->operatingHours()->updateOrCreate(
+                ['weekday' => $weekday],
+                ['is_open' => $open, 'opens_at' => $open ? '10:30' : null, 'closes_at' => $open ? '14:00' : null],
+            );
+        }
     }
 
     private function conversation(Company $company): Conversation

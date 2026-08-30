@@ -288,7 +288,9 @@ class CopilotOrderItemSelectionAdapter
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
         foreach ($available as $component) {
-            if ($this->dailyComponentIsExplicit($component, $text) && ! in_array((int) data_get($component, 'id'), $componentIds, true)) {
+            if (($this->dailyComponentIsExplicit($component, $text)
+                || $this->uniqueDailyComponentShortFormIsExplicit($component, $available, $text))
+                && ! in_array((int) data_get($component, 'id'), $componentIds, true)) {
                 $componentIds[] = (int) data_get($component, 'id');
             }
         }
@@ -709,5 +711,40 @@ class CopilotOrderItemSelectionAdapter
         $short = collect($identities)->filter(fn (string $identity): bool => str_starts_with($identity, 'pure'))->first();
 
         return $short !== null && str_contains($haystack, 'pure');
+    }
+
+    private function uniqueDailyComponentShortFormIsExplicit(mixed $component, $available, string $text): bool
+    {
+        $haystack = Str::of($text)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->squish()->toString();
+        $tokens = $this->componentLeadingTokens($component);
+
+        return collect($tokens)->contains(function (string $token) use ($available, $haystack): bool {
+            if (preg_match('/\b'.preg_quote($token, '/').'\b/', $haystack) !== 1) {
+                return false;
+            }
+
+            return collect($available)
+                ->filter(fn (mixed $candidate): bool => in_array($token, $this->componentLeadingTokens($candidate), true))
+                ->count() === 1;
+        });
+    }
+
+    /** @return list<string> */
+    private function componentLeadingTokens(mixed $component): array
+    {
+        return collect([
+            data_get($component, 'slug'),
+            data_get($component, 'name'),
+            data_get($component, 'display_name'),
+        ])
+            ->map(function (mixed $value): string {
+                $normalized = Str::of((string) $value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->squish()->toString();
+
+                return explode(' ', $normalized)[0] ?? '';
+            })
+            ->filter(fn (string $token): bool => strlen($token) >= 4)
+            ->unique()
+            ->values()
+            ->all();
     }
 }

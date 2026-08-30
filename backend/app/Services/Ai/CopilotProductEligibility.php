@@ -18,6 +18,11 @@ final class CopilotProductEligibility
 
     public function isEligible(?Product $product): bool
     {
-        return $product instanceof Product && $product->product_type !== Product::TYPE_COUNTER;
+        return $product instanceof Product && $this->isEligibleProductType($product->product_type);
+    }
+
+    public function isEligibleProductType(?string $productType): bool
+    {
+        return $productType !== Product::TYPE_COUNTER;
     }
 }

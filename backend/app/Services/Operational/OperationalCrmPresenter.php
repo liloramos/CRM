@@ -85,6 +85,7 @@ class OperationalCrmPresenter
         $products = $this->menuAvailability
             ->availableProducts($company)
             ->get();
+        $permanentDeletionByOrderId = $this->permanentDeletionByOrderId($company, $orders, $user);
 
         return [
             'company' => [
@@ -103,8 +104,13 @@ class OperationalCrmPresenter
                 ], true))
                 ->map(fn (Order $order): array => $this->deliveryTask($order))
                 ->values(),
-            'financeEntries' => $orders->map(fn (Order $order): array => $this->financeEntry($order))->values(),
-            'financialSummary' => $this->financialSummary($orders),
+            'financeEntries' => $orders
+                ->map(fn (Order $order): array => $this->financeEntry(
+                    $order,
+                    $permanentDeletionByOrderId[(string) $order->id] ?? null,
+                ))
+                ->values(),
+            'financialSummary' => $this->financialSummary($orders, $company),
             'expenses' => [],
             'paymentMethods' => $this->paymentMethods($this->financiallyRelevantOrders($orders)),
             'integrations' => $this->integrations(),
@@ -127,7 +133,7 @@ class OperationalCrmPresenter
             'backendStatus' => $order->status,
             'customer' => $this->orderCustomer($order),
             'status' => $this->mapOrderStatus((string) $order->status),
-            'paymentStatus' => $this->mapPaymentStatus((string) $order->payment_status),
+            'paymentStatus' => $this->mapPaymentStatus($order),
             'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'fulfillmentType' => $this->mapFulfillmentType((string) ($order->fulfillment_type ?: Order::FULFILLMENT_PICKUP)),
             'printStatus' => $this->mapPrintStatus((string) $order->print_status),
@@ -279,7 +285,7 @@ class OperationalCrmPresenter
             'id' => (string) $conversation->id,
             'customer' => $this->customer($conversation->customer),
             'mode' => $this->mapAutomationMode((string) $conversation->automation_mode, (bool) $conversation->human_review_required),
-            'unread' => 0,
+            'unread' => (int) ($conversation->unread_count ?? 0),
             'statusLabel' => $conversation->automation_status ?: $conversation->status,
             'lastMessage' => $messages->last()['body'] ?? 'Sem mensagens recentes.',
             'messages' => $messages,
@@ -384,12 +390,17 @@ class OperationalCrmPresenter
     /**
      * @return array<string, mixed>
      */
-    private function financeEntry(Order $order): array
+    private function financeEntry(Order $order, ?array $permanentDeletion = null): array
     {
         $latestPayment = $order->payments
             ->sortByDesc('id')
             ->first();
         $cancelledWithoutConfirmedPayment = $this->isCancelledWithoutConfirmedPayment($order);
+        $hasConfirmedPayment = $order->payments->contains(
+            fn (Payment $payment): bool => $payment->status === Payment::STATUS_CONFIRMED,
+        );
+        $unresolvedOverpayment = $order->payment_status === Payment::ORDER_STATUS_OVERPAID
+            && (int) $order->credit_generated_cents <= 0;
 
         return [
             'id' => (string) $order->id,
@@ -403,11 +414,13 @@ class OperationalCrmPresenter
                 ? 'cancelado'
                 : ($latestPayment?->voided_at
                 ? 'anulado'
-                : $this->mapPaymentStatus((string) $order->payment_status)),
+                : $this->mapPaymentStatus($order)),
             'amount' => $this->cents((int) $order->total_cents),
             'receivedAmount' => $this->cents((int) $order->amount_paid_cents),
             'pendingAmount' => $this->cents($cancelledWithoutConfirmedPayment ? 0 : (int) $order->amount_due_cents),
             'creditApplied' => $this->cents((int) $order->credit_used_cents),
+            'canVoidPayment' => $hasConfirmedPayment,
+            'permanentDeletion' => $permanentDeletion,
             'method' => $cancelledWithoutConfirmedPayment
                 ? 'Sem cobranca'
                 : $this->paymentMethodLabel((string) ($order->payment_method ?: 'a_confirmar')),
@@ -419,19 +432,62 @@ class OperationalCrmPresenter
                     : 'Pedido cancelado sem pagamento confirmado.')
                 : ($latestPayment?->voided_at
                 ? 'Confirmação anulada no CRM: '.$latestPayment->void_reason
+                : ($unresolvedOverpayment
+                    ? 'Valor recebido acima do total; confira antes de gerar crédito para o cliente.'
                 : ($order->payment_confirmed_at
                     ? ($order->origin_channel === Order::CHANNEL_COUNTER
                         ? 'Pagamento confirmado pela atendente no Caixa.'
                         : 'Pagamento confirmado por atendente.')
-                    : 'Aguardando conferencia humana.')),
+                    : 'Aguardando conferencia humana.'))),
         ];
+    }
+
+    /**
+     * @param  Collection<int, Order>  $orders
+     * @return array<string, array{eligible: bool, reasons: list<string>}>
+     */
+    private function permanentDeletionByOrderId(Company $company, Collection $orders, ?User $user): array
+    {
+        if (! $user || ! $this->orderCleanup->canPermanentlyDeleteOrders($user)) {
+            return [];
+        }
+
+        $orderIds = $orders
+            ->where('status', Order::STATUS_CANCELLED)
+            ->pluck('id')
+            ->map(fn ($orderId): int => (int) $orderId)
+            ->values()
+            ->all();
+
+        if ($orderIds === []) {
+            return [];
+        }
+
+        $preview = $this->orderCleanup->previewManyPermanently($company, $orderIds, $user);
+        $byOrderId = [];
+
+        foreach ($preview['eligible'] as $entry) {
+            $byOrderId[(string) $entry['order_id']] = [
+                'eligible' => true,
+                'reasons' => [],
+            ];
+        }
+
+        foreach ($preview['blocked'] as $entry) {
+            $byOrderId[(string) $entry['order_id']] = [
+                'eligible' => false,
+                'reasons' => $entry['reasons'],
+            ];
+        }
+
+        return $byOrderId;
     }
 
     /**
      * @param  Collection<int, Order>  $orders
      * @return array<string, mixed>
      */
-    private function financialSummary(Collection $orders): array
+    private function financialSummary(Collection $orders, Company $company): array
     {
         $financialOrders = $this->financiallyRelevantOrders($orders);
         $gross = (int) $financialOrders->sum('total_cents');
@@ -452,7 +508,9 @@ class OperationalCrmPresenter
             'netProfit' => $this->cents($confirmed),
             'pixAmount' => $this->cents($pix),
             'creditUsed' => $this->cents($credit),
-            'customerCreditBalance' => 0,
+            'customerCreditBalance' => $this->cents((int) Customer::query()
+                ->where('company_id', $company->id)
+                ->sum('credit_balance_cents')),
             'averageTicket' => $financialOrders->count() > 0 ? $this->cents((int) round($gross / $financialOrders->count())) : 0,
         ];
     }
@@ -560,12 +618,12 @@ class OperationalCrmPresenter
         };
     }
 
-    private function mapPaymentStatus(string $status): string
+    private function mapPaymentStatus(Order $order): string
     {
-        return match ($status) {
+        return match ($order->payment_status) {
             Payment::ORDER_STATUS_PAID, Payment::STATUS_CONFIRMED => 'pago',
             Payment::ORDER_STATUS_PARTIAL => 'parcial',
-            Payment::ORDER_STATUS_OVERPAID => 'credito',
+            Payment::ORDER_STATUS_OVERPAID => (int) $order->credit_generated_cents > 0 ? 'credito' : 'revisao_humana',
             Payment::STATUS_PROOF_RECEIVED, Payment::ORDER_STATUS_REJECTED, Payment::STATUS_REJECTED => 'revisao_humana',
             default => 'pendente',
         };

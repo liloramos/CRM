@@ -750,6 +750,7 @@ class WhatsAppService
 
         $media = $this->mediaStorage->storeIncomingMedia($company, $account, $message, $event, $incomingMessage);
         $this->updateConversationAfterInboundMessage($conversation, $message, $incomingMessage);
+        $this->alerts->resolveReopenedCustomerWindow($conversation);
         $this->deliveryLocationCapture->capture($conversation->refresh()->load('activeOrder'), $incomingMessage);
 
         if ($this->customerAskedForHuman($content)) {
@@ -761,7 +762,7 @@ class WhatsAppService
                 message: 'A conversa deve ser acompanhada manualmente.',
                 conversation: $conversation,
                 messageModel: $message,
-                deduplicationKey: 'human-request:'.$message->id,
+                deduplicationKey: 'human-request:'.$conversation->id,
             );
         }
 
@@ -1290,34 +1291,19 @@ class WhatsAppService
                 ])->save();
 
                 $company = $delivery->company;
-                $alertKey = 'message-send-failed:'.$message->id;
 
                 if ($fields['status'] === WhatsAppMessageDelivery::STATUS_FAILED && $company instanceof Company) {
-                    $this->alerts->open(
-                        company: $company,
-                        type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
-                        severity: ConversationAlert::SEVERITY_WARNING,
-                        title: 'Falha ao enviar mensagem',
-                        message: $fields['error_message'],
-                        conversation: $delivery->conversation,
-                        messageModel: $message,
-                        deduplicationKey: $alertKey,
-                        metadata: [
-                            'delivery_id' => $delivery->id,
-                            'error_code' => data_get($fields, 'safe_payload.error_code'),
-                        ],
-                    );
+                    $this->alerts->openMessageSendFailure($company, $delivery->conversation, $delivery);
                 } elseif (in_array($fields['status'], [
                     WhatsAppMessageDelivery::STATUS_SENT,
                     WhatsAppMessageDelivery::STATUS_DELIVERED,
                     WhatsAppMessageDelivery::STATUS_READ,
-                ], true)) {
-                    ConversationAlert::query()
-                        ->where('company_id', $delivery->company_id)
-                        ->where('deduplication_key', $alertKey)
-                        ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
-                        ->get()
-                        ->each(fn (ConversationAlert $alert) => $this->alerts->resolve($alert));
+                ], true) && $company instanceof Company) {
+                    $this->alerts->resolveMessageSendFailures(
+                        $company,
+                        $delivery->conversation,
+                        $delivery->whatsapp_account_id,
+                    );
                 }
             }
 

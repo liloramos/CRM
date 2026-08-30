@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { Badge } from '../../components/ui/Badge'
+import { Button } from '../../components/ui/Button'
 import { EmptyState, LoadingState } from '../../components/ui/States'
 import { Icon } from '../../components/ui/Icon'
 import { SelectField } from '../../components/ui/SelectField'
@@ -22,6 +23,7 @@ import type {
   StructuredProductOption,
   StructuredProductOptionGroup,
 } from '../../types/crm'
+import { orderDeletionReasonLabel } from '../../utils/orderDeletion'
 import { formatCurrency } from '../../utils/formatters'
 import type { CopilotOrderProposal } from '../../services/crm.service'
 
@@ -69,6 +71,7 @@ type OperationalModalContentProps = {
   onBeneficiaryNameChange: (value: string) => void
   onCancelNotesChange: (value: string) => void
   onCancelReasonChange: (value: string) => void
+  onGoToPayments?: () => void
   onDeleteConfirmationChange: (value: string) => void
   onItemHasDifferentBeneficiaryChange: (value: boolean) => void
   onItemExtraBeefChange: (value: boolean) => void
@@ -142,6 +145,7 @@ export function OperationalModalContent({
   onBeneficiaryNameChange,
   onCancelNotesChange,
   onCancelReasonChange,
+  onGoToPayments,
   onDeleteConfirmationChange,
   onItemHasDifferentBeneficiaryChange,
   onItemExtraBeefChange,
@@ -561,6 +565,14 @@ export function OperationalModalContent({
             value={cancelNotes}
           />
         </label>
+        {selectedOrder && selectedOrder.paid > 0 && onGoToPayments ? (
+          <div className="attention-box">
+            <p>Há confirmação financeira neste pedido. Anule cada confirmação em Pagamentos antes de cancelar.</p>
+            <Button icon="payment" onClick={onGoToPayments} variant="secondary">
+              Ir para Pagamentos
+            </Button>
+          </div>
+        ) : null}
         {actionError ? <p className="form-error">{actionError}</p> : null}
       </div>
     )
@@ -585,11 +597,11 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          O pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> sera excluido permanentemente somente se for operacionalmente elegivel.
+          O pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> e seu historico relacionado elegivel serao excluidos permanentemente.
         </p>
         <div className="attention-box">
-          <Badge tone="danger">Exclusao operacional</Badge>
-          <p>Somente pedidos sem pagamento, impressao fisica, entrega ou preparo iniciado podem ser excluidos permanentemente.</p>
+          <Badge tone="danger">Exclusao administrativa definitiva</Badge>
+          <p>Somente pedidos cancelados e financeiramente zerados podem ser excluidos. Confirmacoes, revisoes, creditos e movimentacoes financeiras bloqueiam a acao.</p>
         </div>
         <BlockedDeletionList blocked={blockedOrderDeletions} />
         <label>
@@ -609,7 +621,7 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          {bulkDeleteCount} pedido(s) selecionado(s) serao excluidos permanentemente somente se todos forem operacionalmente elegiveis.
+          {bulkDeleteCount} pedido(s) selecionado(s) serao excluidos permanentemente somente se todos estiverem cancelados e financeiramente zerados.
         </p>
         <div className="attention-box">
           <Badge tone="danger">Exclusão em lote</Badge>
@@ -757,36 +769,11 @@ function BlockedDeletionList({ blocked }: { blocked: BlockedOrderDeletion[] }) {
       {blocked.map((entry) => (
         <div className="blocked-deletions__item" key={entry.order_id}>
           <span>{entry.code ? `Pedido ${entry.code}` : `Pedido ${entry.order_id}`}</span>
-          <small>{entry.reasons.map(deletionReasonLabel).join(', ')}</small>
+          <small>{entry.reasons.map(orderDeletionReasonLabel).join(', ')}</small>
         </div>
       ))}
     </div>
   )
-}
-
-function deletionReasonLabel(reason: string): string {
-  switch (reason) {
-    case 'order_not_found':
-      return 'pedido nao encontrado para esta empresa'
-    case 'status_not_eligible':
-      return 'status nao elegivel'
-    case 'preparation_started':
-      return 'preparo iniciado'
-    case 'payment_confirmed':
-      return 'pagamento confirmado'
-    case 'payment_record_exists':
-      return 'Este pedido possui histórico financeiro e não pode ser excluído permanentemente. Cancele o pedido para removê-lo da operação.'
-    case 'financial_movement':
-      return 'movimentacao financeira'
-    case 'print_confirmed':
-      return 'impressao fisica confirmada'
-    case 'delivery_started':
-      return 'entrega ou retirada iniciada'
-    case 'conversation_linked':
-      return 'pedido vinculado a conversa'
-    default:
-      return reason.replace(/_/g, ' ')
-  }
 }
 
 function CustomerSearchCombobox({

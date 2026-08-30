@@ -4,7 +4,7 @@ namespace App\Services\Ai;
 
 final class CopilotAutomationEvaluationDataset
 {
-    public const VERSION = 4;
+    public const VERSION = 6;
 
     public static function fingerprint(): string
     {
@@ -15,8 +15,11 @@ final class CopilotAutomationEvaluationDataset
     public static function cases(): array
     {
         return [
+            self::conversation('GREETING', 'saudacao'),
+            self::conversation('GENERAL_MESSAGE', 'agradecimento'),
             self::information('MENU_REQUEST', 'cardapio', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
             self::information('BUSINESS_HOURS_REQUEST', 'horario', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
+            self::information('LOCATION_REQUEST', 'endereco_restaurante', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
             self::information('PRODUCT_CLARIFICATION', 'produto', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
             self::information('PRODUCT_CLARIFICATION', 'preco_n8', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
             self::information('PRODUCT_CLARIFICATION', 'disponibilidade_suco_laranja', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY),
@@ -55,6 +58,14 @@ final class CopilotAutomationEvaluationDataset
     }
 
     /** @return array<string,mixed> */
+    private static function conversation(string $intent, string $id): array
+    {
+        return self::case($id, $intent, CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, [
+            'suggested_reply' => 'Oi! Como posso ajudar? 😊',
+        ]);
+    }
+
+    /** @return array<string,mixed> */
     private static function information(string $intent, string $id, string $expected): array
     {
         return self::case($id, $intent, $expected, [
@@ -79,7 +90,8 @@ final class CopilotAutomationEvaluationDataset
     /** @return array<string,mixed> */
     private static function safeClarification(string $id): array
     {
-        return self::case($id, 'ORDER_CREATE', CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, [
+        return self::case($id, 'ORDER_CREATE', CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, [
+            'suggested_reply' => 'Qual carne disponivel hoje voce prefere?',
             'missing_information' => [['code' => 'CARNE']],
             'warnings' => [
                 ['code' => 'AMBIGUOUS_MEAT'],

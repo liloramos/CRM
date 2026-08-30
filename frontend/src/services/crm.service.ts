@@ -27,6 +27,7 @@ import type {
   Conversation,
   ConversationAiStyle,
   ConversationAlert,
+  OperationalNotification,
   ConversationQuickReply,
   ConversationQuickReplyCategory,
   CustomerSummary,
@@ -184,6 +185,7 @@ type ConversationListParams = {
 export type ConversationListResponse = {
   conversations: Conversation[]
   alerts: ConversationAlert[]
+  notifications: OperationalNotification[]
   generatedAt: string | null
 }
 
@@ -771,13 +773,14 @@ export async function getConversations(params: ConversationListParams = {}): Pro
   }
 
   const query = searchParams.toString()
-  const response = await requestJson<ApiEnvelope<{ conversations: Conversation[]; alerts: ConversationAlert[] }>>(
+  const response = await requestJson<ApiEnvelope<{ conversations: Conversation[]; alerts: ConversationAlert[]; notifications?: OperationalNotification[] }>>(
     `/api/app/conversations${query ? `?${query}` : ''}`,
   )
 
   return {
     conversations: response.data.conversations,
     alerts: response.data.alerts,
+    notifications: response.data.notifications ?? [],
     generatedAt: typeof response.meta?.generated_at === 'string' ? response.meta.generated_at : null,
   }
 }

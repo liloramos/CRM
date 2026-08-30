@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -35,6 +36,15 @@ class ConversationAlert extends Model
 
     public const TYPE_MESSAGE_SEND_FAILED = 'message_send_failed';
 
+    /** @var list<string> */
+    public const ACTIONABLE_TYPES = [
+        self::TYPE_HUMAN_REQUESTED,
+        self::TYPE_LOW_CONFIDENCE_AI,
+        self::TYPE_PAYMENT_PROOF_RECEIVED,
+        self::TYPE_PAYMENT_REJECTED,
+        self::TYPE_MESSAGE_SEND_FAILED,
+    ];
+
     protected $fillable = [
         'company_id',
         'conversation_id',
@@ -63,6 +73,19 @@ class ConversationAlert extends Model
             'resolved_at' => 'datetime',
             'metadata' => 'array',
         ];
+    }
+
+    public function scopeCurrentActionable(Builder $query): Builder
+    {
+        return $query
+            ->whereIn('type', self::ACTIONABLE_TYPES)
+            ->whereIn('status', [self::STATUS_OPEN, self::STATUS_ACKNOWLEDGED]);
+    }
+
+    public function isCurrentActionable(): bool
+    {
+        return in_array($this->type, self::ACTIONABLE_TYPES, true)
+            && in_array($this->status, [self::STATUS_OPEN, self::STATUS_ACKNOWLEDGED], true);
     }
 
     public function company(): BelongsTo

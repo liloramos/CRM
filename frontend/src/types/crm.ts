@@ -266,6 +266,21 @@ export type ConversationAlert = {
   resolvedAt?: string | null
   paymentProofId?: string | null
   orderId?: string | null
+  conversationId?: string | null
+  paymentId?: string | null
+  isActionable?: boolean
+}
+
+export type OperationalNotification = {
+  id: string
+  kind: 'message' | 'alert'
+  title: string
+  description: string
+  occurredAt: string | null
+  conversationId: string | null
+  orderId: string | null
+  paymentId: string | null
+  severity: 'info' | 'warning' | 'critical'
 }
 
 export type ConversationPaymentReview = {
@@ -838,6 +853,11 @@ export type FinanceEntry = {
   receivedAmount: number
   pendingAmount: number
   creditApplied: number
+  canVoidPayment?: boolean
+  permanentDeletion?: {
+    eligible: boolean
+    reasons: string[]
+  } | null
   method: string
   paymentMethod: PaymentMethod
   createdLabel: string

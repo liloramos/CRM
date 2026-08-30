@@ -15,8 +15,7 @@ class ConversationOperationalStatusResolver
     public function resolve(Conversation $conversation, ?Order $order = null): array
     {
         $activeAlerts = collect($conversation->alerts ?? [])
-            ->filter(fn (ConversationAlert $alert): bool => $alert->status !== ConversationAlert::STATUS_RESOLVED
-                && $alert->type !== ConversationAlert::TYPE_UNREAD_MESSAGE);
+            ->filter(fn (ConversationAlert $alert): bool => $alert->isCurrentActionable());
 
         $reviewRequiredForOperationalReason = (bool) $conversation->human_review_required
             && ! ($conversation->automation_mode === Conversation::AUTOMATION_MODE_MANUAL

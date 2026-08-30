@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import { AppShell } from './components/layout/AppShell'
+import { NotificationCenter } from './components/notifications/NotificationCenter'
 import { Modal } from './components/ui/Modal'
 import { LoadingState } from './components/ui/States'
 import { modalDescription, modalTitle } from './constants/modals'
@@ -32,7 +33,6 @@ import {
   deleteOrderPermanently,
   describeApiError,
   generateTicketPreview,
-  acknowledgeConversationAlert,
   approveConversationPaymentProof,
   getConversations,
   getOrderTicketPreviewUrl,
@@ -43,7 +43,6 @@ import {
   toggleConversationMessagePin,
   toggleConversationPin,
   rejectConversationPaymentProof,
-  resolveConversationAlert,
   retryConversationMessage,
   reactToConversationMessage,
   searchCustomers,
@@ -69,6 +68,7 @@ import type {
   CustomerSummary,
   FulfillmentApiType,
   OperationalSnapshot,
+  OperationalNotification,
   PrintPreviewResult,
   Product,
   RouteKey,
@@ -139,12 +139,14 @@ function App() {
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
   const [conversationError, setConversationError] = useState<string | null>(null)
   const [conversationAlerts, setConversationAlerts] = useState<ConversationAlert[]>([])
+  const [operationalNotifications, setOperationalNotifications] = useState<OperationalNotification[]>([])
+  const [notificationsHydrated, setNotificationsHydrated] = useState(false)
   const conversationSyncAtRef = useRef<string | null>(null)
+  const conversationsHydratedRef = useRef(false)
   const conversationPollingBusyRef = useRef(false)
   const conversationRequestVersionRef = useRef(0)
   const conversationRefreshPendingRef = useRef(false)
   const [conversationRefreshNonce, setConversationRefreshNonce] = useState(0)
-  const [conversationHydrationVersion, setConversationHydrationVersion] = useState(0)
   const conversationReadBusyRef = useRef<Set<string>>(new Set())
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
@@ -310,9 +312,11 @@ function App() {
       }
 
       setConversationAlerts(response.alerts)
+      setOperationalNotifications(response.notifications)
+      setNotificationsHydrated(true)
       conversationSyncAtRef.current = response.generatedAt ?? new Date().toISOString()
       if (!incremental) {
-        setConversationHydrationVersion((current) => current + 1)
+        conversationsHydratedRef.current = true
       }
       setSnapshot((current) => {
         if (!current) {
@@ -415,11 +419,11 @@ function App() {
   }, [addItemContext, pendingCopilotDraft, resolvedProductConfigurations])
 
   useEffect(() => {
-    if (authStatus !== 'authenticated' || activeRoute !== 'conversas') {
+    if (authStatus !== 'authenticated') {
       return undefined
     }
 
-    void loadConversations(false)
+    void loadConversations(conversationsHydratedRef.current)
 
     const revalidateWhenVisible = () => {
       if (!document.hidden) {
@@ -433,7 +437,7 @@ function App() {
       }
 
       void loadConversations(true)
-    }, 3000)
+    }, activeRoute === 'conversas' ? 3000 : 10000)
 
     window.addEventListener('focus', revalidateWhenVisible)
     document.addEventListener('visibilitychange', revalidateWhenVisible)
@@ -528,11 +532,21 @@ function App() {
       ? snapshot?.orders.find((order) => order.id === selectedConversation.linkedOrderId)
       : undefined)
   const canManageOrders = user?.permissions.includes('orders.manage') ?? false
-  const canPermanentlyDeleteOrders = snapshot?.capabilities.can_permanently_delete_orders ?? canManageOrders
+  const hasPrivilegedDeletionRole = user?.roles.some((role) => role === 'super_admin' || role === 'admin_gerente') ?? false
+  const canPermanentlyDeleteOrders = snapshot?.capabilities.can_permanently_delete_orders
+    ?? (canManageOrders && hasPrivilegedDeletionRole)
   const canRunDestructiveTestCleanup = snapshot?.capabilities.can_run_destructive_test_cleanup ?? false
 
   function handleNewOrder() {
     openNewOrderModal()
+  }
+
+  function handleOpenPermanentDelete(orderId: string) {
+    setSelectedOrderId(orderId)
+    setDeleteConfirmation('')
+    setBlockedOrderDeletions([])
+    setActionError(null)
+    setActiveModal('delete-order-permanent')
   }
 
   async function handleCreateOrder() {
@@ -1381,39 +1395,6 @@ function App() {
     replaceCustomer(customer)
   }
 
-  async function handleConversationAlertAction(conversationId: string, alertId: string, action: 'acknowledge' | 'resolve') {
-    setConversationError(null)
-
-    try {
-      const alert = action === 'acknowledge'
-        ? await acknowledgeConversationAlert(conversationId, alertId)
-        : await resolveConversationAlert(conversationId, alertId)
-
-      setConversationAlerts((current) => mergeConversationAlerts(current, [alert]))
-      setSnapshot((current) => {
-        if (!current) {
-          return current
-        }
-
-        return {
-          ...current,
-          conversations: current.conversations.map((conversation) => {
-            if (conversation.id !== conversationId) {
-              return conversation
-            }
-
-            return {
-              ...conversation,
-              alerts: mergeConversationAlerts(conversation.alerts ?? [], [alert]),
-            }
-          }),
-        }
-      })
-    } catch (error) {
-      setConversationError(error instanceof Error ? error.message : 'Não foi possível atualizar o alerta.')
-    }
-  }
-
   async function handleApproveConversationPayment(conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) {
     setIsActionBusy(true)
     setConversationError(null)
@@ -1678,13 +1659,11 @@ function App() {
             alerts={conversationAlerts}
             conversations={snapshot.conversations}
             error={conversationError}
-            hydrationVersion={conversationHydrationVersion}
             isActionBusy={isActionBusy}
             isLoading={isLoadingConversations}
             linkedOrder={linkedOrder}
             onAnalyzeCopilot={handleConversationCopilotAnalyze}
             onApplyCopilotProposal={handleApplyCopilotProposal}
-            onAcknowledgeAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'acknowledge')}
             onApprovePayment={handleApproveConversationPayment}
             onChangeMode={handleConversationModeChange}
             onClearConversation={clearSelectedConversation}
@@ -1694,7 +1673,6 @@ function App() {
             onOpenOrder={(orderId) => { setSelectedOrderId(orderId); setActiveRoute('pedidos') }}
             onPreviewTicket={handleTicketPreview}
             onRejectPayment={handleRejectConversationPayment}
-            onResolveAlert={(conversationId, alertId) => void handleConversationAlertAction(conversationId, alertId, 'resolve')}
             onSelectConversation={setSelectedConversationId}
             onRetryMessage={handleConversationRetryMessage}
             onReactMessage={handleConversationReaction}
@@ -1742,12 +1720,7 @@ function App() {
               setActionError(null)
               setActiveModal('cleanup-test-orders')
             }}
-            onRequestPermanentDelete={() => {
-              setDeleteConfirmation('')
-              setBlockedOrderDeletions([])
-              setActionError(null)
-              setActiveModal('delete-order-permanent')
-            }}
+            onRequestPermanentDelete={handleOpenPermanentDelete}
             onSelectOrder={setSelectedOrderId}
             orders={snapshot.orders}
             selectedOrder={selectedOrder}
@@ -1770,6 +1743,7 @@ function App() {
             expenses={snapshot.expenses}
             mode="pagamentos"
             onOpenModal={openModal}
+            onOpenPermanentDelete={handleOpenPermanentDelete}
             onOpenVoidPayment={handleOpenVoidPayment}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
@@ -1783,6 +1757,7 @@ function App() {
             expenses={snapshot.expenses}
             mode="financeiro"
             onOpenModal={openModal}
+            onOpenPermanentDelete={handleOpenPermanentDelete}
             onOpenVoidPayment={handleOpenVoidPayment}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
@@ -1839,11 +1814,26 @@ function App() {
   return (
     <AppShell
       activeRoute={activeRoute}
+      conversationUnreadCount={snapshot.conversations.reduce((total, conversation) => total + conversation.unread, 0)}
       onLogout={() => void logout()}
       onNavigate={handleNavigation}
       user={user}
     >
       {renderPage()}
+      <NotificationCenter
+        activeRoute={activeRoute}
+        hydrated={notificationsHydrated}
+        notifications={operationalNotifications}
+        onOpenConversation={(conversationId) => {
+          setSelectedConversationId(conversationId)
+          setActiveRoute('conversas')
+        }}
+        onOpenOrder={(orderId) => {
+          setSelectedOrderId(orderId)
+          setActiveRoute('pedidos')
+        }}
+        onOpenPayments={() => setActiveRoute('pagamentos')}
+      />
       <Modal
         closeDisabled={isActionBusy}
         danger={
@@ -1902,6 +1892,10 @@ function App() {
           onBeneficiaryNameChange={setBeneficiaryName}
           onCancelNotesChange={setCancelNotes}
           onCancelReasonChange={setCancelReason}
+          onGoToPayments={() => {
+            closeModal()
+            setActiveRoute('pagamentos')
+          }}
           onItemNotesChange={setItemNotes}
           onItemQuantityChange={setItemQuantity}
           onOpenConversation={(conversationId) => {
@@ -2432,7 +2426,10 @@ function emptyOperationalSnapshot(user: AuthUser | null): OperationalSnapshot {
   return {
     company: user?.company ?? undefined,
     capabilities: {
-      can_permanently_delete_orders: user?.permissions.includes('orders.manage') ?? false,
+      can_permanently_delete_orders: Boolean(
+        user?.permissions.includes('orders.manage')
+        && user.roles.some((role) => role === 'super_admin' || role === 'admin_gerente'),
+      ),
       can_run_destructive_test_cleanup: false,
       destructive_cleanup_environment: 'unknown',
     },
@@ -2515,24 +2512,6 @@ function conversationMessageTime(message: ConversationMessage): number {
   const parsed = date ? Date.parse(date) : NaN
 
   return Number.isNaN(parsed) ? 0 : parsed
-}
-
-function mergeConversationAlerts(current: ConversationAlert[], incoming: ConversationAlert[]): ConversationAlert[] {
-  const byId = new Map<string, ConversationAlert>()
-
-  current.forEach((alert) => {
-    byId.set(alert.id, alert)
-  })
-  incoming.forEach((alert) => {
-    byId.set(alert.id, alert)
-  })
-
-  return Array.from(byId.values()).sort((first, second) => {
-    const firstTime = first.createdAt ? Date.parse(first.createdAt) : 0
-    const secondTime = second.createdAt ? Date.parse(second.createdAt) : 0
-
-    return secondTime - firstTime
-  })
 }
 
 export default App

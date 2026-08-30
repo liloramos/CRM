@@ -10,7 +10,10 @@ use App\Models\Order;
 use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\User;
+use App\Models\WhatsAppMessageDelivery;
+use App\Services\WhatsApp\WhatsAppErrorClassifier;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class ConversationAlertService
 {
@@ -53,6 +56,17 @@ class ConversationAlertService
                 $paymentProof?->id,
             ]));
 
+            $existing = ConversationAlert::query()
+                ->where('company_id', $company->id)
+                ->where('deduplication_key', $key)
+                ->lockForUpdate()
+                ->first();
+            $startsNewCycle = ! $existing instanceof ConversationAlert
+                || $existing->status === ConversationAlert::STATUS_RESOLVED;
+            $notificationKey = $startsNewCycle
+                ? Str::uuid()->toString()
+                : data_get($existing?->metadata, 'notification_key');
+
             return ConversationAlert::query()->updateOrCreate(
                 [
                     'company_id' => $company->id,
@@ -68,13 +82,116 @@ class ConversationAlertService
                     'severity' => $severity,
                     'title' => $title,
                     'message' => $message,
-                    'status' => ConversationAlert::STATUS_OPEN,
+                    'status' => $startsNewCycle
+                        ? ConversationAlert::STATUS_OPEN
+                        : ($existing?->status ?? ConversationAlert::STATUS_OPEN),
                     'resolved_at' => null,
                     'resolved_by_user_id' => null,
-                    'metadata' => $metadata,
+                    'acknowledged_at' => $startsNewCycle ? null : $existing?->acknowledged_at,
+                    'acknowledged_by_user_id' => $startsNewCycle ? null : $existing?->acknowledged_by_user_id,
+                    'metadata' => [
+                        ...$metadata,
+                        'notification_key' => $notificationKey ?: Str::uuid()->toString(),
+                    ],
                 ],
             )->refresh();
         });
+    }
+
+    /** @param list<string> $types */
+    public function resolveActiveForConversation(Conversation $conversation, array $types, ?User $user = null): int
+    {
+        $alerts = ConversationAlert::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->whereIn('type', $types)
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->get();
+
+        $alerts->each(fn (ConversationAlert $alert) => $this->resolve($alert, $user));
+
+        return $alerts->count();
+    }
+
+    public function openMessageSendFailure(
+        Company $company,
+        ?Conversation $conversation,
+        WhatsAppMessageDelivery $delivery,
+        ?User $user = null,
+    ): ConversationAlert {
+        $errorCode = (string) (data_get($delivery->safe_payload, 'error_code') ?: WhatsAppErrorClassifier::PROVIDER_REJECTED);
+        $systemic = in_array($errorCode, [
+            WhatsAppErrorClassifier::TOKEN_INVALID,
+            WhatsAppErrorClassifier::TOKEN_EXPIRED,
+            WhatsAppErrorClassifier::CONFIGURATION_MISSING,
+        ], true);
+        $scopeId = $delivery->whatsapp_account_id ?: 'default';
+
+        return $this->open(
+            company: $company,
+            type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
+            severity: $systemic ? ConversationAlert::SEVERITY_CRITICAL : ConversationAlert::SEVERITY_WARNING,
+            title: $systemic ? 'WhatsApp precisa de atenção' : 'Mensagem não enviada',
+            message: $delivery->error_message ?: 'A mensagem não foi entregue pelo provedor WhatsApp.',
+            conversation: $systemic ? null : $conversation,
+            messageModel: $systemic ? null : $delivery->message()->first(),
+            deduplicationKey: $systemic
+                ? "whatsapp-systemic:{$scopeId}:{$errorCode}"
+                : 'message-send-failed:'.($conversation?->id ?: 'unknown').":{$errorCode}",
+            metadata: [
+                'scope' => $systemic ? 'account' : 'conversation',
+                'whatsapp_account_id' => $delivery->whatsapp_account_id,
+                'latest_delivery_id' => $delivery->id,
+                'latest_message_id' => $delivery->message_id,
+                'actor_id' => $user?->id,
+                'error_code' => $errorCode,
+            ],
+        );
+    }
+
+    public function resolveMessageSendFailures(
+        Company $company,
+        ?Conversation $conversation,
+        ?int $whatsAppAccountId,
+        ?User $user = null,
+    ): int {
+        $accountScope = $whatsAppAccountId === null ? 'default' : (string) $whatsAppAccountId;
+        $alerts = ConversationAlert::query()
+            ->where('company_id', $company->id)
+            ->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->get()
+            ->filter(function (ConversationAlert $alert) use ($conversation, $accountScope): bool {
+                $sameConversation = $conversation instanceof Conversation
+                    && (int) $alert->conversation_id === (int) $conversation->id;
+                $alertAccount = data_get($alert->metadata, 'whatsapp_account_id');
+                $sameAccount = data_get($alert->metadata, 'scope') === 'account'
+                    && ($alertAccount === null ? 'default' : (string) $alertAccount) === $accountScope;
+
+                return $sameConversation || $sameAccount;
+            });
+
+        $alerts->each(fn (ConversationAlert $alert) => $this->resolve($alert, $user));
+
+        return $alerts->count();
+    }
+
+    public function resolveReopenedCustomerWindow(Conversation $conversation): int
+    {
+        $alerts = ConversationAlert::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->get()
+            ->filter(fn (ConversationAlert $alert): bool => in_array(data_get($alert->metadata, 'error_code'), [
+                WhatsAppErrorClassifier::CUSTOMER_WINDOW_CLOSED,
+                WhatsAppErrorClassifier::TEMPLATE_REQUIRED,
+            ], true));
+
+        $alerts->each(fn (ConversationAlert $alert) => $this->resolve($alert));
+
+        return $alerts->count();
     }
 
     public function acknowledge(ConversationAlert $alert, ?User $user = null): ConversationAlert

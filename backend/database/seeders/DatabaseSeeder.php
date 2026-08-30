@@ -11,6 +11,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             CompanySeeder::class,
             RestaurantBaseSeeder::class,
+            SolRestaurantOperatingHoursSeeder::class,
             PrintingSeeder::class,
             WhatsAppSeeder::class,
             AiAutomationSeeder::class,

@@ -5,6 +5,7 @@ namespace Tests\Feature\Restaurant;
 use App\Models\Company;
 use Database\Seeders\CompanySeeder;
 use Database\Seeders\RestaurantBaseSeeder;
+use Database\Seeders\SolRestaurantOperatingHoursSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -67,5 +68,26 @@ class RestaurantBaseTest extends TestCase
         $this->assertSame('Restaurante Demo', $company->restaurantProfile->display_name);
         $this->assertSame('active', $company->setting->status);
         $this->assertCount(1, $company->operatingHours);
+    }
+
+    public function test_sol_official_operating_hours_are_stored_in_the_canonical_schedule(): void
+    {
+        $this->seed([
+            CompanySeeder::class,
+            RestaurantBaseSeeder::class,
+            SolRestaurantOperatingHoursSeeder::class,
+        ]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $hours = $company->operatingHours()->orderBy('weekday')->get()->keyBy('weekday');
+
+        $this->assertFalse($hours->get(0)->is_open);
+        $this->assertNull($hours->get(0)->opens_at);
+        foreach (range(1, 6) as $weekday) {
+            $this->assertTrue($hours->get($weekday)->is_open);
+            $this->assertSame('10:30', $hours->get($weekday)->opens_at);
+            $this->assertSame('14:00', $hours->get($weekday)->closes_at);
+        }
+        $this->assertSame('America/Sao_Paulo', $company->setting()->value('timezone'));
     }
 }

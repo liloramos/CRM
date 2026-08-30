@@ -1708,6 +1708,21 @@ label textarea {
   overflow-wrap: anywhere;
 }
 
+.finance-entry-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.finance-entry-actions__blocked {
+  max-width: 220px;
+  color: var(--color-text-secondary);
+  line-height: 1.35;
+  text-align: right;
+}
+
 .table-main__removals {
   color: var(--color-danger);
   font-weight: 800;

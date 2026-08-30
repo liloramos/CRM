@@ -469,7 +469,7 @@ class OrderOperationsController extends Controller
         ]);
 
         try {
-            $result = $cleanup->deleteOnePermanently($company, $order);
+            $result = $cleanup->deleteOnePermanently($company, $order, $request->user());
         } catch (DomainException $exception) {
             return response()->json([
                 'message' => $exception->getMessage(),
@@ -504,6 +504,7 @@ class OrderOperationsController extends Controller
             $result = $cleanup->deleteManyPermanently(
                 $company,
                 array_map('intval', $validated['order_ids']),
+                $request->user(),
             );
         } catch (DomainException $exception) {
             return response()->json([
@@ -734,8 +735,8 @@ class OrderOperationsController extends Controller
         return response()->json([
             'code' => $singleOrder ? OrderCleanupService::BLOCKED_CODE : OrderCleanupService::BULK_BLOCKED_CODE,
             'message' => $singleOrder
-                ? 'Este pedido possui registros operacionais e nao pode ser excluido.'
-                : 'Um ou mais pedidos possuem registros operacionais e nao podem ser excluidos.',
+                ? 'Este pedido nao atende aos criterios de exclusao administrativa.'
+                : 'Um ou mais pedidos nao atendem aos criterios de exclusao administrativa.',
             'reasons' => $result['blocked'][0]['reasons'] ?? [],
             'eligible' => $result['eligible'],
             'blocked' => $result['blocked'],

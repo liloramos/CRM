@@ -29,6 +29,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Response;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 class ConversationOperationsController extends Controller
@@ -100,7 +101,7 @@ class ConversationOperationsController extends Controller
             ->when($mode === 'manual', fn ($query) => $query->where('automation_mode', Conversation::AUTOMATION_MODE_MANUAL))
             ->when($mode === 'attention', fn ($query) => $query->where('human_review_required', true))
             ->when($mode === 'unread', fn ($query) => $query->where('unread_count', '>', 0))
-            ->when($mode === 'alerts', fn ($query) => $query->whereHas('alerts', fn ($alerts) => $alerts->where('status', '!=', ConversationAlert::STATUS_RESOLVED)))
+            ->when($mode === 'alerts', fn ($query) => $query->whereHas('alerts', fn ($alerts) => $alerts->currentActionable()))
             ->orderByRaw('CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END')
             ->orderByDesc('last_message_at')
             ->orderByDesc('updated_at')
@@ -111,6 +112,7 @@ class ConversationOperationsController extends Controller
             'data' => [
                 'conversations' => $conversations->map(fn (Conversation $conversation): array => $presenter->conversation($conversation))->values(),
                 'alerts' => $this->globalAlerts($company, $presenter),
+                'notifications' => $this->globalNotifications($company),
             ],
             'meta' => [
                 'generated_at' => now()->toIso8601String(),
@@ -594,12 +596,64 @@ class ConversationOperationsController extends Controller
     {
         return ConversationAlert::query()
             ->where('company_id', $company->id)
-            ->where('status', '!=', ConversationAlert::STATUS_RESOLVED)
-            ->where('type', '!=', ConversationAlert::TYPE_UNREAD_MESSAGE)
+            ->currentActionable()
             ->latest()
             ->limit(30)
             ->get()
             ->map(fn (ConversationAlert $alert): array => $presenter->alert($alert))
+            ->values()
+            ->all();
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function globalNotifications($company): array
+    {
+        $messages = Message::query()
+            ->with('conversation.customer')
+            ->whereHas('conversation', fn ($query) => $query->where('company_id', $company->id))
+            ->where('direction', 'inbound')
+            ->latest('id')
+            ->limit(30)
+            ->get()
+            ->map(function (Message $message): array {
+                $conversation = $message->conversation;
+                $customerName = $conversation?->customer?->name ?: 'Cliente WhatsApp';
+
+                return [
+                    'id' => 'message:'.$message->id,
+                    'kind' => 'message',
+                    'title' => 'Nova mensagem — '.$customerName,
+                    'description' => Str::limit((string) ($message->content ?: 'Nova mídia recebida.'), 100),
+                    'occurredAt' => ($message->received_at ?? $message->created_at)?->toIso8601String(),
+                    'conversationId' => $conversation?->id ? (string) $conversation->id : null,
+                    'orderId' => null,
+                    'paymentId' => null,
+                    'severity' => 'info',
+                ];
+            });
+
+        $alerts = ConversationAlert::query()
+            ->where('company_id', $company->id)
+            ->currentActionable()
+            ->latest('id')
+            ->limit(30)
+            ->get()
+            ->map(fn (ConversationAlert $alert): array => [
+                'id' => 'alert:'.$alert->id.':'.(data_get($alert->metadata, 'notification_key') ?: $alert->id),
+                'kind' => 'alert',
+                'title' => $alert->title,
+                'description' => $alert->message ?: 'Existe uma pendência operacional.',
+                'occurredAt' => $alert->updated_at?->toIso8601String(),
+                'conversationId' => $alert->conversation_id ? (string) $alert->conversation_id : null,
+                'orderId' => $alert->order_id ? (string) $alert->order_id : null,
+                'paymentId' => $alert->payment_id ? (string) $alert->payment_id : null,
+                'severity' => $alert->severity,
+            ]);
+
+        return $messages
+            ->concat($alerts)
+            ->sortByDesc(fn (array $notification): int => strtotime((string) ($notification['occurredAt'] ?? '')) ?: 0)
+            ->take(40)
             ->values()
             ->all();
     }

@@ -300,7 +300,10 @@ class PaymentWorkflowService
 
             $order = $this->recalculateOrderPaymentSummary($order);
 
-            if (! in_array($order->status, [Order::STATUS_FINISHED, Order::STATUS_CANCELLED], true)) {
+            if (
+                $order->status !== Order::STATUS_AWAITING_PAYMENT
+                && ! in_array($order->status, [Order::STATUS_FINISHED, Order::STATUS_CANCELLED], true)
+            ) {
                 $this->orders->transitionTo(
                     $order,
                     Order::STATUS_AWAITING_PAYMENT,

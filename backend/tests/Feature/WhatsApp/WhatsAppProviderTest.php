@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
+use App\Services\Conversations\ConversationAlertService;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\PaymentProofCandidateClassifier;
 use App\Services\Orders\OrderWorkflowService;
@@ -1511,6 +1512,7 @@ class WhatsAppProviderTest extends TestCase
             ->assertJsonPath('data.messages.0.status', WhatsAppMessageDelivery::STATUS_FAILED);
 
         $message = Message::query()->where('conversation_id', $conversation->id)->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)->firstOrFail();
+        $failureAlertKey = 'message-send-failed:'.$conversation->id.':'.WhatsAppErrorClassifier::CUSTOMER_WINDOW_CLOSED;
 
         $this->actingAs($user)
             ->postJson("/api/app/conversations/{$conversation->id}/messages", [
@@ -1524,7 +1526,7 @@ class WhatsAppProviderTest extends TestCase
         $this->assertSame(1, WhatsAppMessageDelivery::query()->where('message_id', $message->id)->count());
         $this->assertSame(1, ConversationAlert::query()
             ->where('conversation_id', $conversation->id)
-            ->where('deduplication_key', 'message-send-failed:'.$message->id)
+            ->where('deduplication_key', $failureAlertKey)
             ->count());
 
         $this->actingAs($user)
@@ -1536,10 +1538,388 @@ class WhatsAppProviderTest extends TestCase
         $this->assertSame(2, WhatsAppMessageDelivery::query()->where('message_id', $message->id)->count());
         $this->assertDatabaseHas('conversation_alerts', [
             'conversation_id' => $conversation->id,
-            'deduplication_key' => 'message-send-failed:'.$message->id,
+            'deduplication_key' => $failureAlertKey,
             'status' => ConversationAlert::STATUS_RESOLVED,
         ]);
         Http::assertSentCount(2);
+    }
+
+    public function test_equivalent_customer_window_failures_consolidate_and_new_inbound_resolves_the_alert(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.business_account_id', 'safe-business-account-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fakeSequence()
+            ->push(['error' => ['code' => 131047, 'type' => 'OAuthException']], 400)
+            ->push(['error' => ['code' => 131047, 'type' => 'OAuthException']], 400);
+
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Janela',
+            'phone' => '15550100001',
+            'whatsapp_id' => '15550100001',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'whatsapp_identifier' => '15550100001',
+            'started_at' => now(),
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages", [
+                'body' => 'Primeira tentativa fora da janela.',
+                'client_reference' => 'window-attempt-1',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', WhatsAppErrorClassifier::CUSTOMER_WINDOW_CLOSED);
+
+        $alert = ConversationAlert::query()->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)->firstOrFail();
+        $notificationKey = data_get($alert->metadata, 'notification_key');
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/messages", [
+                'body' => 'Segunda tentativa fora da janela.',
+                'client_reference' => 'window-attempt-2',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('code', WhatsAppErrorClassifier::CUSTOMER_WINDOW_CLOSED);
+
+        $messages = Message::query()
+            ->where('conversation_id', $conversation->id)
+            ->where('direction', WhatsAppMessageDelivery::DIRECTION_OUTBOUND)
+            ->orderBy('id')
+            ->get();
+        $alert->refresh();
+
+        $this->assertCount(2, $messages);
+        $this->assertSame(1, ConversationAlert::query()->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)->count());
+        $this->assertSame('message-send-failed:'.$conversation->id.':'.WhatsAppErrorClassifier::CUSTOMER_WINDOW_CLOSED, $alert->deduplication_key);
+        $this->assertSame($notificationKey, data_get($alert->metadata, 'notification_key'));
+        $this->assertSame($messages->last()->id, data_get($alert->metadata, 'latest_message_id'));
+        $this->assertSame(ConversationAlert::STATUS_OPEN, $alert->status);
+
+        Queue::fake();
+        $this->postJson('/api/webhooks/whatsapp', $this->textPayload('wamid.window-reopened', 'Oi, voltei.'))->assertOk();
+        $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle(app(WhatsAppService::class));
+
+        $this->assertSame(ConversationAlert::STATUS_RESOLVED, $alert->refresh()->status);
+        $this->assertSame(1, $conversation->refresh()->unread_count);
+        Http::assertSentCount(2);
+    }
+
+    public function test_systemic_meta_failures_are_global_and_deduplicated_per_account(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.business_account_id', 'safe-business-account-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fakeSequence()
+            ->push(['error' => ['code' => 190, 'type' => 'OAuthException']], 401)
+            ->push(['error' => ['code' => 190, 'type' => 'OAuthException']], 401);
+
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        foreach (['15550100101', '15550100102'] as $index => $phone) {
+            $customer = Customer::query()->create([
+                'company_id' => $company->id,
+                'name' => 'Cliente Sistêmico '.($index + 1),
+                'phone' => $phone,
+                'whatsapp_id' => $phone,
+                'source_channel' => 'whatsapp',
+            ]);
+            $conversation = Conversation::query()->create([
+                'company_id' => $company->id,
+                'customer_id' => $customer->id,
+                'channel' => 'whatsapp',
+                'status' => 'open',
+                'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+                'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+                'whatsapp_identifier' => $phone,
+                'started_at' => now(),
+            ]);
+
+            $this->actingAs($user)
+                ->postJson("/api/app/conversations/{$conversation->id}/messages", [
+                    'body' => 'Teste de falha sistêmica.',
+                    'client_reference' => 'systemic-attempt-'.($index + 1),
+                ])
+                ->assertStatus(422)
+                ->assertJsonPath('code', WhatsAppErrorClassifier::TOKEN_INVALID);
+        }
+
+        $alert = ConversationAlert::query()->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)->firstOrFail();
+
+        $this->assertSame(1, ConversationAlert::query()->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)->count());
+        $this->assertNull($alert->conversation_id);
+        $this->assertSame('account', data_get($alert->metadata, 'scope'));
+        $this->assertSame(WhatsAppErrorClassifier::TOKEN_INVALID, data_get($alert->metadata, 'error_code'));
+        $this->assertSame(ConversationAlert::SEVERITY_CRITICAL, $alert->severity);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonCount(1, 'data.alerts')
+            ->assertJsonPath('data.alerts.0.conversationId', null)
+            ->assertJsonPath('data.alerts.0.isActionable', true);
+    }
+
+    public function test_async_delivery_failures_use_the_same_consolidated_alert_lifecycle(): void
+    {
+        $company = $this->prepareWhatsApp();
+        Config::set('chatbotcrm.whatsapp.provider', 'meta_cloud');
+        Config::set('chatbotcrm.whatsapp.meta.token', 'safe-test-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.phone_number_id', 'safe-phone-number-id');
+        Config::set('chatbotcrm.whatsapp.meta.business_account_id', 'safe-business-account-id');
+        Config::set('chatbotcrm.whatsapp.meta.verify_token', 'safe-verify-token-not-real');
+        Config::set('chatbotcrm.whatsapp.meta.api_version', 'v20.0');
+        Http::fakeSequence()
+            ->push(['messages' => [['id' => 'wamid.async-failure-1']]], 200)
+            ->push(['messages' => [['id' => 'wamid.async-failure-2']]], 200);
+
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Status Meta',
+            'phone' => '15550100301',
+            'whatsapp_id' => '15550100301',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'automation_status' => Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER,
+            'whatsapp_identifier' => '15550100301',
+            'started_at' => now(),
+        ]);
+        $whatsapp = app(WhatsAppService::class);
+        $deliveries = collect([
+            $whatsapp->sendTextMessage($company, '15550100301', 'Mensagem status 1.', [
+                'conversation' => $conversation,
+                'sender_type' => 'system',
+                'client_reference' => 'async-status-1',
+            ]),
+            $whatsapp->sendTextMessage($company, '15550100301', 'Mensagem status 2.', [
+                'conversation' => $conversation,
+                'sender_type' => 'system',
+                'client_reference' => 'async-status-2',
+            ]),
+        ]);
+
+        Queue::fake();
+        foreach ($deliveries as $delivery) {
+            $this->postJson('/api/webhooks/whatsapp', $this->statusPayload(
+                (string) $delivery->provider_message_id,
+                'failed',
+                [['code' => 131047, 'type' => 'OAuthException']],
+            ))->assertOk();
+            $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+            (new ProcessWhatsAppWebhookEvent($event->id))->handle($whatsapp);
+        }
+
+        $alert = ConversationAlert::query()->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)->firstOrFail();
+        $this->assertSame(1, ConversationAlert::query()->where('type', ConversationAlert::TYPE_MESSAGE_SEND_FAILED)->count());
+        $this->assertSame('message-send-failed:'.$conversation->id.':'.WhatsAppErrorClassifier::CUSTOMER_WINDOW_CLOSED, $alert->deduplication_key);
+        $this->assertSame($deliveries->last()->message_id, data_get($alert->metadata, 'latest_message_id'));
+
+        $this->postJson('/api/webhooks/whatsapp', $this->statusPayload(
+            (string) $deliveries->last()->provider_message_id,
+            'delivered',
+        ))->assertOk();
+        $event = WhatsAppWebhookEvent::query()->latest('id')->firstOrFail();
+        (new ProcessWhatsAppWebhookEvent($event->id))->handle($whatsapp);
+
+        $this->assertSame(ConversationAlert::STATUS_RESOLVED, $alert->refresh()->status);
+    }
+
+    public function test_conversation_api_separates_current_alerts_history_and_unread_notifications(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Notificações',
+            'phone' => '15550100201',
+            'whatsapp_id' => '15550100201',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'unread_count' => 1,
+            'whatsapp_identifier' => '15550100201',
+            'started_at' => now(),
+        ]);
+        $message = Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => WhatsAppMessageDelivery::DIRECTION_INBOUND,
+            'sender_type' => 'customer',
+            'content' => 'Mensagem realmente não lida.',
+            'type' => 'text',
+            'provider' => 'fake',
+            'external_message_id' => 'wamid.notification-current',
+        ]);
+        $alerts = app(ConversationAlertService::class);
+        $historicalAlert = $alerts->open(
+            company: $company,
+            type: ConversationAlert::TYPE_NEW_CONVERSATION,
+            severity: ConversationAlert::SEVERITY_INFO,
+            title: 'Conversa criada',
+            conversation: $conversation,
+            deduplicationKey: 'history-only:'.$conversation->id,
+        );
+        $currentAlert = $alerts->open(
+            company: $company,
+            type: ConversationAlert::TYPE_HUMAN_REQUESTED,
+            severity: ConversationAlert::SEVERITY_WARNING,
+            title: 'Cliente pediu atendente',
+            conversation: $conversation,
+            messageModel: $message,
+            deduplicationKey: 'human-request:'.$conversation->id,
+        );
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $response = $this->actingAs($user)->getJson('/api/app/conversations')->assertOk();
+        $payload = $response->json('data');
+        $globalAlertIds = collect($payload['alerts'])->pluck('id')->all();
+        $notificationIds = collect($payload['notifications'])->pluck('id')->all();
+        $conversationAlerts = collect($payload['conversations'][0]['alerts'])->keyBy('id');
+
+        $this->assertSame(1, $payload['conversations'][0]['unread']);
+        $this->assertSame([(string) $currentAlert->id], $globalAlertIds);
+        $this->assertContains('message:'.$message->id, $notificationIds);
+        $this->assertTrue(collect($notificationIds)->contains(fn (string $id): bool => str_starts_with($id, 'alert:'.$currentAlert->id.':')));
+        $this->assertFalse(collect($notificationIds)->contains(fn (string $id): bool => str_starts_with($id, 'alert:'.$historicalAlert->id.':')));
+        $this->assertTrue($conversationAlerts[(string) $currentAlert->id]['isActionable']);
+        $this->assertFalse($conversationAlerts[(string) $historicalAlert->id]['isActionable']);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.unread', 1);
+    }
+
+    public function test_alert_notification_cycle_is_stable_until_the_cause_is_resolved(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Ciclo',
+            'phone' => '15550100202',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'started_at' => now(),
+        ]);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+        $alerts = app(ConversationAlertService::class);
+        $open = $alerts->open(
+            company: $company,
+            type: ConversationAlert::TYPE_HUMAN_REQUESTED,
+            severity: ConversationAlert::SEVERITY_WARNING,
+            title: 'Cliente pediu atendente',
+            conversation: $conversation,
+            deduplicationKey: 'human-request:'.$conversation->id,
+        );
+        $firstNotificationKey = data_get($open->metadata, 'notification_key');
+
+        $alerts->acknowledge($open, $user);
+        $sameCycle = $alerts->open(
+            company: $company,
+            type: ConversationAlert::TYPE_HUMAN_REQUESTED,
+            severity: ConversationAlert::SEVERITY_WARNING,
+            title: 'Cliente pediu atendente novamente',
+            conversation: $conversation,
+            deduplicationKey: 'human-request:'.$conversation->id,
+        );
+
+        $this->assertSame(ConversationAlert::STATUS_ACKNOWLEDGED, $sameCycle->status);
+        $this->assertSame($firstNotificationKey, data_get($sameCycle->metadata, 'notification_key'));
+
+        $alerts->resolve($sameCycle, $user);
+        $nextCycle = $alerts->open(
+            company: $company,
+            type: ConversationAlert::TYPE_HUMAN_REQUESTED,
+            severity: ConversationAlert::SEVERITY_WARNING,
+            title: 'Cliente voltou a pedir atendente',
+            conversation: $conversation,
+            deduplicationKey: 'human-request:'.$conversation->id,
+        );
+
+        $this->assertSame(ConversationAlert::STATUS_OPEN, $nextCycle->status);
+        $this->assertNotSame($firstNotificationKey, data_get($nextCycle->metadata, 'notification_key'));
+    }
+
+    public function test_manual_takeover_resolves_the_human_request_alert_without_opening_a_manual_mode_alert(): void
+    {
+        $company = $this->prepareWhatsApp(withRoles: true);
+        $customer = Customer::query()->create([
+            'company_id' => $company->id,
+            'name' => 'Cliente Atendido',
+            'phone' => '15550100203',
+            'source_channel' => 'whatsapp',
+        ]);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_ASSISTED,
+            'automation_status' => Conversation::AUTOMATION_STATUS_ACTIVE,
+            'started_at' => now(),
+        ]);
+        $alert = app(ConversationAlertService::class)->open(
+            company: $company,
+            type: ConversationAlert::TYPE_HUMAN_REQUESTED,
+            severity: ConversationAlert::SEVERITY_WARNING,
+            title: 'Cliente pediu atendente',
+            conversation: $conversation,
+            deduplicationKey: 'human-request:'.$conversation->id,
+        );
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/mode", [
+                'mode' => Conversation::AUTOMATION_MODE_MANUAL,
+                'reason' => 'Atendimento assumido.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.automationMode', Conversation::AUTOMATION_MODE_MANUAL);
+
+        $this->assertSame(ConversationAlert::STATUS_RESOLVED, $alert->refresh()->status);
+        $this->assertSame(0, ConversationAlert::query()->currentActionable()->count());
+        $this->assertSame(1, ConversationAlert::query()->count());
     }
 
     public function test_operational_conversations_hide_demo_data_when_disabled(): void
@@ -2343,7 +2723,7 @@ class WhatsAppProviderTest extends TestCase
     /**
      * @return array<string, mixed>
      */
-    private function statusPayload(string $messageId, string $status): array
+    private function statusPayload(string $messageId, string $status, array $errors = []): array
     {
         return [
             'object' => 'whatsapp_business_account',
@@ -2364,6 +2744,7 @@ class WhatsAppProviderTest extends TestCase
                                         'status' => $status,
                                         'timestamp' => '1780000001',
                                         'recipient_id' => '15550100001',
+                                        ...($errors === [] ? [] : ['errors' => $errors]),
                                     ],
                                 ],
                             ],

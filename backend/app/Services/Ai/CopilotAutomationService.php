@@ -137,10 +137,12 @@ final class CopilotAutomationService
             $event = $this->record($company, $conversation, $message, $decision, $analysis);
 
             if ($decision['requires_human_review']) {
-                $this->requireHumanReview($company, $conversation, $message, $decision);
+                $this->requireHumanReview($company, $conversation, $message, $decision, $analysis);
 
                 return $event;
             }
+
+            $this->resolveCompletedClarificationReview($conversation, $analysis);
 
             if ($decision['decision'] !== CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY
                 && $decision['decision'] !== CopilotAutomationAuthorityPolicy::DECISION_AUTO_ACTION) {
@@ -298,6 +300,7 @@ final class CopilotAutomationService
                 'action' => $decision['action'] ?? null,
                 'reason_codes' => array_values((array) ($decision['reason_codes'] ?? [])),
                 'intent' => (string) ($analysis['intent'] ?? 'UNKNOWN'),
+                'operational_status' => data_get($analysis, 'metadata.operational_status'),
                 'safe_result_status' => (bool) ($analysis['requires_human_review'] ?? true) ? 'requires_human_review' : 'safe',
                 'target_state' => data_get($analysis, 'proposal.target.state'),
                 'guarded_reply_present' => trim((string) ($analysis['suggested_reply'] ?? '')) !== '',
@@ -308,6 +311,11 @@ final class CopilotAutomationService
                 'clarification_source_event_id' => data_get($analysis, 'metadata.clarification_continuity.source_event_id'),
                 'clarification_resolution' => data_get($analysis, 'metadata.clarification_continuity.resolution'),
                 'clarification_matched_option_id' => data_get($analysis, 'metadata.clarification_continuity.matched_option_id'),
+                'waiting_for_customer' => ($decision['action'] ?? null) === 'send_safe_clarification'
+                    || array_intersect(
+                        ['resolved_order_clarification', 'fulfillment_required'],
+                        (array) ($decision['reason_codes'] ?? []),
+                    ) !== [],
                 'guard_results' => [
                     // Analysis is intentionally conservative. The policy decision above,
                     // not this telemetry field, controls whether a human action is required.
@@ -342,7 +350,7 @@ final class CopilotAutomationService
         if (($decision['action'] ?? null) !== 'send_safe_clarification'
             || ! is_array($clarification)
             || ($clarification['type'] ?? null) !== 'MEAT'
-            || ($clarification['source'] ?? null) !== 'DAILY_MENU'
+            || ! in_array(($clarification['source'] ?? null), ['DAILY_MENU', 'PRODUCT_CONFIGURATION'], true)
             || ($clarification['grounded'] ?? false) !== true) {
             return null;
         }
@@ -358,6 +366,7 @@ final class CopilotAutomationService
 
         return [
             'type' => 'ambiguous_meat',
+            'source' => (string) ($clarification['source'] ?? 'DAILY_MENU'),
             'selection_group' => 'meat',
             'source_message_id' => (int) $message->id,
             'active_order_id' => $conversation->active_order_id === null ? null : (int) $conversation->active_order_id,
@@ -385,21 +394,76 @@ final class CopilotAutomationService
         return $event->refresh();
     }
 
-    /** @param array<string,mixed> $decision */
-    private function requireHumanReview(Company $company, Conversation $conversation, Message $message, array $decision): void
+    /** @param array<string,mixed> $decision @param array<string,mixed> $analysis */
+    private function requireHumanReview(Company $company, Conversation $conversation, Message $message, array $decision, array $analysis = []): void
     {
         $conversation->forceFill(['human_review_required' => true])->save();
+        $reason = $this->humanReviewReason($analysis);
+        $customer = trim((string) $conversation->customer()->value('name'));
         $this->alerts->open(
             company: $company,
             type: ConversationAlert::TYPE_LOW_CONFIDENCE_AI,
             severity: ConversationAlert::SEVERITY_WARNING,
-            title: 'Revisão humana necessária',
-            message: 'A automação segura deixou esta conversa para acompanhamento da equipe.',
+            title: $customer === '' ? 'Revisão necessária' : "Revisão necessária — {$customer}",
+            message: $reason['message'],
             conversation: $conversation,
             messageModel: $message,
-            deduplicationKey: 'copilot-act-safe-review:'.$message->id,
-            metadata: ['reason_codes' => array_values((array) ($decision['reason_codes'] ?? []))],
+            deduplicationKey: 'copilot-act-safe-review:'.$conversation->id.':'.$reason['key'],
+            metadata: [
+                'reason_codes' => array_values((array) ($decision['reason_codes'] ?? [])),
+                'missing_information_codes' => $this->codes((array) ($analysis['missing_information'] ?? [])),
+                'warning_codes' => $this->codes((array) ($analysis['warnings'] ?? [])),
+            ],
         );
+    }
+
+    /** @param array<string,mixed> $analysis @return array{key:string,message:string} */
+    private function humanReviewReason(array $analysis): array
+    {
+        $missing = $this->codes((array) ($analysis['missing_information'] ?? []));
+        $warnings = $this->codes((array) ($analysis['warnings'] ?? []));
+        $product = trim((string) data_get($analysis, 'proposal.items.0.product_name', 'Pedido'));
+
+        if (in_array('CARNE', $missing, true)) {
+            return ['key' => 'missing-meat', 'message' => "{$product} precisa de confirmação: falta escolher a carne."];
+        }
+        if (in_array('ADDRESS', $missing, true)) {
+            return ['key' => 'missing-address', 'message' => 'Pedido precisa de confirmação: falta informar o endereço de entrega.'];
+        }
+        if (in_array('LOCATION_UNAVAILABLE', $warnings, true)) {
+            return ['key' => 'location-unavailable', 'message' => 'Atendimento precisa de apoio: confirme o endereço do restaurante.'];
+        }
+
+        $key = strtolower($missing[0] ?? $warnings[0] ?? 'general');
+
+        return ['key' => preg_replace('/[^a-z0-9_-]+/', '-', $key) ?: 'general', 'message' => 'A conversa precisa de conferência da equipe antes de continuar.'];
+    }
+
+    /** @param array<string,mixed> $analysis */
+    private function resolveCompletedClarificationReview(Conversation $conversation, array $analysis): void
+    {
+        if (data_get($analysis, 'metadata.clarification_continuity.resolution') !== 'resolved') {
+            return;
+        }
+
+        ConversationAlert::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->where('type', ConversationAlert::TYPE_LOW_CONFIDENCE_AI)
+            ->where('deduplication_key', 'copilot-act-safe-review:'.$conversation->id.':missing-meat')
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->get()
+            ->each(fn (ConversationAlert $alert) => $this->alerts->resolve($alert));
+
+        $hasActiveOperationalAlert = ConversationAlert::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->currentActionable()
+            ->exists();
+
+        if (! $hasActiveOperationalAlert && $conversation->human_review_required) {
+            $conversation->forceFill(['human_review_required' => false])->save();
+        }
     }
 
     private function clientReference(Message $message): string

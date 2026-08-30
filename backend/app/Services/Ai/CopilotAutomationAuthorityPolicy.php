@@ -64,7 +64,7 @@ final class CopilotAutomationAuthorityPolicy
                 return $this->decision($rollout, self::DECISION_SHADOW, ['shadow_no_execution', 'safe_clarification_available'], 'send_safe_clarification');
             }
 
-            return $this->decision($rollout, self::DECISION_HUMAN_REVIEW, ['safe_clarification_shadow_only']);
+            return $this->decision($rollout, self::DECISION_AUTO_REPLY, ['grounded_safe_clarification'], 'send_safe_clarification');
         }
 
         if ($this->requiresHumanReview($intent, $analysis, $proposal)) {
@@ -76,6 +76,12 @@ final class CopilotAutomationAuthorityPolicy
         }
 
         $candidate = $this->candidate($intent, $analysis, $proposal);
+
+        if ($rollout === self::ROLLOUT_ACT_SAFE
+            && $conversation->human_review_required
+            && $candidate['decision'] === self::DECISION_AUTO_ACTION) {
+            return $this->decision($rollout, self::DECISION_HUMAN_REVIEW, ['pending_human_review_blocks_mutation']);
+        }
 
         if ($rollout === self::ROLLOUT_SHADOW) {
             return $this->decision($rollout, self::DECISION_SHADOW, ['shadow_no_execution', ...$candidate['reason_codes']], $candidate['action']);
@@ -100,28 +106,69 @@ final class CopilotAutomationAuthorityPolicy
     /** @return array{decision:string,action:?string,reason_codes:list<string>} */
     private function candidate(string $intent, array $analysis, array $proposal): array
     {
-        if (in_array($intent, ['MENU_REQUEST', 'BUSINESS_HOURS_REQUEST', 'PRODUCT_CLARIFICATION'], true)
+        if (in_array($intent, ['ORDER_CREATE', 'ORDER_CONTINUE'], true)
+            && data_get($analysis, 'metadata.operational_status') === 'CLOSED'
+            && $this->hasNoOperationalPayload($analysis)
+            && trim((string) ($analysis['suggested_reply'] ?? '')) !== '') {
+            return ['decision' => self::DECISION_AUTO_REPLY, 'action' => 'send_grounded_reply', 'reason_codes' => ['restaurant_closed']];
+        }
+
+        if ($intent === 'ORDER_CREATE'
+            && data_get($analysis, 'metadata.reply_source') === 'order_start'
+            && $this->hasNoOperationalPayload($analysis)
+            && trim((string) ($analysis['suggested_reply'] ?? '')) !== '') {
+            return ['decision' => self::DECISION_AUTO_REPLY, 'action' => 'send_grounded_reply', 'reason_codes' => ['safe_order_start_reply']];
+        }
+
+        if (in_array($intent, ['GREETING', 'GENERAL_MESSAGE'], true)
+            && $this->hasNoOperationalPayload($analysis)
+            && trim((string) ($analysis['suggested_reply'] ?? '')) !== '') {
+            return ['decision' => self::DECISION_AUTO_REPLY, 'action' => 'send_grounded_reply', 'reason_codes' => ['safe_conversational_reply']];
+        }
+
+        if (in_array($intent, ['MENU_REQUEST', 'BUSINESS_HOURS_REQUEST', 'LOCATION_REQUEST', 'PRODUCT_CLARIFICATION'], true)
             && trim((string) ($analysis['suggested_reply'] ?? '')) !== '') {
             return ['decision' => self::DECISION_AUTO_REPLY, 'action' => 'send_grounded_reply', 'reason_codes' => ['grounded_information_reply']];
         }
 
-        if ($intent === 'ORDER_CREATE'
+        if (in_array($intent, ['ORDER_CREATE', 'ORDER_CONTINUE'], true)
+            && $this->isReadyNewOrder($analysis, $proposal)
+            && blank(data_get($analysis, 'draft_order.fulfillment'))
+            && trim((string) ($analysis['suggested_reply'] ?? '')) !== '') {
+            return ['decision' => self::DECISION_AUTO_REPLY, 'action' => 'send_grounded_reply', 'reason_codes' => ['fulfillment_required']];
+        }
+
+        if ($intent === 'ORDER_CONTINUE'
+            && $this->isResolvedClarificationContinuation($analysis)
             && ($proposal['applyability'] ?? null) === 'READY'
-            && ($proposal['target']['state'] ?? null) === 'NEW_ORDER'
-            && ($proposal['target']['requires_human_selection'] ?? true) === false
             && ($proposal['items'] ?? []) !== []
             && empty($proposal['missing_information'])
             && empty($proposal['warnings'])
-            && ! in_array(data_get($analysis, 'draft_order.fulfillment'), ['delivery'], true)) {
+            && trim((string) ($analysis['suggested_reply'] ?? '')) !== '') {
+            return ['decision' => self::DECISION_AUTO_REPLY, 'action' => 'send_grounded_reply', 'reason_codes' => ['resolved_order_clarification']];
+        }
+
+        if (in_array($intent, ['ORDER_CREATE', 'ORDER_CONTINUE'], true)
+            && $this->isReadyNewOrder($analysis, $proposal)
+            && data_get($analysis, 'draft_order.fulfillment') === 'pickup') {
             return ['decision' => self::DECISION_AUTO_ACTION, 'action' => 'stage_new_order', 'reason_codes' => ['new_order_fully_validated']];
         }
 
         return ['decision' => self::DECISION_HUMAN_REVIEW, 'action' => null, 'reason_codes' => ['candidate_not_in_act_safe_v1']];
     }
 
+    /** @param array<string,mixed> $analysis */
+    private function hasNoOperationalPayload(array $analysis): bool
+    {
+        return data_get($analysis, 'draft_order.items', []) === []
+            && blank(data_get($analysis, 'draft_order.fulfillment'))
+            && blank(data_get($analysis, 'draft_order.address'))
+            && blank(data_get($analysis, 'draft_order.payment_method'));
+    }
+
     private function requiresHumanReview(string $intent, array $analysis, array $proposal): bool
     {
-        if (in_array($intent, ['ORDER_CHANGE', 'ORDER_CONFIRMATION', 'ORDER_CONTINUE', 'DELIVERY_QUESTION', 'UNKNOWN'], true)) {
+        if (in_array($intent, ['ORDER_CHANGE', 'ORDER_CONFIRMATION', 'DELIVERY_QUESTION', 'UNKNOWN'], true)) {
             return true;
         }
 
@@ -147,16 +194,36 @@ final class CopilotAutomationAuthorityPolicy
         return is_array($clarification)
             && (string) ($analysis['intent'] ?? '') === 'ORDER_CREATE'
             && ($clarification['type'] ?? null) === 'MEAT'
-            && ($clarification['source'] ?? null) === 'DAILY_MENU'
+            && in_array(($clarification['source'] ?? null), ['DAILY_MENU', 'PRODUCT_CONFIGURATION'], true)
             && ($clarification['grounded'] ?? false) === true
             && (string) data_get($clarification, 'scope.selection_group') === 'meat'
             && (int) data_get($clarification, 'scope.product_id') > 0
             && count($options) >= 2
             && count($options) <= 5
             && count($optionIds) === count($options)
-            && in_array('AMBIGUOUS_MEAT', $warningCodes, true)
             && array_diff($warningCodes, ['AMBIGUOUS_MEAT', 'DOMAIN_SELECTION_REJECTED']) === []
             && array_diff($missingCodes, ['CARNE']) === [];
+    }
+
+    /** @param array<string,mixed> $analysis */
+    private function isResolvedClarificationContinuation(array $analysis): bool
+    {
+        return data_get($analysis, 'metadata.clarification_continuity.resolution') === 'resolved'
+            && (int) data_get($analysis, 'metadata.clarification_continuity.source_event_id') > 0
+            && (int) data_get($analysis, 'metadata.clarification_continuity.matched_option_id') > 0;
+    }
+
+    /** @param array<string,mixed> $analysis @param array<string,mixed> $proposal */
+    private function isReadyNewOrder(array $analysis, array $proposal): bool
+    {
+        return ($proposal['applyability'] ?? null) === 'READY'
+            && ($proposal['target']['state'] ?? null) === 'NEW_ORDER'
+            && ($proposal['target']['requires_human_selection'] ?? true) === false
+            && ($proposal['items'] ?? []) !== []
+            && empty($proposal['missing_information'])
+            && empty($proposal['warnings'])
+            && collect((array) data_get($analysis, 'draft_order.items', []))
+                ->every(fn (mixed $item): bool => is_array($item) && ($item['valid'] ?? false) === true);
     }
 
     /** @param list<array<string,mixed>> $entries @return list<string> */

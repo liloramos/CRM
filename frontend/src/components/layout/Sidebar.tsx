@@ -9,13 +9,14 @@ import { initialsFromName } from '../../utils/formatters'
 type SidebarProps = {
   activeRoute: RouteKey
   collapsed: boolean
+  conversationUnreadCount?: number
   onLogout: () => void
   onNavigate: (route: RouteKey) => void
   onToggleCollapsed: () => void
   user: AuthUser | null
 }
 
-export function Sidebar({ activeRoute, collapsed, onLogout, onNavigate, onToggleCollapsed, user }: SidebarProps) {
+export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, onLogout, onNavigate, onToggleCollapsed, user }: SidebarProps) {
   const toggleLabel = collapsed ? 'Expandir menu' : 'Recolher menu'
   const activeItemRef = useRef<HTMLButtonElement | null>(null)
   const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
@@ -76,7 +77,12 @@ export function Sidebar({ activeRoute, collapsed, onLogout, onNavigate, onToggle
         <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={15} />
       </button>
       <nav className="sidebar__nav" aria-label="Menu principal">
-        {menuItems.map((item) => (
+        {menuItems.map((item) => {
+          const badge = item.key === 'conversas' && conversationUnreadCount > 0
+            ? String(conversationUnreadCount)
+            : item.badge
+
+          return (
           <button
             aria-current={activeRoute === item.key ? 'page' : undefined}
             aria-label={item.label}
@@ -92,13 +98,14 @@ export function Sidebar({ activeRoute, collapsed, onLogout, onNavigate, onToggle
           >
             <Icon name={item.icon} size={19} />
             <span className="sidebar__item-label">{item.label}</span>
-            {item.badge ? (
-              <Badge tone="brand" size="sm">
-                {formatCompactBadge(item.badge)}
+            {badge ? (
+              <Badge tone={item.key === 'conversas' ? 'danger' : 'brand'} size="sm">
+                {formatCompactBadge(badge)}
               </Badge>
             ) : null}
           </button>
-        ))}
+          )
+        })}
       </nav>
       <div className="sidebar__footer">
         <div className="sidebar__profile" ref={profileRef}>

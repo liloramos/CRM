@@ -43,9 +43,10 @@ final class CopilotProductClarificationBuilder
             return $pending;
         }
 
+        $missing = array_column((array) ($safe['missing_information'] ?? []), 'code');
         if ((string) ($safe['intent'] ?? '') !== 'ORDER_CREATE'
             || data_get($context, 'active_order') !== null
-            || ! in_array('AMBIGUOUS_MEAT', array_column((array) ($safe['warnings'] ?? []), 'code'), true)) {
+            || ! in_array('CARNE', $missing, true)) {
             return null;
         }
 
@@ -54,24 +55,26 @@ final class CopilotProductClarificationBuilder
             return null;
         }
         $menuItem = collect((array) data_get($context, 'menu', []))->firstWhere('id', (int) ($item['menu_item_id'] ?? 0));
-        if (! is_array($menuItem) || ! in_array((string) ($menuItem['rule'] ?? ''), ['n8_tradicional', 'n9_tradicional'], true)) {
+        if (! is_array($menuItem)) {
             return null;
         }
 
-        $message = Str::of((string) data_get($context, 'latest_message.body', ''))->ascii()->lower()->toString();
-        $options = collect((array) data_get($context, 'daily_meats', []))
-            ->filter(fn (array $meat): bool => (int) ($meat['id'] ?? 0) > 0 && $this->matchesMeatReference($message, $meat))
-            ->map(fn (array $meat): array => ['component_id' => (int) $meat['id'], 'display_name' => (string) $meat['name']])
-            ->unique('component_id')->sortBy('display_name')->values();
+        $dailyMeat = in_array('AMBIGUOUS_MEAT', array_column((array) ($safe['warnings'] ?? []), 'code'), true)
+            && in_array((string) ($menuItem['rule'] ?? ''), ['n8_tradicional', 'n9_tradicional'], true);
+        $options = $dailyMeat
+            ? $this->matchingDailyMeats($context)
+            : $this->configuredMeats($menuItem);
         if ($options->count() < 2 || $options->count() > 5) {
             return null;
         }
 
         return [
             'type' => 'MEAT',
-            'prompt' => 'Hoje temos '.$options->pluck('display_name')->implode(' e ').'. Qual você prefere?',
+            'prompt' => $dailyMeat
+                ? 'Hoje temos '.$options->pluck('display_name')->implode(' e ').'. Qual você prefere?'
+                : 'Perfeito 😊 Qual carne você prefere?',
             'options' => $options->all(),
-            'source' => 'DAILY_MENU',
+            'source' => $dailyMeat ? 'DAILY_MENU' : 'PRODUCT_CONFIGURATION',
             'grounded' => true,
             'scope' => ['product_id' => (int) $item['menu_item_id'], 'selection_group' => 'meat'],
         ];
@@ -169,5 +172,35 @@ final class CopilotProductClarificationBuilder
         return collect(preg_split('/[^a-z0-9]+/', Str::of((string) ($meat['name'] ?? ''))->ascii()->lower()->toString()) ?: [])
             ->filter(fn (string $token): bool => strlen($token) >= 4)
             ->contains(fn (string $token): bool => str_contains($message, $token));
+    }
+
+    private function matchingDailyMeats(array $context): Collection
+    {
+        $message = Str::of((string) data_get($context, 'latest_message.body', ''))->ascii()->lower()->toString();
+
+        return collect((array) data_get($context, 'daily_meats', []))
+            ->filter(fn (array $meat): bool => (int) ($meat['id'] ?? 0) > 0 && $this->matchesMeatReference($message, $meat))
+            ->map(fn (array $meat): array => ['component_id' => (int) $meat['id'], 'display_name' => (string) $meat['name']])
+            ->unique('component_id')->sortBy('display_name')->values();
+    }
+
+    private function configuredMeats(array $menuItem): Collection
+    {
+        $group = collect((array) data_get($menuItem, 'resolved_configuration.static_configuration.groups', []))
+            ->first(fn (mixed $candidate): bool => is_array($candidate)
+                && ($candidate['code'] ?? null) === 'carne'
+                && ($candidate['selection_actor'] ?? null) === 'customer'
+                && ($candidate['required'] ?? false) === true);
+
+        return collect(is_array($group) ? ($group['component_options'] ?? []) : [])
+            ->filter(fn (mixed $option): bool => is_array($option)
+                && ($option['available'] ?? false) === true
+                && (int) ($option['component_id'] ?? 0) > 0
+                && trim((string) ($option['display_name'] ?? $option['name'] ?? '')) !== '')
+            ->map(fn (array $option): array => [
+                'component_id' => (int) $option['component_id'],
+                'display_name' => (string) ($option['display_name'] ?? $option['name']),
+            ])
+            ->unique('component_id')->sortBy('display_name')->values();
     }
 }

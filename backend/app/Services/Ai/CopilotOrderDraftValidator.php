@@ -419,6 +419,8 @@ class CopilotOrderDraftValidator
     {
         $componentId = (int) data_get($pending, 'resolution.component_id');
         $option = collect((array) ($pending['options'] ?? []))->firstWhere('component_id', $componentId);
+        $selectionMode = (string) data_get($pending, 'scope.selection_mode');
+        $displayName = (string) data_get($option, 'display_name');
 
         return [
             'menu_item_id' => (int) data_get($pending, 'candidate.product_id'),
@@ -426,8 +428,8 @@ class CopilotOrderDraftValidator
             'quantity' => max(1, (int) data_get($pending, 'candidate.quantity', 1)),
             'selections' => [
                 'meat_mode' => 'traditional',
-                'meat' => null,
-                'meats' => [(string) data_get($option, 'display_name')],
+                'meat' => $selectionMode === ProductSelectionMode::Single->value ? $displayName : null,
+                'meats' => $selectionMode === ProductSelectionMode::Multiple->value ? [$displayName] : [],
             ],
             'removed_components' => [],
         ];

@@ -15,12 +15,16 @@ final class CopilotLatestMessageIntentResolver
             return 'GENERAL_MESSAGE';
         }
 
-        if (preg_match('/\b(cardapio|menu|o\s+que\s+tem\s+hoje|tem\s+hoje)\b/', $text) === 1) {
+        if (preg_match('/\b(cardapio|menu|o\s+que\s+tem\s+hoje|tem\s+hoje|tem\s+almoco\s+hoje)\b/', $text) === 1) {
             return 'MENU_REQUEST';
         }
 
-        if (preg_match('/\b(horario|horarios|funciona(?:ndo)?|aberto|fechado|atendendo)\b/', $text) === 1) {
+        if (preg_match('/\b(horario|horarios|funciona(?:ndo)?|abert[oa]s?|fechad[oa]s?|atendendo|que\s+horas\s+abre(?:m)?)\b/', $text) === 1) {
             return 'BUSINESS_HOURS_REQUEST';
+        }
+
+        if (preg_match('/\b(onde\s+fica|qual(?:\s+e)?\s+(?:o\s+)?endereco|voces?\s+ficam\s+onde|endereco\s+do\s+restaurante)\b/', $text) === 1) {
+            return 'LOCATION_REQUEST';
         }
 
         if (preg_match('/\b(chave\s+pix|pix\s+(?:para|de|do)|como\s+pagar\s+por\s+pix|qual(?:\s+e)?\s+(?:o|a)?\s*(?:chave\s+)?pix|me\s+passa\s+(?:a\s+)?(?:chave\s+)?pix)\b/', $text) === 1) {
@@ -33,6 +37,10 @@ final class CopilotLatestMessageIntentResolver
 
         if ($this->isProductInformationRequest($text)) {
             return 'PRODUCT_CLARIFICATION';
+        }
+
+        if ($this->isBareOrderStartRequest($context)) {
+            return 'ORDER_CREATE';
         }
 
         if (preg_match('/\b(troca|troque|alter[ae]|muda|mude|substitui[ar]?|tir[ae]|remove[ar]?)\b/', $text) === 1) {
@@ -77,6 +85,14 @@ final class CopilotLatestMessageIntentResolver
         }
 
         return 'GENERAL_MESSAGE';
+    }
+
+    /** @param array<string,mixed> $context */
+    public function isBareOrderStartRequest(array $context): bool
+    {
+        $text = $this->latestInbound($context);
+
+        return preg_match('/^(?:(?:oi|ola)\s*,?\s*)?(?:quero|queria|gostaria(?:\s+de)?|preciso)\s+(?:fazer|montar|realizar)\s+(?:um\s+)?pedido[.!?]*$/', $text) === 1;
     }
 
     private function isProductInformationRequest(string $text): bool

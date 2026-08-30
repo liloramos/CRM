@@ -44,15 +44,10 @@ class ConversationWorkflowService
             ])->save();
 
             if ($mode === Conversation::AUTOMATION_MODE_MANUAL) {
-                $this->alerts->open(
-                    company: $conversation->company()->firstOrFail(),
-                    type: ConversationAlert::TYPE_HUMAN_REQUESTED,
-                    severity: ConversationAlert::SEVERITY_WARNING,
-                    title: 'Atendimento manual assumido',
-                    message: 'A automacao foi pausada para esta conversa.',
-                    conversation: $conversation,
-                    deduplicationKey: 'manual-mode:'.$conversation->id,
-                    metadata: ['actor_id' => $user?->id],
+                $this->alerts->resolveActiveForConversation(
+                    $conversation,
+                    [ConversationAlert::TYPE_HUMAN_REQUESTED],
+                    $user,
                 );
             }
 
@@ -130,26 +125,12 @@ class ConversationWorkflowService
 
             if ($delivery->status === 'failed') {
                 $failedDelivery = $delivery;
-
-                $this->alerts->open(
-                    company: $company,
-                    type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
-                    severity: ConversationAlert::SEVERITY_CRITICAL,
-                    title: 'Falha ao enviar mensagem',
-                    message: $delivery->error_message ?: 'A mensagem não foi entregue pelo provedor WhatsApp.',
-                    conversation: $conversation,
-                    deduplicationKey: 'message-send-failed:'.$delivery->message_id,
-                    metadata: [
-                        'delivery_id' => $delivery->id,
-                        'error_code' => data_get($delivery->safe_payload, 'error_code'),
-                    ],
-                );
+                $this->alerts->openMessageSendFailure($company, $conversation, $delivery, $user);
             }
 
             $conversation->forceFill([
                 'last_business_message_at' => now(),
                 'last_message_at' => now(),
-                'unread_count' => 0,
             ])->save();
 
             return $conversation->refresh();
@@ -176,20 +157,7 @@ class ConversationWorkflowService
         $delivery = $this->whatsapp->retryTextMessage($company, $message);
 
         if ($delivery->status === WhatsAppMessageDelivery::STATUS_FAILED) {
-            $this->alerts->open(
-                company: $company,
-                type: ConversationAlert::TYPE_MESSAGE_SEND_FAILED,
-                severity: ConversationAlert::SEVERITY_CRITICAL,
-                title: 'Falha ao reenviar mensagem',
-                message: $delivery->error_message ?: 'A mensagem não foi entregue pelo provedor WhatsApp.',
-                conversation: $conversation,
-                deduplicationKey: 'message-send-failed:'.$delivery->message_id,
-                metadata: [
-                    'delivery_id' => $delivery->id,
-                    'actor_id' => $user->id,
-                    'error_code' => data_get($delivery->safe_payload, 'error_code'),
-                ],
-            );
+            $this->alerts->openMessageSendFailure($company, $conversation, $delivery, $user);
 
             throw new WhatsAppMessageSendFailedException(
                 $delivery->error_message ?: 'Não foi possível reenviar a mensagem pelo WhatsApp.',
@@ -199,12 +167,7 @@ class ConversationWorkflowService
             );
         }
 
-        ConversationAlert::query()
-            ->where('company_id', $company->id)
-            ->where('deduplication_key', 'message-send-failed:'.$message->id)
-            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
-            ->get()
-            ->each(fn (ConversationAlert $alert) => $this->alerts->resolve($alert, $user));
+        $this->alerts->resolveMessageSendFailures($company, $conversation, $delivery->whatsapp_account_id, $user);
 
         return $conversation->refresh();
     }

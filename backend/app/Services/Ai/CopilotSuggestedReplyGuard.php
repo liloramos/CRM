@@ -14,7 +14,7 @@ final class CopilotSuggestedReplyGuard
     /** @param array<string,mixed> $safe @param array<string,mixed> $context @return array<string,mixed> */
     public function restrict(array $safe, array $context): array
     {
-        if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'product_catalog', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy'], true)) {
+        if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'product_catalog', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy', 'order_start'], true)) {
             return [...$safe, 'clarification' => null];
         }
         $clarification = $this->clarifications->forAmbiguousMeat($safe, $context)
@@ -191,7 +191,11 @@ final class CopilotSuggestedReplyGuard
                     ->firstWhere('id', (int) ($item['menu_item_id'] ?? 0));
                 $name = $this->products->name($item, $context);
                 $description = $this->products->description($item, $context);
-                $meats = collect(data_get($item, 'selections.meats', []))->filter()->implode(' e ');
+                $meatSelections = data_get($item, 'selections.meats', []);
+                if ($meatSelections === [] && filled(data_get($item, 'selections.meat'))) {
+                    $meatSelections = [data_get($item, 'selections.meat')];
+                }
+                $meats = collect($meatSelections)->filter()->implode(' e ');
                 $detail = match (data_get($item, 'selections.meat_mode', 'traditional')) {
                     'none' => ' sem carne',
                     'beef_only' => ' somente bife',
@@ -200,8 +204,8 @@ final class CopilotSuggestedReplyGuard
                         : '',
                 };
 
-                if ($description === '' && $meats !== '') {
-                    $detail = " com {$meats}";
+                if ($meats !== '') {
+                    $detail .= $detail === '' ? " com {$meats}" : " e {$meats}";
                 }
                 if (str_contains(Str::of((string) ($item['item_notes'] ?? ''))->ascii()->lower()->toString(), 'salada a escolha da casa')) {
                     $detail .= $detail === '' ? ' com salada por conta da casa' : ' e salada por conta da casa';
@@ -222,6 +226,14 @@ final class CopilotSuggestedReplyGuard
         if (filled(data_get($safe, 'draft_order.payment_method'))) {
             $method = (string) data_get($safe, 'draft_order.payment_method');
             $reply .= ' com pagamento por '.(mb_strtolower($method) === 'pix' ? 'Pix' : $method);
+        }
+
+        if (blank(data_get($safe, 'draft_order.fulfillment'))
+            && in_array((string) ($safe['intent'] ?? ''), ['ORDER_CREATE', 'ORDER_CONTINUE'], true)
+            && data_get($safe, 'draft_order.items', []) !== []
+            && empty($safe['missing_information'])
+            && empty($safe['warnings'])) {
+            return $reply.'. Vai ser para retirada ou entrega? 😊';
         }
 
         return $reply.'. Confere?';

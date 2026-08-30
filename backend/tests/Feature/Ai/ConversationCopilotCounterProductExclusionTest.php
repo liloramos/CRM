@@ -9,6 +9,8 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Services\Ai\ConversationCopilotContextBuilder;
 use App\Services\Ai\CopilotMenuAliasResolver;
+use App\Services\Ai\CopilotMenuReplyBuilder;
+use Carbon\CarbonImmutable;
 use Database\Seeders\SolRestaurantStructuredMenuSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -54,6 +56,9 @@ class ConversationCopilotCounterProductExclusionTest extends TestCase
         $this->assertNotContains($counter->id, $menuIds);
         $this->assertContains($normal->id, $menuIds);
         $this->assertNull(app(CopilotMenuAliasResolver::class)->resolve($company, $counter->id, $counter->slug));
+        $menuReply = app(CopilotMenuReplyBuilder::class)->build($company, CarbonImmutable::now(), 'cardápio completo');
+        $this->assertStringNotContainsString($counter->name, $menuReply['suggested_reply']);
+        $this->assertStringContainsString($normal->name, $menuReply['suggested_reply']);
         $this->assertTrue(Product::query()->whereKey($counter->id)->where('product_type', Product::TYPE_COUNTER)->exists());
     }
 }

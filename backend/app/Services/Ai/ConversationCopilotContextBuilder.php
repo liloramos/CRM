@@ -9,6 +9,7 @@ use App\Models\Message;
 use App\Models\Order;
 use App\Models\Product;
 use App\Services\Menu\DailyStructuredMenuService;
+use App\Services\Operational\CompanyOperatingHoursService;
 use App\Services\Orders\CustomerActiveOrderResolver;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -22,6 +23,7 @@ final class ConversationCopilotContextBuilder
         private readonly CopilotResolvedProductConfigurationService $resolvedProducts,
         private readonly CustomerActiveOrderResolver $activeOrders,
         private readonly CopilotProductEligibility $eligibility,
+        private readonly CompanyOperatingHoursService $operatingHours,
     ) {}
 
     /** @return array<string,mixed> */
@@ -80,6 +82,7 @@ final class ConversationCopilotContextBuilder
                 'instruction' => 'Nenhum pedido historico foi carregado. Solicite uma referencia explicita antes de repetir um pedido anterior.',
             ],
             'evaluation_date' => $date->toDateString(),
+            'operational_status' => $this->operatingHours->status($company, $date),
             'menu' => $this->menuContext($company, $date),
             'daily_meats' => $this->dailyMeats($company, $date),
         ];
@@ -344,12 +347,34 @@ final class ConversationCopilotContextBuilder
 
         $productId = (int) data_get($snapshot, 'candidate.product_id');
         $product = collect((array) data_get($context, 'menu', []))->firstWhere('id', $productId);
-        if (! is_array($product) || ! in_array((string) ($product['rule'] ?? ''), ['n8_tradicional', 'n9_tradicional'], true)) {
+        $source = (string) ($snapshot['source'] ?? 'DAILY_MENU');
+        if (! is_array($product)
+            || ($source === 'DAILY_MENU' && ! in_array((string) ($product['rule'] ?? ''), ['n8_tradicional', 'n9_tradicional'], true))) {
             return $this->staleClarification($event, 'product_unavailable');
         }
 
+        $selectionGroup = collect((array) data_get($product, 'groups', []))->firstWhere('code', 'carne');
+        $selectionMode = $source === 'DAILY_MENU'
+            ? ((int) data_get($product, 'resolved_configuration.meat_configuration.traditional.selection_rules.max', 1) > 1 ? 'multiple' : 'single')
+            : (string) data_get($selectionGroup, 'selection_mode');
+        if (! in_array($selectionMode, ['single', 'multiple'], true)) {
+            return $this->staleClarification($event, 'selection_group_changed');
+        }
+
         $allowedIds = array_values(array_unique(array_filter(array_map('intval', (array) ($snapshot['option_component_ids'] ?? [])))));
-        $available = collect((array) data_get($context, 'daily_meats', []))->keyBy(fn (array $meat): int => (int) ($meat['id'] ?? 0));
+        $available = $source === 'PRODUCT_CONFIGURATION'
+            ? collect((array) data_get(
+                collect((array) data_get($product, 'resolved_configuration.static_configuration.groups', []))->firstWhere('code', 'carne'),
+                'component_options',
+                [],
+            ))
+                ->filter(fn (array $option): bool => ($option['available'] ?? false) === true)
+                ->map(fn (array $option): array => [
+                    'id' => (int) ($option['component_id'] ?? 0),
+                    'name' => (string) ($option['display_name'] ?? $option['name'] ?? ''),
+                ])
+                ->keyBy(fn (array $meat): int => (int) ($meat['id'] ?? 0))
+            : collect((array) data_get($context, 'daily_meats', []))->keyBy(fn (array $meat): int => (int) ($meat['id'] ?? 0));
         $options = collect($allowedIds)
             ->map(fn (int $id): ?array => $available->has($id) ? ['component_id' => $id, 'display_name' => (string) data_get($available->get($id), 'name')] : null)
             ->filter()
@@ -365,7 +390,11 @@ final class ConversationCopilotContextBuilder
             'source_event_id' => (int) $event->id,
             'source_message_id' => (int) $event->message_id,
             'type' => 'ambiguous_meat',
-            'scope' => ['product_id' => $productId, 'selection_group' => 'meat'],
+            'scope' => [
+                'product_id' => $productId,
+                'selection_group' => 'meat',
+                'selection_mode' => $selectionMode,
+            ],
             'candidate' => [
                 'product_id' => $productId,
                 'product_slug' => (string) data_get($snapshot, 'candidate.product_slug'),

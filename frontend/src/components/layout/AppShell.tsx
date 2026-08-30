@@ -7,6 +7,7 @@ const SIDEBAR_STORAGE_KEY = 'chatbotcrm.sidebar.v1.collapsed'
 type AppShellProps = {
   activeRoute: RouteKey
   children: ReactNode
+  conversationUnreadCount?: number
   onLogout: () => void
   onNavigate: (route: RouteKey) => void
   user: AuthUser | null
@@ -15,6 +16,7 @@ type AppShellProps = {
 export function AppShell({
   activeRoute,
   children,
+  conversationUnreadCount = 0,
   onLogout,
   onNavigate,
   user,
@@ -34,6 +36,7 @@ export function AppShell({
       <Sidebar
         activeRoute={activeRoute}
         collapsed={isSidebarCollapsed}
+        conversationUnreadCount={conversationUnreadCount}
         onNavigate={onNavigate}
         onLogout={onLogout}
         onToggleCollapsed={() => setIsSidebarCollapsed((current) => !current)}

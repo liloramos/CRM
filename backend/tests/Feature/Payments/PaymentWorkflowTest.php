@@ -138,6 +138,40 @@ class PaymentWorkflowTest extends TestCase
             ->count());
     }
 
+    public function test_financial_snapshot_only_labels_credit_when_customer_credit_was_generated(): void
+    {
+        [$company, $customer, $unresolvedOrder] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $payments = app(PaymentWorkflowService::class);
+
+        $payments->confirmOrderPayment($unresolvedOrder, $user, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $unresolvedOrder->total_cents + 200,
+        ]);
+
+        $unresolvedSnapshot = app(OperationalCrmPresenter::class)->snapshot($company, $user);
+        $unresolvedEntry = collect($unresolvedSnapshot['financeEntries'])
+            ->firstWhere('orderId', (string) $unresolvedOrder->id);
+
+        $this->assertSame('revisao_humana', $unresolvedEntry['status']);
+        $this->assertTrue($unresolvedEntry['canVoidPayment']);
+        $this->assertSame(0.0, $unresolvedSnapshot['financialSummary']['customerCreditBalance']);
+
+        $creditOrder = $this->createOrderForExistingCustomer($company, $customer, 'n5-casa');
+        $payments->confirmOrderPayment($creditOrder, $user, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $creditOrder->total_cents + 200,
+            'overpayment_action' => Payment::OVERPAYMENT_KEEP_AS_CREDIT,
+        ]);
+
+        $creditSnapshot = app(OperationalCrmPresenter::class)->snapshot($company, $user);
+        $creditEntry = collect($creditSnapshot['financeEntries'])
+            ->firstWhere('orderId', (string) $creditOrder->id);
+
+        $this->assertSame('credito', $creditEntry['status']);
+        $this->assertSame(2.0, $creditSnapshot['financialSummary']['customerCreditBalance']);
+    }
+
     public function test_whatsapp_evidence_is_idempotent_per_media_and_keeps_multiple_files_auditable(): void
     {
         [, , $order] = $this->createOrderWithProduct('n8-casa');
@@ -322,6 +356,71 @@ class PaymentWorkflowTest extends TestCase
         $again = $payments->voidLatestConfirmedPayment($order, $user, 'Não deve duplicar a auditoria.');
         $this->assertSame($voided->id, $again->id);
         $this->assertSame(1, $order->payments()->whereNotNull('voided_at')->count());
+    }
+
+    public function test_legacy_confirmed_payments_can_be_voided_when_order_is_already_awaiting_payment(): void
+    {
+        [$company, $customer, $order] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+
+        $original = $payments->recordPayment($order, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => $order->total_cents,
+        ]);
+        $firstProof = $payments->attachProof($original, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 701],
+        ]);
+        $secondProof = $payments->attachProof($original, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 702],
+        ]);
+        $payments->confirmPayment($original, $user);
+        $orders->transitionTo($order->refresh(), Order::STATUS_READY_TO_PRINT, $user, 'ticket_ready');
+
+        $legacyDuplicate = Payment::query()->create([
+            'company_id' => $company->id,
+            'order_id' => $order->id,
+            'customer_id' => $customer->id,
+            'created_by_user_id' => $user->id,
+            'confirmed_by_user_id' => $user->id,
+            'method' => Payment::METHOD_PIX,
+            'provider' => Payment::PROVIDER_MANUAL,
+            'status' => Payment::STATUS_CONFIRMED,
+            'amount_cents' => $order->total_cents,
+            'confirmed_amount_cents' => $order->total_cents,
+            'amount_due_after_payment_cents' => 0,
+            'currency' => $order->currency,
+            'paid_at' => now(),
+            'confirmed_at' => now(),
+        ]);
+
+        $firstVoid = $payments->voidLatestConfirmedPayment($order, $user, 'Duplicidade legada identificada.');
+
+        $this->assertSame($legacyDuplicate->id, $firstVoid->id);
+        $this->assertSame(Order::STATUS_AWAITING_PAYMENT, $order->refresh()->status);
+        $this->assertSame(Payment::ORDER_STATUS_PAID, $order->payment_status);
+
+        $secondVoid = $payments->voidLatestConfirmedPayment($order, $user, 'Confirmacao restante anulada pela gerente.');
+
+        $this->assertSame($original->id, $secondVoid->id);
+        $this->assertSame(Payment::STATUS_CANCELLED, $secondVoid->status);
+        $this->assertSame($user->id, $secondVoid->voided_by_user_id);
+        $this->assertNotNull($secondVoid->voided_at);
+        $this->assertSame('Confirmacao restante anulada pela gerente.', $secondVoid->void_reason);
+        $this->assertSame(Order::STATUS_AWAITING_PAYMENT, $order->refresh()->status);
+        $this->assertSame(Payment::ORDER_STATUS_UNPAID, $order->payment_status);
+        $this->assertSame(0, $order->amount_paid_cents);
+        $this->assertSame(2, $order->payments()->count());
+        $this->assertSame(2, $order->payments()->where('status', Payment::STATUS_CANCELLED)->count());
+        $this->assertSame($original->id, $firstProof->refresh()->payment_id);
+        $this->assertSame($original->id, $secondProof->refresh()->payment_id);
+        $this->assertSame(2, $original->proofs()->count());
+        $this->assertSame(0, $order->creditMovements()->count());
+        $this->assertSame(0, $customer->refresh()->credit_balance_cents);
+        $this->assertSame(1, $order->statusHistories()->where('reason', 'payment_confirmation_voided')->count());
     }
 
     public function test_cancelled_unpaid_orders_are_not_financial_pending_but_paid_history_is_preserved(): void

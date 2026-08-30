@@ -4,6 +4,7 @@ namespace Tests\Feature\Ai;
 
 use App\Contracts\Ai\ConversationCopilotProviderInterface;
 use App\Models\Company;
+use App\Models\MenuComponent;
 use App\Models\Product;
 use App\Services\Ai\ConversationCopilotContextBuilder;
 use App\Services\Ai\ConversationCopilotPipeline;
@@ -393,6 +394,47 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->assertNotContains('DOMAIN_SELECTION_REJECTED', array_column($safe['warnings'], 'code'));
         $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
         $this->assertNotContains('SALADA', array_column($safe['missing_information'], 'code'));
+    }
+
+    public function test_free_assembly_recovers_multiple_canonical_choices_from_one_unaccented_message(): void
+    {
+        $company = $this->seedRestaurant();
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n8',
+                'quantity' => 1,
+                'selections' => ['meats' => ['porco']],
+                'removed_components' => [],
+            ]], 'fulfillment' => null],
+            'missing_information' => [],
+            'warnings' => [],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze(
+            $company,
+            app(ConversationCopilotContextBuilder::class)->forMessages(
+                $company,
+                [['direction' => 'inbound', 'type' => 'text', 'body' => 'n8 arroz feijao macarrao porco beterraba']],
+                null,
+                $this->evaluationDate(),
+            ),
+            $this->evaluationDate(),
+        )['safe'];
+        $item = $safe['draft_order']['items'][0];
+        $componentNames = MenuComponent::query()
+            ->whereIn('id', $item['daily_component_ids'] ?? [])
+            ->pluck('name')
+            ->all();
+
+        $this->assertSame('n8-tradicional', $item['menu_item_slug']);
+        $this->assertSame(['Porco'], $item['selections']['meats']);
+        $this->assertContains('Feijão tradicional', $componentNames);
+        $this->assertContains('Beterraba', $componentNames);
+        $this->assertNotContains('Arroz', $componentNames);
+        $this->assertNotContains('Macarrão', $componentNames);
+        $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
+        $this->assertNotContains('UNRESOLVED_SELECTION', array_column($safe['warnings'], 'code'));
     }
 
     public function test_n8_without_the_casa_qualifier_resolves_to_the_traditional_variant(): void

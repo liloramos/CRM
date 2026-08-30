@@ -7,7 +7,7 @@ export function modalTitle(modal: AppModal): string {
     case 'delete-draft':
       return 'Excluir rascunho'
     case 'delete-order-permanent':
-      return 'Excluir pedido de teste'
+      return 'Excluir pedido definitivamente'
     case 'delete-orders-bulk':
       return 'Excluir pedidos selecionados'
     case 'cleanup-test-orders':
@@ -55,7 +55,7 @@ export function modalDescription(modal: AppModal): string {
       return 'Somente rascunho vazio, sem pagamento, itens ou impressao, pode ser apagado.'
     case 'delete-order-permanent':
     case 'delete-orders-bulk':
-      return 'Exclusao permanente somente para pedidos operacionalmente elegiveis.'
+      return 'Exclusao administrativa definitiva, disponivel somente para pedidos cancelados e financeiramente zerados.'
     case 'cleanup-test-orders':
       return 'Limpeza ampla de desenvolvimento, protegida por permissao, ambiente, flag e confirmacao.'
     case 'toggle-ai':

@@ -1011,6 +1011,22 @@ class OrderWorkflowTest extends TestCase
         $this->assertSame(800, $order->refresh()->amount_paid_cents);
     }
 
+    public function test_order_state_machine_still_rejects_same_state_transitions(): void
+    {
+        $this->seed(CompanySeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $orders->transitionTo($order, Order::STATUS_AWAITING_PAYMENT, $user, 'payment_requested');
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('Order cannot transition from [awaiting_payment] to [awaiting_payment].');
+
+        $orders->transitionTo($order->refresh(), Order::STATUS_AWAITING_PAYMENT, $user, 'duplicate_transition');
+    }
+
     public function test_order_payment_confirmation_reuses_the_existing_payment_proof_review(): void
     {
         $this->seed([CompanySeeder::class, MenuSeeder::class]);
@@ -1050,6 +1066,49 @@ class OrderWorkflowTest extends TestCase
         $this->assertSame(PaymentProof::STATUS_RECEIVED, $proof->status);
     }
 
+    public function test_operational_status_changes_do_not_mutate_confirmed_payments(): void
+    {
+        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $orders->addItem($order, $product);
+        $payment = $payments->confirmOrderPayment($order, $user, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 800,
+        ]);
+        $paymentBefore = $payment->refresh()->only([
+            'id',
+            'status',
+            'amount_cents',
+            'confirmed_amount_cents',
+            'confirmed_by_user_id',
+        ]);
+
+        foreach ([
+            Order::STATUS_READY_TO_PRINT,
+            Order::STATUS_AWAITING_PAYMENT,
+            Order::STATUS_PAYMENT_CONFIRMED,
+            Order::STATUS_READY_TO_PRINT,
+        ] as $status) {
+            $orders->transitionTo($order->refresh(), $status, $user, 'manual_status_change');
+        }
+
+        $this->assertSame(1, Payment::query()->where('order_id', $order->id)->count());
+        $this->assertSame($paymentBefore, $payment->refresh()->only([
+            'id',
+            'status',
+            'amount_cents',
+            'confirmed_amount_cents',
+            'confirmed_by_user_id',
+        ]));
+        $this->assertSame(800, $order->refresh()->amount_paid_cents);
+    }
+
     public function test_empty_draft_order_can_be_deleted_safely(): void
     {
         $this->seed(CompanySeeder::class);
@@ -1074,26 +1133,125 @@ class OrderWorkflowTest extends TestCase
         $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
-        $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $operator = User::factory()->create(['company_id' => $company->id]);
+        $operator->assignRole(Role::ATENDENTE);
+        $administrator = User::factory()->create(['company_id' => $company->id]);
+        $administrator->assignRole(Role::ADMIN_GERENTE);
 
-        $data = $this->actingAs($manager)
+        $data = $this->actingAs($operator)
             ->getJson('/api/app/operational-snapshot')
             ->assertOk()
             ->json('data.capabilities');
 
         $this->assertFalse(config('chatbotcrm.orders.allow_destructive_test_cleanup'));
-        $this->assertTrue($data['can_permanently_delete_orders']);
+        $this->assertFalse($data['can_permanently_delete_orders']);
         $this->assertFalse($data['can_run_destructive_test_cleanup']);
 
-        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => true]);
-
-        $data = $this->actingAs($manager)
+        $administratorData = $this->actingAs($administrator)
             ->getJson('/api/app/operational-snapshot')
             ->assertOk()
             ->json('data.capabilities');
 
+        $this->assertTrue($administratorData['can_permanently_delete_orders']);
+
+        config(['chatbotcrm.orders.allow_destructive_test_cleanup' => true]);
+
+        $data = $this->actingAs($operator)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.capabilities');
+
+        $this->assertFalse($data['can_permanently_delete_orders']);
         $this->assertTrue($data['can_run_destructive_test_cleanup']);
+    }
+
+    public function test_finance_snapshot_uses_canonical_order_deletion_eligibility(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $administrator = User::factory()->create(['company_id' => $company->id]);
+        $administrator->assignRole(Role::ADMIN_GERENTE);
+        $operator = User::factory()->create(['company_id' => $company->id]);
+        $operator->assignRole(Role::ATENDENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+
+        $eligibleOrder = $orders->createDraft($company, ['customer_name_snapshot' => 'Financeiro elegivel']);
+        $orders->transitionTo($eligibleOrder, Order::STATUS_CANCELLED, $administrator, 'pedido_cancelado');
+
+        $confirmedOrder = $orders->createDraft($company, ['customer_name_snapshot' => 'Financeiro confirmado']);
+        $orders->addItem($confirmedOrder, $product);
+        $confirmedPayment = $payments->confirmOrderPayment($confirmedOrder, $administrator, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 800,
+        ]);
+        $orders->transitionTo($confirmedOrder->refresh(), Order::STATUS_CANCELLED, $administrator, 'pedido_cancelado');
+
+        $reviewOrder = $orders->createDraft($company, ['customer_name_snapshot' => 'Financeiro em revisao']);
+        $orders->addItem($reviewOrder, $product);
+        $reviewPayment = $payments->recordPayment($reviewOrder, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 800,
+        ]);
+        $reviewProof = $payments->attachProof($reviewPayment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 901],
+        ]);
+        $orders->transitionTo($reviewOrder->refresh(), Order::STATUS_CANCELLED, $administrator, 'pedido_cancelado');
+
+        $activeOrder = $orders->createDraft($company, ['customer_name_snapshot' => 'Financeiro ativo']);
+
+        $entries = collect($this->actingAs($administrator)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.financeEntries'))
+            ->keyBy('orderId');
+
+        $this->assertTrue($entries[(string) $eligibleOrder->id]['permanentDeletion']['eligible']);
+        $this->assertSame([], $entries[(string) $eligibleOrder->id]['permanentDeletion']['reasons']);
+        $this->assertFalse($entries[(string) $confirmedOrder->id]['permanentDeletion']['eligible']);
+        $this->assertContains('payment_confirmed', $entries[(string) $confirmedOrder->id]['permanentDeletion']['reasons']);
+        $this->assertFalse($entries[(string) $reviewOrder->id]['permanentDeletion']['eligible']);
+        $this->assertContains('payment_review_pending', $entries[(string) $reviewOrder->id]['permanentDeletion']['reasons']);
+        $this->assertNull($entries[(string) $activeOrder->id]['permanentDeletion']);
+
+        $operatorEntries = collect($this->actingAs($operator)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.financeEntries'))
+            ->keyBy('orderId');
+
+        $this->assertNull($operatorEntries[(string) $eligibleOrder->id]['permanentDeletion']);
+
+        $this->actingAs($operator)
+            ->deleteJson("/api/app/orders/{$eligibleOrder->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('orders', ['id' => $eligibleOrder->id]);
+
+        $this->actingAs($administrator)
+            ->deleteJson("/api/app/orders/{$eligibleOrder->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', 1);
+
+        $refreshedEntries = collect($this->actingAs($administrator)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.financeEntries'))
+            ->keyBy('orderId');
+
+        $this->assertFalse($refreshedEntries->has((string) $eligibleOrder->id));
+        $this->assertTrue($refreshedEntries->has((string) $confirmedOrder->id));
+        $this->assertTrue($refreshedEntries->has((string) $reviewOrder->id));
+        $this->assertDatabaseHas('payments', ['id' => $confirmedPayment->id, 'status' => Payment::STATUS_CONFIRMED]);
+        $this->assertDatabaseHas('payments', ['id' => $reviewPayment->id, 'status' => Payment::STATUS_PROOF_RECEIVED]);
+        $this->assertDatabaseHas('payment_proofs', ['id' => $reviewProof->id]);
     }
 
     public function test_operational_permanent_delete_requires_permission_and_confirmation_but_not_test_flag(): void
@@ -1102,11 +1260,13 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $userWithoutPermission = User::factory()->create(['company_id' => $company->id]);
+        $userWithoutPermission->assignRole(Role::ATENDENTE);
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $unauthorizedOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Sem permissao']);
         $wrongConfirmationOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Confirmacao errada']);
         $eligibleOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Elegivel']);
+        app(OrderWorkflowService::class)->transitionTo($eligibleOrder, Order::STATUS_CANCELLED, $manager, 'pedido_cancelado');
 
         $this->actingAs($userWithoutPermission)
             ->deleteJson("/api/app/orders/{$unauthorizedOrder->id}/permanent", [
@@ -1139,7 +1299,7 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Teste bloqueado']);
 
         $this->actingAs($manager)
@@ -1181,7 +1341,7 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Cancelado elegivel']);
 
         app(OrderWorkflowService::class)->transitionTo($order, Order::STATUS_CANCELLED, $manager, 'teste_cancelado');
@@ -1194,6 +1354,123 @@ class OrderWorkflowTest extends TestCase
             ->assertJsonPath('data.deleted', 1);
 
         $this->assertDatabaseMissing('orders', ['id' => $order->id]);
+    }
+
+    public function test_administrator_can_delete_cancelled_order_with_only_voided_payment_history(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $administrator = User::factory()->create(['company_id' => $company->id]);
+        $administrator->assignRole(Role::ADMIN_GERENTE);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente preservado']);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+        $order = $orders->createDraft($company, ['payer_customer_id' => $customer->id]);
+        $orders->addItem($order, $product);
+        $payment = $payments->recordPayment($order, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 800,
+        ]);
+        $firstProof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 801],
+        ]);
+        $secondProof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 802],
+        ]);
+        $payments->confirmPayment($payment, $administrator);
+        $payments->voidLatestConfirmedPayment($order, $administrator, 'Confirmacao anulada antes da exclusao.');
+        $orders->transitionTo($order->refresh(), Order::STATUS_CANCELLED, $administrator, 'pedido_cancelado');
+
+        $this->assertSame(Payment::STATUS_CANCELLED, $payment->refresh()->status);
+        $this->assertSame(0, $order->refresh()->amount_paid_cents);
+        $this->assertSame(Payment::ORDER_STATUS_UNPAID, $order->payment_status);
+
+        $this->actingAs($administrator)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', 1);
+
+        $this->assertDatabaseMissing('orders', ['id' => $order->id]);
+        $this->assertDatabaseMissing('payments', ['id' => $payment->id]);
+        $this->assertDatabaseMissing('payment_proofs', ['id' => $firstProof->id]);
+        $this->assertDatabaseMissing('payment_proofs', ['id' => $secondProof->id]);
+        $this->assertDatabaseMissing('order_items', ['order_id' => $order->id]);
+        $this->assertDatabaseMissing('order_status_histories', ['order_id' => $order->id]);
+        $this->assertDatabaseHas('customers', ['id' => $customer->id]);
+    }
+
+    public function test_permanent_delete_blocks_cancelled_order_with_payment_review_pending(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $administrator = User::factory()->create(['company_id' => $company->id]);
+        $administrator->assignRole(Role::ADMIN_GERENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $payments = app(PaymentWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $orders->addItem($order, $product);
+        $payment = $payments->recordPayment($order, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 800,
+        ]);
+        $proof = $payments->attachProof($payment, [
+            'source_channel' => PaymentProof::SOURCE_WHATSAPP,
+            'metadata' => ['whatsapp_media_file_id' => 803],
+        ]);
+        $orders->transitionTo($order->refresh(), Order::STATUS_CANCELLED, $administrator, 'pedido_cancelado');
+
+        $response = $this->actingAs($administrator)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->json();
+
+        $this->assertContains('payment_review_pending', $response['reasons']);
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+        $this->assertDatabaseHas('payments', ['id' => $payment->id, 'status' => Payment::STATUS_PROOF_RECEIVED]);
+        $this->assertDatabaseHas('payment_proofs', ['id' => $proof->id]);
+    }
+
+    public function test_permanent_delete_blocks_cancelled_order_with_customer_credit_movement(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $administrator = User::factory()->create(['company_id' => $company->id]);
+        $administrator->assignRole(Role::ADMIN_GERENTE);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente com credito']);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, ['payer_customer_id' => $customer->id]);
+        $orders->addItem($order, $product);
+        $payments = app(PaymentWorkflowService::class);
+        $payments->confirmOrderPayment($order, $administrator, [
+            'method' => Payment::METHOD_PIX,
+            'amount_cents' => 1000,
+            'overpayment_action' => Payment::OVERPAYMENT_KEEP_AS_CREDIT,
+        ]);
+        $payments->voidLatestConfirmedPayment($order, $administrator, 'Confirmacao anulada com credito ainda ativo.');
+        $orders->transitionTo($order->refresh(), Order::STATUS_CANCELLED, $administrator, 'pedido_cancelado');
+
+        $response = $this->actingAs($administrator)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", [
+                'confirmation' => 'EXCLUIR',
+            ])
+            ->assertStatus(422)
+            ->json();
+
+        $this->assertContains('financial_movement', $response['reasons']);
+        $this->assertDatabaseHas('orders', ['id' => $order->id]);
+        $this->assertSame(200, $customer->refresh()->credit_balance_cents);
     }
 
     public function test_destructive_test_cleanup_deletes_selected_orders_without_clients_or_other_companies(): void
@@ -1260,7 +1537,7 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
         $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Pago bloqueado']);
         app(OrderWorkflowService::class)->addItem($order, $product);
@@ -1271,6 +1548,7 @@ class OrderWorkflowTest extends TestCase
                 'amount_cents' => 800,
             ])
             ->assertOk();
+        app(OrderWorkflowService::class)->transitionTo($order->refresh(), Order::STATUS_CANCELLED, $manager, 'pedido_cancelado');
 
         $response = $this->actingAs($manager)
             ->deleteJson("/api/app/orders/{$order->id}/permanent", [
@@ -1278,11 +1556,10 @@ class OrderWorkflowTest extends TestCase
             ])
             ->assertStatus(422)
             ->assertJsonPath('code', 'order_not_eligible_for_permanent_deletion')
-            ->assertJsonPath('message', 'Este pedido possui registros operacionais e nao pode ser excluido.')
+            ->assertJsonPath('message', 'Este pedido nao atende aos criterios de exclusao administrativa.')
             ->json();
 
         $this->assertContains('payment_confirmed', $response['reasons']);
-        $this->assertContains('payment_record_exists', $response['reasons']);
         $this->assertDatabaseHas('orders', ['id' => $order->id]);
     }
 
@@ -1292,7 +1569,7 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
         $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Impresso bloqueado']);
         app(OrderWorkflowService::class)->addItem($order, $product);
@@ -1317,7 +1594,7 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
         $orders = app(OrderWorkflowService::class);
         $order = $orders->createDraft($company, ['customer_name_snapshot' => 'Preparo bloqueado']);
@@ -1345,7 +1622,7 @@ class OrderWorkflowTest extends TestCase
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $otherCompany = Company::query()->create(['name' => 'Outro Restaurante', 'slug' => 'outro-restaurante-delete']);
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $otherOrder = app(OrderWorkflowService::class)->createDraft($otherCompany, ['customer_name_snapshot' => 'Pedido externo']);
 
         $this->actingAs($manager)
@@ -1363,10 +1640,11 @@ class OrderWorkflowTest extends TestCase
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $manager = User::factory()->create(['company_id' => $company->id]);
-        $manager->assignRole(Role::ATENDENTE);
+        $manager->assignRole(Role::ADMIN_GERENTE);
         $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
         $eligibleOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Elegivel lote']);
         $blockedOrder = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Bloqueado lote']);
+        app(OrderWorkflowService::class)->transitionTo($eligibleOrder, Order::STATUS_CANCELLED, $manager, 'pedido_cancelado');
 
         app(OrderWorkflowService::class)->addItem($blockedOrder, $product);
         $this->actingAs($manager)
@@ -1375,6 +1653,7 @@ class OrderWorkflowTest extends TestCase
                 'amount_cents' => 800,
             ])
             ->assertOk();
+        app(OrderWorkflowService::class)->transitionTo($blockedOrder->refresh(), Order::STATUS_CANCELLED, $manager, 'pedido_cancelado');
 
         $data = $this->actingAs($manager)
             ->postJson('/api/app/orders/permanent-deletion', [

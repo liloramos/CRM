@@ -125,8 +125,9 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame($options[0]['id'], data_get($resolvedEvent?->payload, 'clarification_matched_option_id'));
         $this->assertNotContains('AMBIGUOUS_MEAT', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
         $this->assertNotContains('DOMAIN_SELECTION_REJECTED', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
-        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, data_get($resolvedEvent?->payload, 'decision'));
-        $this->assertSame(['order_continue_requires_human_review'], data_get($resolvedEvent?->payload, 'reason_codes'));
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($resolvedEvent?->payload, 'decision'));
+        $this->assertContains('shadow_no_execution', data_get($resolvedEvent?->payload, 'reason_codes'));
+        $this->assertContains('fulfillment_required', data_get($resolvedEvent?->payload, 'reason_codes'));
         $this->assertSame('not_executed', data_get($resolvedEvent?->response_payload, 'execution_result'));
         $this->assertSame(1, $provider->calls);
         $this->assertSame(0, Order::count());
@@ -138,8 +139,8 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame('ORDER_CREATE', data_get($newOrderEvent?->payload, 'intent'));
         $this->assertSame('NEW_ORDER', data_get($newOrderEvent?->payload, 'target_state'));
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($newOrderEvent?->payload, 'decision'));
-        $this->assertSame('stage_new_order', data_get($newOrderEvent?->payload, 'action'));
-        $this->assertContains('new_order_fully_validated', data_get($newOrderEvent?->payload, 'reason_codes', []));
+        $this->assertSame('send_grounded_reply', data_get($newOrderEvent?->payload, 'action'));
+        $this->assertContains('fulfillment_required', data_get($newOrderEvent?->payload, 'reason_codes', []));
         $this->assertSame([], data_get($newOrderEvent?->payload, 'guard_results.warning_codes'));
         $this->assertSame([], data_get($newOrderEvent?->payload, 'guard_results.missing_information_codes'));
         $this->assertNull(data_get($newOrderEvent?->payload, 'clarification_source_event_id'));

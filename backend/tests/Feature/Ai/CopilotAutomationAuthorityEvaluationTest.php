@@ -81,7 +81,7 @@ class CopilotAutomationAuthorityEvaluationTest extends TestCase
         $this->assertSame(100.0, round(($groundedReplies / $groundedReplyCandidates) * 100, 2));
         $this->assertSame(100.0, round(($humanReviewCaptured / $humanReviewExpected) * 100, 2));
         $this->assertSame(64, strlen(CopilotAutomationEvaluationDataset::fingerprint()));
-        $this->assertSame(4, CopilotAutomationEvaluationDataset::VERSION);
+        $this->assertSame(6, CopilotAutomationEvaluationDataset::VERSION);
     }
 
     public function test_manual_and_disabled_rollouts_do_not_promote_a_candidate(): void
@@ -99,6 +99,25 @@ class CopilotAutomationAuthorityEvaluationTest extends TestCase
             CopilotAutomationAuthorityPolicy::DECISION_DISABLED,
             $policy->decide($automatic, $analysis, CopilotAutomationAuthorityPolicy::ROLLOUT_DISABLED, true)['decision'],
         );
+    }
+
+    public function test_pending_human_review_blocks_mutation_but_not_grounded_information(): void
+    {
+        $policy = app(CopilotAutomationAuthorityPolicy::class);
+        $conversation = new Conversation([
+            'automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
+            'human_review_required' => true,
+        ]);
+        $readyOrder = collect(CopilotAutomationEvaluationDataset::cases())->firstWhere('id', 'n5_validada')['analysis'];
+        $location = collect(CopilotAutomationEvaluationDataset::cases())->firstWhere('id', 'endereco_restaurante')['analysis'];
+
+        $mutation = $policy->decide($conversation, $readyOrder, CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE, true);
+        $information = $policy->decide($conversation, $location, CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE, true);
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $mutation['decision']);
+        $this->assertSame(['pending_human_review_blocks_mutation'], $mutation['reason_codes']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, $information['decision']);
+        $this->assertSame('send_grounded_reply', $information['action']);
     }
 
     public function test_safe_clarification_accepts_only_the_explicitly_compatible_meat_diagnostics(): void
@@ -129,9 +148,41 @@ class CopilotAutomationAuthorityEvaluationTest extends TestCase
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, $shadow['decision']);
         $this->assertSame('send_safe_clarification', $shadow['action']);
         $this->assertContains('safe_clarification_available', $shadow['reason_codes']);
-        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $actSafe['decision']);
-        $this->assertContains('safe_clarification_shadow_only', $actSafe['reason_codes']);
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_AUTO_REPLY, $actSafe['decision']);
+        $this->assertSame('send_safe_clarification', $actSafe['action']);
+        $this->assertContains('grounded_safe_clarification', $actSafe['reason_codes']);
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $blockingWarning['decision']);
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $insufficientOptions['decision']);
+    }
+
+    public function test_general_message_cannot_promote_an_operational_payload(): void
+    {
+        $policy = app(CopilotAutomationAuthorityPolicy::class);
+        $conversation = new Conversation(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC]);
+        $analysis = [
+            'intent' => 'GENERAL_MESSAGE',
+            'suggested_reply' => 'Oi! Como posso ajudar?',
+            'draft_order' => [
+                'items' => [['menu_item_id' => 99, 'quantity' => 1]],
+                'fulfillment' => null,
+                'address' => null,
+                'payment_method' => null,
+            ],
+            'missing_information' => [],
+            'warnings' => [],
+            'proposal' => ['target' => ['state' => 'NEW_ORDER', 'requires_human_selection' => false]],
+        ];
+
+        $decision = $policy->decide(
+            $conversation,
+            $analysis,
+            CopilotAutomationAuthorityPolicy::ROLLOUT_ACT_SAFE,
+            true,
+            'Oi',
+        );
+
+        $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_HUMAN_REVIEW, $decision['decision']);
+        $this->assertNull($decision['action']);
+        $this->assertContains('no_safe_action_candidate', $decision['reason_codes']);
     }
 }

@@ -13,6 +13,7 @@ import type {
   PaymentMethodSummary,
 } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
+import { orderDeletionReasonLabel } from '../../utils/orderDeletion'
 import { CustomerCreditPanel } from './CustomerCreditPanel'
 import { ExpenseList } from './ExpenseList'
 import { FinancialSummaryCards } from './FinancialSummaryCards'
@@ -26,6 +27,7 @@ type FinancePageProps = {
   summary: DailyFinancialSummary
   mode: 'pagamentos' | 'financeiro'
   onOpenModal: (modal: AppModal) => void
+  onOpenPermanentDelete: (orderId: string) => void
   onOpenVoidPayment: (orderId: string) => void
 }
 
@@ -73,23 +75,49 @@ const columns: DataTableColumn<FinanceEntry>[] = [
   { key: 'amount', header: 'Total', align: 'right', render: (entry) => formatCurrency(entry.amount) },
 ]
 
-function financeColumns(onOpenVoidPayment: (orderId: string) => void, allowVoid: boolean): DataTableColumn<FinanceEntry>[] {
+function financeColumns(
+  onOpenPermanentDelete: (orderId: string) => void,
+  onOpenVoidPayment: (orderId: string) => void,
+  allowPermanentDelete: boolean,
+  allowVoid: boolean,
+): DataTableColumn<FinanceEntry>[] {
   return [
     ...columns,
     {
       key: 'actions',
       header: 'Ações',
       align: 'right',
-      render: (entry) => allowVoid && entry.status === 'pago' && entry.orderId ? (
-        <Button onClick={() => onOpenVoidPayment(entry.orderId)} variant="ghost">
-          Anular confirmação
-        </Button>
-      ) : null,
+      render: (entry) => {
+        const deletion = allowPermanentDelete ? entry.permanentDeletion : null
+        const blockedReason = deletion && !deletion.eligible
+          ? deletion.reasons.map(orderDeletionReasonLabel).join(', ')
+          : ''
+
+        return (
+          <div className="finance-entry-actions">
+            {allowVoid && entry.canVoidPayment && entry.orderId ? (
+              <Button onClick={() => onOpenVoidPayment(entry.orderId)} variant="ghost">
+                Anular confirmação
+              </Button>
+            ) : null}
+            {deletion?.eligible && entry.orderId ? (
+              <Button onClick={() => onOpenPermanentDelete(entry.orderId)} variant="danger">
+                Excluir registro
+              </Button>
+            ) : null}
+            {blockedReason ? (
+              <small className="finance-entry-actions__blocked" title={blockedReason}>
+                Exclusão bloqueada: {blockedReason}
+              </small>
+            ) : null}
+          </div>
+        )
+      },
     },
   ]
 }
 
-export function FinancePage({ canConfirmPayment, entries, expenses, mode, onOpenModal, onOpenVoidPayment, paymentMethods, summary }: FinancePageProps) {
+export function FinancePage({ canConfirmPayment, entries, expenses, mode, onOpenModal, onOpenPermanentDelete, onOpenVoidPayment, paymentMethods, summary }: FinancePageProps) {
   const title = mode === 'pagamentos' ? 'Pagamentos / Pix' : 'Financeiro'
   const description =
     mode === 'pagamentos'
@@ -113,7 +141,11 @@ export function FinancePage({ canConfirmPayment, entries, expenses, mode, onOpen
       <div className="finance-dashboard-grid">
         <Card className="finance-table-card">
           <SectionTitle title="Movimentos recentes" />
-          <DataTable columns={financeColumns(onOpenVoidPayment, mode === 'pagamentos')} data={entries} getRowKey={(entry) => entry.id} />
+          <DataTable
+            columns={financeColumns(onOpenPermanentDelete, onOpenVoidPayment, mode === 'financeiro', mode === 'pagamentos')}
+            data={entries}
+            getRowKey={(entry) => entry.id}
+          />
         </Card>
 
         <div className="finance-side-stack">
