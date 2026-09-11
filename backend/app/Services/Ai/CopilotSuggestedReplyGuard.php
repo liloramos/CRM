@@ -14,34 +14,57 @@ final class CopilotSuggestedReplyGuard
     /** @param array<string,mixed> $safe @param array<string,mixed> $context @return array<string,mixed> */
     public function restrict(array $safe, array $context): array
     {
-        if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'product_catalog', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy', 'order_start'], true)) {
+        if (in_array((string) data_get($safe, 'metadata.reply_source'), ['daily_menu', 'product_catalog', 'operating_hours', 'operating_hours_unconfigured', 'customer_facing_policy', 'customer_location_received', 'order_start', 'order_clarification', 'recovery_clarification', 'explicit_handoff', 'resolved_turn_product_discovery', 'semantic_grounded_product_information', 'semantic_grounded_comparison', 'semantic_grounded_options'], true)) {
             return [...$safe, 'clarification' => null];
         }
         $clarification = $this->clarifications->forAmbiguousMeat($safe, $context)
             ?? $this->clarifications->forSafe($safe, $context);
         if ($clarification !== null) {
-            return [...$safe, 'clarification' => $clarification, 'suggested_reply' => $this->clarifications->reply($clarification)];
+            $reply = $this->clarifications->reply($clarification);
+
+            return $this->withBackendReply($safe, $reply, ['clarification' => $clarification]);
         }
 
         $reply = trim((string) ($safe['suggested_reply'] ?? ''));
 
         if ($this->hasEquivalentChangeTarget($safe) && $this->mentionsPhysicalTarget($reply)) {
-            return [...$safe, 'clarification' => null, 'suggested_reply' => $this->safeFallback($safe, $context)];
+            $reply = $this->safeFallback($safe, $context);
+
+            return $this->withBackendReply($safe, $reply);
         }
 
         if (data_get($safe, 'draft_order.items', []) === [] && ($this->assumesResolvedMenuChoice($reply) || $this->mentionsSafeOnlyOrderData($reply))) {
-            return [...$safe, 'clarification' => null, 'suggested_reply' => $this->safeFallback($safe, $context)];
+            $reply = $this->safeFallback($safe, $context);
+
+            return $this->withBackendReply($safe, $reply);
         }
 
         if (in_array((string) ($safe['intent'] ?? ''), ['ORDER_CREATE', 'ORDER_CONTINUE', 'ORDER_CONFIRMATION', 'ORDER_CHANGE'], true)) {
-            return [...$safe, 'clarification' => null, 'suggested_reply' => $this->safeFallback($safe, $context)];
+            $reply = $this->safeFallback($safe, $context);
+
+            return $this->withBackendReply($safe, $reply);
         }
 
         if ($reply === '' || ! $this->contradictsResolvedFacts($reply, $safe)) {
             return [...$safe, 'clarification' => null];
         }
 
-        return [...$safe, 'clarification' => null, 'suggested_reply' => $this->safeFallback($safe, $context)];
+        $reply = $this->safeFallback($safe, $context);
+
+        return $this->withBackendReply($safe, $reply);
+    }
+
+    /** @param array<string,mixed> $safe @param array<string,mixed> $extra @return array<string,mixed> */
+    private function withBackendReply(array $safe, string $reply, array $extra = []): array
+    {
+        return [
+            ...$safe,
+            ...$extra,
+            'clarification' => $extra['clarification'] ?? null,
+            'suggested_reply' => $reply,
+            'reply_messages' => [$reply],
+            'metadata' => [...(array) ($safe['metadata'] ?? []), 'reply_composed_by' => 'backend'],
+        ];
     }
 
     /** @param array<string,mixed> $safe */
@@ -147,12 +170,34 @@ final class CopilotSuggestedReplyGuard
     {
         $warnings = array_column(data_get($safe, 'warnings', []), 'code');
         $missing = array_column(data_get($safe, 'missing_information', []), 'code');
+        $constraint = collect((array) data_get($safe, 'metadata.constraints', []))
+            ->first(fn (mixed $entry): bool => is_array($entry) && ($entry['code'] ?? null) === 'MEAT_ALLOWANCE_EXCEEDED');
+
+        if (is_array($constraint)) {
+            $product = (string) ($constraint['product_name'] ?? 'essa marmita');
+            $requested = collect((array) ($constraint['requested'] ?? []))->filter()->implode(', ');
+            $included = max(0, (int) ($constraint['included_max'] ?? 0));
+            $allowance = $included === 1 ? '1 tipo de carne' : "{$included} tipos de carne";
+            if (($constraint['resolution'] ?? null) === 'customer_choice_required') {
+                return "Na {$product}, estão incluídos até {$allowance}. Você pediu {$requested}. Qual você quer manter? 😊";
+            }
+
+            $additional = (int) ($constraint['additional_total_cents'] ?? 0);
+            $reply = "Na {$product}, estão incluídos até {$allowance}. Como você pediu {$requested}, o adicional canônico de *R$ "
+                .number_format($additional / 100, 2, ',', '.').'* já entrou no cálculo.';
+            $reply .= ' Se preferir evitar o adicional, posso retirar alguma delas.';
+            if (blank(data_get($safe, 'draft_order.fulfillment'))) {
+                $reply .= "\n\nVai ser para retirada ou entrega? 😊";
+            }
+
+            return $reply;
+        }
 
         if (in_array('CONFLICTING_MEAT_REQUEST', $warnings, true)) {
             return 'Você quer somente bife ou porco com bife adicional?';
         }
         if (in_array('CARNE', $missing, true)) {
-            return 'Qual carne você deseja?';
+            return 'Perfeito. Agora falta escolher a carne. Qual você deseja?';
         }
         if (in_array('TARGET_ORDER_ITEM', $missing, true)) {
             $change = data_get($safe, 'draft_order.change_request', []);
@@ -180,8 +225,22 @@ final class CopilotSuggestedReplyGuard
         if (in_array('SALADA', $missing, true)) {
             return 'Qual salada você deseja?';
         }
+        if (in_array('ACOMPANHAMENTO', $missing, true)) {
+            $candidate = collect((array) data_get($safe, 'draft_order.items', []))
+                ->flatMap(fn (mixed $item): array => is_array($item) ? (array) ($item['daily_component_candidates'] ?? []) : [])
+                ->first(fn (mixed $entry): bool => is_array($entry) && (array) ($entry['names'] ?? []) !== []);
+            $names = is_array($candidate) ? array_values((array) ($candidate['names'] ?? [])) : [];
+            if ($names !== []) {
+                return 'Anotei o restante 😊 Para o acompanhamento, você prefere '.implode(' ou ', $names).'?';
+            }
+
+            return 'Qual acompanhamento você prefere?';
+        }
         if (in_array('ADDRESS', $missing, true)) {
             return 'Qual é o endereço para a entrega?';
+        }
+        if (in_array('PAYMENT_METHOD', $missing, true)) {
+            return 'Recebi os dados da entrega. Como você prefere pagar?';
         }
 
         $items = collect(data_get($safe, 'draft_order.items', []))

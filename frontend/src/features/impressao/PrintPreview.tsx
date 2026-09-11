@@ -75,7 +75,7 @@ export function PrintPreview({ onPreviewTicket, onPrintTicket, order }: PrintPre
             <strong>{formatCurrency(order.deliveryFee)}</strong>
           </div>
           <div className="receipt-row">
-            <span>Credito usado</span>
+            <span>Crédito usado</span>
             <strong>{formatCurrency(order.creditUsed)}</strong>
           </div>
           <div className="receipt-row">

@@ -65,7 +65,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
             'intent' => 'ORDER_CREATE',
             'draft_order' => ['items' => [[
-                'product' => 'n8',
+                'product' => 'n8livre',
                 'quantity' => 1,
                 'selections' => ['meat' => 'porco'],
                 'removed_components' => ['salada'],
@@ -402,7 +402,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
             'intent' => 'ORDER_CREATE',
             'draft_order' => ['items' => [[
-                'product' => 'n8',
+                'product' => 'n8livre',
                 'quantity' => 1,
                 'selections' => ['meats' => ['porco']],
                 'removed_components' => [],
@@ -415,7 +415,7 @@ class ConversationCopilotPipelineTest extends TestCase
             $company,
             app(ConversationCopilotContextBuilder::class)->forMessages(
                 $company,
-                [['direction' => 'inbound', 'type' => 'text', 'body' => 'n8 arroz feijao macarrao porco beterraba']],
+                [['direction' => 'inbound', 'type' => 'text', 'body' => 'n8 livre arroz feijao macarrao porco beterraba']],
                 null,
                 $this->evaluationDate(),
             ),
@@ -426,23 +426,54 @@ class ConversationCopilotPipelineTest extends TestCase
             ->whereIn('id', $item['daily_component_ids'] ?? [])
             ->pluck('name')
             ->all();
+        $candidateNames = collect((array) ($item['daily_component_candidates'] ?? []))
+            ->flatMap(fn (array $candidate): array => (array) ($candidate['names'] ?? []))
+            ->all();
 
         $this->assertSame('n8-tradicional', $item['menu_item_slug']);
         $this->assertSame(['Porco'], $item['selections']['meats']);
         $this->assertContains('Feijão tradicional', $componentNames);
         $this->assertContains('Beterraba', $componentNames);
-        $this->assertNotContains('Arroz', $componentNames);
-        $this->assertNotContains('Macarrão', $componentNames);
+        $this->assertContains('Arroz branco', $componentNames);
+        $this->assertNotContains('Arroz amarelo', $componentNames);
+        $this->assertContains('Macarrão vermelho', $candidateNames);
+        $this->assertContains('Macarrão alho e óleo', $candidateNames);
+        $this->assertContains('ACOMPANHAMENTO', array_column($safe['missing_information'], 'code'));
         $this->assertNotContains('CARNE', array_column($safe['missing_information'], 'code'));
         $this->assertNotContains('UNRESOLVED_SELECTION', array_column($safe['warnings'], 'code'));
     }
 
-    public function test_n8_without_the_casa_qualifier_resolves_to_the_traditional_variant(): void
+    public function test_n8_without_a_variant_stays_ambiguous_while_explicit_variants_resolve(): void
     {
         $company = $this->seedRestaurant();
 
-        $this->assertSame('n8-tradicional', app(CopilotMenuAliasResolver::class)->resolve($company, null, 'N8')?->slug);
+        $this->assertNull(app(CopilotMenuAliasResolver::class)->resolve($company, null, 'N8'));
         $this->assertSame('n8-casa', app(CopilotMenuAliasResolver::class)->resolve($company, null, 'N8 Casa')?->slug);
+        $this->assertSame('n8-tradicional', app(CopilotMenuAliasResolver::class)->resolve($company, null, 'N8 Livre')?->slug);
+    }
+
+    public function test_product_alias_preserves_a_compact_unit_when_the_product_family_is_spaced(): void
+    {
+        $company = $this->seedRestaurant();
+
+        $product = app(CopilotMenuAliasResolver::class)->resolveFromTextIncludingInactive(
+            $company,
+            'quanto custa a coca 2l?',
+        );
+
+        $this->assertSame('coca-cola-2l', $product?->slug);
+        $this->assertSame(
+            'coca-cola-600ml',
+            app(CopilotMenuAliasResolver::class)->resolveFromTextIncludingInactive($company, 'uma coca de 600')?->slug,
+        );
+        $this->assertSame(
+            'coca-cola-zero-lata',
+            app(CopilotMenuAliasResolver::class)->resolveFromTextIncludingInactive($company, 'uma coca zero lata')?->slug,
+        );
+        $this->assertSame(
+            'n8-tradicional',
+            app(CopilotMenuAliasResolver::class)->resolveFromTextIncludingInactive($company, 'quero duas n8 tradicionais')?->slug,
+        );
     }
 
     public function test_single_meat_is_not_masked_by_an_empty_multiple_meats_schema_default(): void
@@ -581,7 +612,7 @@ class ConversationCopilotPipelineTest extends TestCase
 
         $context = app(ConversationCopilotContextBuilder::class)->forMessages(
             $company,
-            [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 com frango e porco, mais um bife']],
+            [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 Livre com frango e porco, mais um bife']],
             null,
             $this->evaluationDate(),
         );
@@ -607,7 +638,7 @@ class ConversationCopilotPipelineTest extends TestCase
         ]));
         $context = app(ConversationCopilotContextBuilder::class)->forMessages(
             $company,
-            [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 com frango e porco']],
+            [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 Livre com frango e porco']],
             null,
             $this->evaluationDate(),
         );
@@ -642,7 +673,7 @@ class ConversationCopilotPipelineTest extends TestCase
         )['safe'];
         $item = $safe['draft_order']['items'][0];
 
-        $this->assertSame(['Porco', 'Porco'], $item['selections']['meats']);
+        $this->assertSame(['Porco'], $item['selections']['meats']);
         $this->assertSame([], $item['removed_components']);
         $this->assertContains('INVALID_REMOVAL', array_column($safe['warnings'], 'code'));
     }
@@ -767,7 +798,7 @@ class ConversationCopilotPipelineTest extends TestCase
     {
         $company = $this->seedRestaurant();
 
-        foreach (['N8 porco com bife extra', 'N8 porco e bife adicional'] as $message) {
+        foreach (['N8 Livre porco com bife extra', 'N8 Livre porco e bife adicional'] as $message) {
             $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
                 'intent' => 'ORDER_CREATE',
                 'draft_order' => ['items' => [[
@@ -802,7 +833,7 @@ class ConversationCopilotPipelineTest extends TestCase
 
         $safe = app(ConversationCopilotPipeline::class)->analyze(
             $company,
-            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'Na N8, nao quero somente bife, quero porco']], null, $this->evaluationDate()),
+            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'Na N8 Livre, nao quero somente bife, quero porco']], null, $this->evaluationDate()),
             $this->evaluationDate(),
         )['safe'];
 
@@ -917,7 +948,7 @@ class ConversationCopilotPipelineTest extends TestCase
     public function test_n8_recovery_is_invariant_to_missing_or_partial_provider_items(): void
     {
         $company = $this->seedRestaurant();
-        $context = app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'n8 frg e porco']], null, $this->evaluationDate());
+        $context = app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'n8 livre frg e porco']], null, $this->evaluationDate());
 
         foreach ([
             [['product' => 'n8', 'quantity' => 1, 'selections' => ['meats' => ['porco']]]],
@@ -951,9 +982,9 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->assertTrue((bool) data_get($n8->fresh()->composition_rules, 'traditional_meat_selection.allow_none', false));
 
         foreach ([
-            ['message' => 'quero uma n8 sem carne', 'mode' => 'none', 'has_meat_missing' => false],
-            ['message' => 'quero uma n8', 'mode' => 'traditional', 'has_meat_missing' => true],
-            ['message' => 'quero uma n8 de porco', 'mode' => 'traditional', 'has_meat_missing' => false],
+            ['message' => 'quero uma n8 livre sem carne', 'mode' => 'none', 'has_meat_missing' => false],
+            ['message' => 'quero uma n8 livre', 'mode' => 'traditional', 'has_meat_missing' => true],
+            ['message' => 'quero uma n8 livre de porco', 'mode' => 'traditional', 'has_meat_missing' => false],
         ] as $scenario) {
             $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
                 'intent' => 'ORDER_CREATE',
@@ -981,7 +1012,7 @@ class ConversationCopilotPipelineTest extends TestCase
     {
         $company = $this->seedRestaurant();
 
-        foreach (['quero uma n8 sem carne com bife adicional', 'quero uma n8 sem carne, somente bife'] as $message) {
+        foreach (['quero uma n8 livre sem carne com bife adicional', 'quero uma n8 livre sem carne, somente bife'] as $message) {
             $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
                 'intent' => 'ORDER_CREATE',
                 'draft_order' => ['items' => [[
@@ -1229,7 +1260,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $context = app(ConversationCopilotContextBuilder::class)->forMessages(
             $company,
             [
-                ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero N8 com frango ao molho'],
+                ['direction' => 'inbound', 'type' => 'text', 'body' => 'Quero N8 Livre com frango ao molho'],
                 ['direction' => 'inbound', 'type' => 'text', 'body' => 'E porco tambem'],
             ],
             null,
@@ -1255,7 +1286,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $saturday = CarbonImmutable::parse('2026-08-15');
         $safeSaturday = app(ConversationCopilotPipeline::class)->analyze(
             $company,
-            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 frango e porco']], null, $saturday),
+            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 Livre frango e porco']], null, $saturday),
             $saturday,
         )['safe'];
 
@@ -1266,7 +1297,7 @@ class ConversationCopilotPipelineTest extends TestCase
         $friday = CarbonImmutable::parse(CopilotEvaluationDataset::EVALUATION_DATE);
         $safeFriday = app(ConversationCopilotPipeline::class)->analyze(
             $company,
-            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 frango e porco']], null, $friday),
+            app(ConversationCopilotContextBuilder::class)->forMessages($company, [['direction' => 'inbound', 'type' => 'text', 'body' => 'N8 Livre frango e porco']], null, $friday),
             $friday,
         )['safe'];
 

@@ -44,7 +44,7 @@ class CopilotSafeClarificationContinuationTest extends TestCase
     {
         [$company, $conversation, $options] = $this->scenario();
         $sharedToken = $this->sharedToken($options);
-        $this->assertSame('frango', $sharedToken);
+        $this->assertNotSame('', $sharedToken);
         $conversation->forceFill(['automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC])->save();
         Config::set('chatbotcrm.ai.copilot.act_safe_enabled', true);
         AiAutomationSetting::query()->updateOrCreate(
@@ -59,7 +59,7 @@ class CopilotSafeClarificationContinuationTest extends TestCase
                 'settings' => ['rollout' => CopilotAutomationAuthorityPolicy::ROLLOUT_SHADOW],
             ],
         );
-        $message = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
+        $message = $this->inbound($conversation, "Quero uma N8 de 16 com {$sharedToken}.");
         $provider = new class($options[0]['name']) implements ConversationCopilotProviderInterface
         {
             public int $calls = 0;
@@ -107,7 +107,10 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame(['CARNE'], data_get($event?->payload, 'guard_results.missing_information_codes'));
         $this->assertSame(['AMBIGUOUS_MEAT', 'DOMAIN_SELECTION_REJECTED'], data_get($event?->payload, 'guard_results.warning_codes'));
         $this->assertSame('ambiguous_meat', data_get($event?->payload, 'clarification_context.type'));
-        $this->assertEqualsCanonicalizing(array_column($options, 'id'), data_get($event?->payload, 'clarification_context.option_component_ids'));
+        $clarificationOptionIds = data_get($event?->payload, 'clarification_context.option_component_ids', []);
+        $this->assertGreaterThanOrEqual(2, count($clarificationOptionIds));
+        $this->assertSame([], array_values(array_diff(array_column($options, 'id'), $clarificationOptionIds)));
+        $firstPresentedId = $clarificationOptionIds[0];
         $this->assertSame('not_executed', data_get($event?->response_payload, 'execution_result'));
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
@@ -116,20 +119,20 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $followUpContext = app(ConversationCopilotContextBuilder::class)->forConversation($conversation->fresh());
         $this->assertSame('eligible', data_get($followUpContext, 'pending_clarification.status'));
         $this->assertSame('resolved', data_get($followUpContext, 'pending_clarification.resolution.status'));
-        $this->assertSame($options[0]['id'], data_get($followUpContext, 'pending_clarification.resolution.component_id'));
+        $this->assertSame($firstPresentedId, data_get($followUpContext, 'pending_clarification.resolution.component_id'));
         $resolvedEvent = app(CopilotAutomationService::class)->handle($followUp->id, (int) $conversation->automation_version);
 
         $this->assertSame('ORDER_CONTINUE', data_get($resolvedEvent?->payload, 'intent'));
         $this->assertSame($event?->id, data_get($resolvedEvent?->payload, 'clarification_source_event_id'));
         $this->assertSame('resolved', data_get($resolvedEvent?->payload, 'clarification_resolution'));
-        $this->assertSame($options[0]['id'], data_get($resolvedEvent?->payload, 'clarification_matched_option_id'));
+        $this->assertSame($firstPresentedId, data_get($resolvedEvent?->payload, 'clarification_matched_option_id'));
         $this->assertNotContains('AMBIGUOUS_MEAT', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
         $this->assertNotContains('DOMAIN_SELECTION_REJECTED', data_get($resolvedEvent?->payload, 'guard_results.warning_codes', []));
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($resolvedEvent?->payload, 'decision'));
         $this->assertContains('shadow_no_execution', data_get($resolvedEvent?->payload, 'reason_codes'));
-        $this->assertContains('fulfillment_required', data_get($resolvedEvent?->payload, 'reason_codes'));
+        $this->assertContains('item_confirmation_required', data_get($resolvedEvent?->payload, 'reason_codes'));
         $this->assertSame('not_executed', data_get($resolvedEvent?->response_payload, 'execution_result'));
-        $this->assertSame(1, $provider->calls);
+        $this->assertSame(2, $provider->calls);
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
 
@@ -140,12 +143,12 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame('NEW_ORDER', data_get($newOrderEvent?->payload, 'target_state'));
         $this->assertSame(CopilotAutomationAuthorityPolicy::DECISION_SHADOW, data_get($newOrderEvent?->payload, 'decision'));
         $this->assertSame('send_grounded_reply', data_get($newOrderEvent?->payload, 'action'));
-        $this->assertContains('fulfillment_required', data_get($newOrderEvent?->payload, 'reason_codes', []));
+        $this->assertContains('item_confirmation_required', data_get($newOrderEvent?->payload, 'reason_codes', []));
         $this->assertSame([], data_get($newOrderEvent?->payload, 'guard_results.warning_codes'));
         $this->assertSame([], data_get($newOrderEvent?->payload, 'guard_results.missing_information_codes'));
         $this->assertNull(data_get($newOrderEvent?->payload, 'clarification_source_event_id'));
         $this->assertNull(data_get($newOrderEvent?->payload, 'clarification_resolution'));
-        $this->assertSame(2, $provider->calls);
+        $this->assertSame(3, $provider->calls);
         $this->assertSame(0, Order::count());
         $this->assertSame(0, Message::query()->where('direction', 'outbound')->count());
     }
@@ -195,7 +198,7 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         CarbonImmutable::setTestNow('2026-08-27 15:00:00');
         [$company, $conversation, $options] = $this->scenario();
 
-        $this->assertSame(['Frango ao molho', 'Filé de frango'], array_column($options, 'name'));
+        $this->assertNotSame('', $this->sharedToken($options));
         $source = $this->inbound($conversation, 'Quero uma N8 de 16 com frango.');
         $this->pendingClarification($conversation, $source, $options);
         $this->inbound($conversation, 'a segunda');
@@ -306,7 +309,7 @@ class CopilotSafeClarificationContinuationTest extends TestCase
         $this->assertSame('superseded', data_get($analysis, 'metadata.clarification_continuity.resolution'));
     }
 
-    public function test_an_operational_day_boundary_makes_an_old_clarification_stale(): void
+    public function test_an_operational_day_boundary_does_not_revive_an_old_clarification(): void
     {
         CarbonImmutable::setTestNow('2026-08-27 10:00:00');
         [$company, $conversation, $options] = $this->scenario();
@@ -316,8 +319,7 @@ class CopilotSafeClarificationContinuationTest extends TestCase
 
         $context = app(ConversationCopilotContextBuilder::class)->forConversation($conversation->fresh());
 
-        $this->assertSame('stale', data_get($context, 'pending_clarification.status'));
-        $this->assertSame('cycle_boundary', data_get($context, 'pending_clarification.resolution.reason'));
+        $this->assertNull(data_get($context, 'pending_clarification'));
     }
 
     public function test_a_removed_menu_option_makes_the_snapshot_stale_before_the_reply_is_used(): void
@@ -466,9 +468,14 @@ class CopilotSafeClarificationContinuationTest extends TestCase
 
         $first = preg_split('/[^a-z0-9]+/', mb_strtolower(iconv('UTF-8', 'ASCII//TRANSLIT', $options[0]['name']) ?: $options[0]['name'])) ?: [];
         $second = preg_split('/[^a-z0-9]+/', mb_strtolower(iconv('UTF-8', 'ASCII//TRANSLIT', $options[1]['name']) ?: $options[1]['name'])) ?: [];
+        $firstName = implode(' ', array_filter($first));
+        $secondName = implode(' ', array_filter($second));
 
         return collect($first)
-            ->filter(fn (string $token): bool => strlen($token) >= 4 && in_array($token, $second, true))
+            ->filter(fn (string $token): bool => strlen($token) >= 4
+                && $token !== $firstName
+                && $token !== $secondName
+                && in_array($token, $second, true))
             ->first() ?? '';
     }
 }

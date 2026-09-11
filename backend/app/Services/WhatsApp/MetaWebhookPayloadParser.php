@@ -197,6 +197,16 @@ class MetaWebhookPayloadParser
                 'location_present' => true,
                 'latitude_present' => isset($message['location']['latitude']),
                 'longitude_present' => isset($message['location']['longitude']),
+                'location' => [
+                    'latitude' => isset($message['location']['latitude']) && is_numeric($message['location']['latitude'])
+                        ? (float) $message['location']['latitude']
+                        : null,
+                    'longitude' => isset($message['location']['longitude']) && is_numeric($message['location']['longitude'])
+                        ? (float) $message['location']['longitude']
+                        : null,
+                    'name' => is_string($message['location']['name'] ?? null) ? $message['location']['name'] : null,
+                    'address' => is_string($message['location']['address'] ?? null) ? $message['location']['address'] : null,
+                ],
             ];
         }
 

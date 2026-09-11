@@ -15,6 +15,7 @@ use App\Services\Menu\MenuProductManagementService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class MenuProductAdminController extends Controller
 {
@@ -27,7 +28,7 @@ class MenuProductAdminController extends Controller
         $company = $this->resolveCompany($request)->loadMissing('setting');
 
         return response()->json([
-            'data' => $products->createCounterProduct(
+            'data' => $products->createProduct(
                 company: $company,
                 attributes: $request->validated(),
                 serviceDays: $request->serviceDays(),
@@ -54,6 +55,23 @@ class MenuProductAdminController extends Controller
         ]);
     }
 
+    public function destroy(
+        Request $request,
+        Product $product,
+        MenuProductManagementService $products,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request)->loadMissing('setting');
+
+        return response()->json([
+            'data' => $products->deleteProduct(
+                company: $company,
+                product: $product,
+                date: $this->dateFor($request, $company),
+                actorUserId: $request->user()?->id,
+            ),
+        ]);
+    }
+
     public function replaceImage(
         UpdateMenuProductImageRequest $request,
         Product $product,
@@ -63,6 +81,26 @@ class MenuProductAdminController extends Controller
 
         return response()->json([
             'data' => $products->replaceProductImage($company, $product, $request->file('image'), $this->dateFor($request, $company)),
+        ]);
+    }
+
+    public function image(Request $request, Product $product): mixed
+    {
+        $company = $this->resolveCompany($request);
+        abort_unless((int) $product->company_id === (int) $company->id, 404);
+
+        $path = data_get($product->metadata, 'catalog_image_path');
+        abort_unless(
+            is_string($path) && str_starts_with($path, "menu-products/{$company->id}/{$product->id}/"),
+            404,
+        );
+
+        $disk = Storage::disk('public');
+        abort_unless($disk->exists($path), 404);
+
+        return $disk->response($path, null, [
+            'Cache-Control' => 'private, max-age=31536000, immutable',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

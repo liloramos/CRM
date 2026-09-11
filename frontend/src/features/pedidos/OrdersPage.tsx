@@ -6,7 +6,8 @@ import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { DataTable, type DataTableColumn } from '../../components/ui/DataTable'
 import { EmptyState, LoadingState } from '../../components/ui/States'
-import type { AppModal, Order, OrderItem } from '../../types/crm'
+import { SelectField } from '../../components/ui/SelectField'
+import type { AppModal, Order, OrderItem, SellerSummary } from '../../types/crm'
 import { formatCurrency } from '../../utils/formatters'
 import {
   getOrderOperationalState,
@@ -26,14 +27,20 @@ type OrdersPageProps = {
   onAdvanceOrder: (orderId: string, action: FulfillmentAction) => Promise<void>
   onOpenModal: (modal: AppModal) => void
   onPreviewTicket: (orderId: string) => void
-  onPrintTicket: (orderId: string) => void
+  onPrintTicket: (orderId: string) => Promise<void>
+  onConfirmPrint: (orderId: string) => Promise<void>
   onRequestBulkDelete: (orderIds: string[]) => void
   onRequestCleanupTestOrders: (orderIds: string[]) => void
   onRequestPermanentDelete: (orderId: string) => void
   onSelectOrder: (orderId: string) => void
+  onAssignSeller: (orderId: string, sellerUserId: string | null) => Promise<void>
   canManageOrders: boolean
+  canManageFinance: boolean
+  canManagePrinting: boolean
+  canViewPrinting: boolean
   canPermanentlyDeleteOrders: boolean
   canRunDestructiveTestCleanup: boolean
+  sellerCandidates: SellerSummary[]
 }
 
 const QUEUE_FILTERS: Array<{ key: OrderQueueFilter; label: string }> = [
@@ -44,13 +51,17 @@ const QUEUE_FILTERS: Array<{ key: OrderQueueFilter; label: string }> = [
 ]
 
 export function OrdersPage({
+  canManageFinance,
   canManageOrders,
+  canManagePrinting,
+  canViewPrinting,
   isLoading,
   onNewOrder,
   onOpenConversation,
   onEditItem,
   onRemoveItem,
   onAdvanceOrder,
+  onConfirmPrint,
   onOpenModal,
   onPreviewTicket,
   onPrintTicket,
@@ -58,13 +69,17 @@ export function OrdersPage({
   onRequestCleanupTestOrders,
   onRequestPermanentDelete,
   onSelectOrder,
+  onAssignSeller,
   orders,
   selectedOrder,
   canPermanentlyDeleteOrders,
   canRunDestructiveTestCleanup,
+  sellerCandidates,
 }: OrdersPageProps) {
   const [queueFilter, setQueueFilter] = useState<OrderQueueFilter>('active')
   const [bulkSelection, setBulkSelection] = useState<string[]>([])
+  const [sellerUpdating, setSellerUpdating] = useState(false)
+  const [sellerError, setSellerError] = useState<string | null>(null)
   const selectedOrderState = selectedOrder ? getOrderOperationalState(selectedOrder) : null
   const filteredOrders = orders.filter((order) => orderMatchesQueueFilter(order, queueFilter))
   const canSelectForCleanup = canPermanentlyDeleteOrders && queueFilter !== 'active'
@@ -93,11 +108,11 @@ export function OrdersPage({
               </Button>
             </div>
             <div className="orders-header-actions__secondary">
-              <Button disabled={!selectedOrderState?.canPrint} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="ghost">
+              <Button disabled={!canViewPrinting || !selectedOrderState?.canPrint} icon="printer" onClick={() => selectedOrder && onPreviewTicket(selectedOrder.id)} variant="ghost">
                 Visualizar comanda
               </Button>
-              <Button disabled={!selectedOrderState?.canPrint} icon="printer" onClick={() => selectedOrder && onPrintTicket(selectedOrder.id)} variant="secondary">
-                Imprimir
+              <Button disabled={!canManagePrinting || isLoading || !selectedOrderState?.canPrint} icon="printer" onClick={() => selectedOrder && void onPrintTicket(selectedOrder.id)} variant="secondary">
+                {selectedOrder?.hasConfirmedPrint ? 'Imprimir novamente' : 'Imprimir'}
               </Button>
             </div>
           </div>
@@ -198,6 +213,7 @@ export function OrdersPage({
                     <div className="order-list-item__customer" title={order.customer.name}>
                       {order.customer.name}
                     </div>
+                    <small>Atendente: {order.sellerName ?? 'Não atribuído'}</small>
                     <div className="order-list-item__row order-list-item__row--meta">
                       <small>{order.createdLabel}</small>
                       <small>{formatCurrency(order.total)}</small>
@@ -285,9 +301,24 @@ export function OrdersPage({
                     <strong>{selectedOrder.customer.name}</strong>
                     <span>Retirada/entrega</span>
                     <strong>{selectedOrder.pickupPerson ?? selectedOrder.deliveryLabel ?? 'A confirmar'}</strong>
-                    <span>Credito</span>
+                    <span>Crédito</span>
                     <strong>{formatCurrency(selectedOrder.customer.creditBalance)}</strong>
                   </div>
+                  <SelectField
+                    disabled={!canManageOrders || sellerUpdating}
+                    label="Responsável / Atendente"
+                    onChange={(value) => {
+                      setSellerUpdating(true)
+                      setSellerError(null)
+                      void onAssignSeller(selectedOrder.id, value || null)
+                        .catch((error) => setSellerError(error instanceof Error ? error.message : 'Não foi possível alterar o responsável.'))
+                        .finally(() => setSellerUpdating(false))
+                    }}
+                    options={sellerOptions(sellerCandidates, selectedOrder)}
+                    searchable={sellerCandidates.length > 8}
+                    value={selectedOrder.seller?.id ?? (selectedOrder.sellerName ? '__historical_seller__' : '')}
+                  />
+                  {sellerError ? <p className="form-error">{sellerError}</p> : null}
                 </Card>
                 <Card>
                   <SectionTitle title="Histórico e observações" />
@@ -298,6 +329,7 @@ export function OrdersPage({
                         <div>
                           <strong>{entry.title}</strong>
                           <p>{entry.description}</p>
+                          {entry.actorName ? <small>Por {entry.actorName}</small> : null}
                         </div>
                         <small>{entry.timeLabel}</small>
                       </div>
@@ -321,24 +353,25 @@ export function OrdersPage({
         <Card className="order-side-panel">
           <SectionTitle title="Acoes criticas" />
           <div className="side-actions">
-            {selectedOrder?.backendStatus === 'in_preparation' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'ready')}>Marcar como pronto</Button> : null}
-            {selectedOrder?.backendStatus === 'ready_for_pickup' && selectedOrder.fulfillmentType === 'entrega' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'start-delivery')}>Iniciar entrega</Button> : null}
-            {selectedOrder?.backendStatus === 'ready_for_pickup' && selectedOrder.fulfillmentType === 'retirada' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'picked-up')}>Marcar como retirado</Button> : null}
-            {selectedOrder?.backendStatus === 'out_for_delivery' ? <Button disabled={isLoading} onClick={() => void onAdvanceOrder(selectedOrder.id, 'delivered')}>Marcar como entregue</Button> : null}
-            <Button disabled={!selectedOrderState?.canConfirmPayment} icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
+            {selectedOrder?.printConfirmationPending ? <Button disabled={isLoading || !canManagePrinting} icon="check" onClick={() => void onConfirmPrint(selectedOrder.id)} variant="primary">Confirmar impressão</Button> : null}
+            {selectedOrder?.backendStatus === 'in_preparation' ? <Button disabled={isLoading || !canManageOrders} onClick={() => void onAdvanceOrder(selectedOrder.id, 'ready')}>Confirmar montagem</Button> : null}
+            {selectedOrder?.backendStatus === 'ready_for_pickup' && selectedOrder.fulfillmentType === 'entrega' ? <p className="muted-text">Pedido pronto para sair. Continue pela tela Entregas.</p> : null}
+            {selectedOrder?.backendStatus === 'ready_for_pickup' && selectedOrder.fulfillmentType === 'retirada' ? <Button disabled={isLoading || !canManageOrders} onClick={() => void onAdvanceOrder(selectedOrder.id, 'picked-up')}>Marcar como retirado</Button> : null}
+            {selectedOrder?.backendStatus === 'out_for_delivery' ? <Button disabled={isLoading || !canManageOrders} onClick={() => void onAdvanceOrder(selectedOrder.id, 'delivered')}>Marcar como entregue</Button> : null}
+            {selectedOrderState?.canConfirmPayment ? <Button icon="check" onClick={() => onOpenModal('confirm-payment')} variant="primary">
               Confirmar pagamento
-            </Button>
-            {selectedOrder?.paymentStatus === 'pago' ? (
+            </Button> : null}
+            {canManageFinance && selectedOrder?.paymentStatus === 'pago' ? (
               <Button disabled={isLoading} icon="alert" onClick={() => onOpenModal('void-payment')} variant="secondary">
                 Anular confirmação
               </Button>
             ) : null}
-            <Button disabled={!selectedOrderState?.canChangeStatus} icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
+            {selectedOrderState?.canChangeStatus ? <Button icon="arrow" onClick={() => onOpenModal('change-status')} variant="secondary">
               Alterar status
-            </Button>
-            <Button disabled={!selectedOrderState?.canCancel} icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
+            </Button> : null}
+            {selectedOrderState?.canCancel ? <Button icon="alert" onClick={() => onOpenModal('cancel-order')} variant="danger">
               Cancelar pedido
-            </Button>
+            </Button> : null}
             <Button disabled={!selectedOrderState?.canDeleteDraft} icon="close" onClick={() => onOpenModal('delete-draft')} variant="ghost">
               Excluir pedido em montagem
             </Button>
@@ -349,13 +382,30 @@ export function OrdersPage({
             ) : null}
           </div>
           <div className="attention-box">
-            <Badge tone="manual">Confirmacao humana</Badge>
+            <Badge tone="manual">Confirmação humana</Badge>
             <p>Ambiguidades, crédito e comprovantes não devem ser decididos pela IA sem atendente.</p>
           </div>
         </Card>
       </div>
     </PageContainer>
   )
+}
+
+function sellerOptions(sellers: SellerSummary[], order: Order) {
+  const currentIsUnavailable = order.seller && !sellers.some((seller) => seller.id === order.seller?.id)
+  const historical = order.sellerName && (!order.seller || currentIsUnavailable)
+    ? [{
+        value: order.seller?.id ?? '__historical_seller__',
+        label: `${order.sellerName} (histórico)`,
+        disabled: true,
+      }]
+    : []
+
+  return [
+    { value: '', label: 'Não atribuído' },
+    ...historical,
+    ...sellers.map((seller) => ({ value: seller.id, label: seller.name })),
+  ]
 }
 
 function orderItemColumns(
@@ -422,7 +472,7 @@ function emptyQueueDescription(filter: OrderQueueFilter): string {
     case 'cancelled':
       return 'Pedidos cancelados ficam preservados no histórico, fora da fila ativa.'
     case 'finished':
-      return 'Pedidos finalizados saem da operacao ativa.'
+      return 'Pedidos finalizados saem da operação ativa.'
     case 'all':
       return 'Nenhum pedido veio da API para esta consulta.'
     case 'active':

@@ -22,7 +22,7 @@ class CounterProductManagementTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_creates_a_counter_product_in_an_idempotent_category_for_its_company(): void
+    public function test_admin_creates_counter_products_in_an_existing_category_for_its_company(): void
     {
         $this->seedStructuredMenu();
 
@@ -35,7 +35,7 @@ class CounterProductManagementTest extends TestCase
             ->assertJsonPath('data.name', 'Geladinho de morango')
             ->assertJsonPath('data.product_type', Product::TYPE_COUNTER)
             ->assertJsonPath('data.is_counter_product', true)
-            ->assertJsonPath('data.category.slug', 'geladinhos')
+            ->assertJsonPath('data.category.slug', 'bebidas')
             ->assertJsonPath('data.image_url', null)
             ->json('data');
 
@@ -47,17 +47,27 @@ class CounterProductManagementTest extends TestCase
         ]);
         $this->assertSame(1, ProductCategory::query()
             ->where('company_id', $this->company()->id)
-            ->where('slug', 'geladinhos')
+            ->where('slug', 'bebidas')
             ->count());
+
+        $newProductImage = $this->actingAs($admin)
+            ->postJson("/api/app/menu/products/{$created['id']}/image", [
+                'image' => $this->pngUpload('geladinho.png'),
+            ])
+            ->assertOk()
+            ->json('data.image_url');
+
+        $this->assertIsString($newProductImage);
+        $this->assertStringStartsWith("/api/app/menu/products/{$created['id']}/image?v=", $newProductImage);
 
         $this->actingAs($admin)
             ->postJson('/api/app/menu/products', $this->counterProductPayload('Geladinho de uva'))
             ->assertCreated()
-            ->assertJsonPath('data.category.slug', 'geladinhos');
+            ->assertJsonPath('data.category.slug', 'bebidas');
 
         $this->assertSame(1, ProductCategory::query()
             ->where('company_id', $this->company()->id)
-            ->where('slug', 'geladinhos')
+            ->where('slug', 'bebidas')
             ->count());
     }
 
@@ -79,16 +89,18 @@ class CounterProductManagementTest extends TestCase
             'metadata' => ['counter_sale' => true],
         ]);
 
-        $this->actingAs($admin)
+        $response = $this->actingAs($admin)
             ->postJson("/api/app/menu/products/{$product->id}/image", [
-                'image' => UploadedFile::fake()->createWithContent(
-                    'doce.png',
-                    base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Jj2QAAAAASUVORK5CYII='),
-                ),
+                'image' => $this->pngUpload('doce.png'),
             ])
             ->assertOk()
             ->assertJsonPath('data.id', $product->id)
             ->assertJsonPath('data.is_counter_product', true);
+
+        $imageUrl = $response->json('data.image_url');
+        $this->assertIsString($imageUrl);
+        $this->assertStringStartsWith("/api/app/menu/products/{$product->id}/image?v=", $imageUrl);
+        $this->get($imageUrl)->assertOk()->assertHeader('x-content-type-options', 'nosniff');
 
         $product->refresh();
         $path = data_get($product->metadata, 'catalog_image_path');
@@ -101,6 +113,64 @@ class CounterProductManagementTest extends TestCase
             ->assertJsonPath('data.image_url', null);
 
         Storage::disk('public')->assertMissing($path);
+        $this->assertNull(data_get($product->refresh()->metadata, 'catalog_image_path'));
+    }
+
+    public function test_existing_regular_product_image_can_be_added_replaced_reloaded_and_removed(): void
+    {
+        Storage::fake('public');
+        $this->seedStructuredMenu();
+
+        $admin = $this->admin();
+        $product = Product::query()
+            ->where('company_id', $this->company()->id)
+            ->where('slug', 'n8-casa')
+            ->firstOrFail();
+
+        $firstUrl = $this->actingAs($admin)
+            ->postJson("/api/app/menu/products/{$product->id}/image", [
+                'image' => $this->pngUpload('primeira.png'),
+            ])
+            ->assertOk()
+            ->json('data.image_url');
+        $firstPath = data_get($product->refresh()->metadata, 'catalog_image_path');
+
+        $this->assertIsString($firstUrl);
+        $this->assertIsString($firstPath);
+        Storage::disk('public')->assertExists($firstPath);
+
+        $secondUrl = $this->actingAs($admin)
+            ->postJson("/api/app/menu/products/{$product->id}/image", [
+                'image' => $this->pngUpload('segunda.png'),
+            ])
+            ->assertOk()
+            ->json('data.image_url');
+        $secondPath = data_get($product->refresh()->metadata, 'catalog_image_path');
+
+        $this->assertIsString($secondUrl);
+        $this->assertIsString($secondPath);
+        $this->assertNotSame($firstUrl, $secondUrl);
+        $this->assertNotSame($firstPath, $secondPath);
+        Storage::disk('public')->assertMissing($firstPath);
+        Storage::disk('public')->assertExists($secondPath);
+
+        $categories = $this->actingAs($admin)
+            ->getJson('/api/app/menu/admin/products?date=2026-09-04')
+            ->assertOk()
+            ->json('data.categories');
+        $reloaded = collect($categories)
+            ->flatMap(fn (array $category): array => $category['products'])
+            ->firstWhere('id', $product->id);
+
+        $this->assertSame($secondUrl, $reloaded['image_url']);
+        $this->get($secondUrl)->assertOk();
+
+        $this->actingAs($admin)
+            ->deleteJson("/api/app/menu/products/{$product->id}/image")
+            ->assertOk()
+            ->assertJsonPath('data.image_url', null);
+
+        Storage::disk('public')->assertMissing($secondPath);
         $this->assertNull(data_get($product->refresh()->metadata, 'catalog_image_path'));
     }
 
@@ -138,12 +208,35 @@ class CounterProductManagementTest extends TestCase
             'metadata' => ['counter_sale' => true],
         ]);
 
+        $otherImagePath = "menu-products/{$otherCompany->id}/{$otherProduct->id}/private.png";
+        Storage::disk('public')->put($otherImagePath, 'private-image');
+        $otherProduct->forceFill(['metadata' => [
+            'counter_sale' => true,
+            'catalog_image_path' => $otherImagePath,
+        ]])->save();
+
         $this->actingAs($admin)
             ->patchJson("/api/app/menu/products/{$otherProduct->id}", [
                 ...$this->counterProductPayload('Produto externo'),
                 'display_order' => 10,
             ])
             ->assertNotFound();
+
+        $this->actingAs($admin)
+            ->get("/api/app/menu/products/{$otherProduct->id}/image")
+            ->assertNotFound();
+
+        $this->actingAs($admin)
+            ->postJson("/api/app/menu/products/{$otherProduct->id}/image", [
+                'image' => $this->pngUpload('invasora.png'),
+            ])
+            ->assertNotFound();
+
+        $this->actingAs($admin)
+            ->deleteJson("/api/app/menu/products/{$otherProduct->id}/image")
+            ->assertNotFound();
+
+        Storage::disk('public')->assertExists($otherImagePath);
     }
 
     public function test_juice_flavors_keep_internal_slugs_and_expose_customer_facing_500ml_labels(): void
@@ -176,9 +269,21 @@ class CounterProductManagementTest extends TestCase
             'price_cents' => 350,
             'is_active' => true,
             'is_available_by_default' => true,
-            'category_slug' => 'geladinhos',
+            'category_id' => ProductCategory::query()
+                ->where('company_id', $this->company()->id)
+                ->where('slug', 'bebidas')
+                ->value('id'),
+            'is_counter_product' => true,
             'service_days' => [ProductServiceDay::Monday->value, ProductServiceDay::Tuesday->value],
         ];
+    }
+
+    private function pngUpload(string $name): UploadedFile
+    {
+        return UploadedFile::fake()->createWithContent(
+            $name,
+            base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Jj2QAAAAASUVORK5CYII='),
+        );
     }
 
     private function seedStructuredMenu(): void

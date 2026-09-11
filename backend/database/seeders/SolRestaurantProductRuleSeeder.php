@@ -221,7 +221,7 @@ class SolRestaurantProductRuleSeeder extends Seeder
         $this->syncComponentLinks($n9, [
             'bife' => [
                 'price_delta_cents' => 400,
-                'final_price_cents' => 2200,
+                'final_price_cents' => 2300,
                 'requires_confirmation' => false,
                 'is_active' => true,
             ],
@@ -252,6 +252,15 @@ class SolRestaurantProductRuleSeeder extends Seeder
         ]);
 
         $this->seedBifeAdditionalRule($company, $n8Product, 20);
+
+        foreach ([$n8Product, $n9Product] as $traditionalMarmita) {
+            $traditionalMarmita->forceFill([
+                'composition_rules' => [
+                    ...($traditionalMarmita->composition_rules ?? []),
+                    'churrasco_second_meat_additional_price_cents' => 400,
+                ],
+            ])->save();
+        }
     }
 
     private function seedBifeAdditionalRule(Company $company, Product $product, int $displayOrder): void

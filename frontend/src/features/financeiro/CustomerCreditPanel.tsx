@@ -9,9 +9,9 @@ type CustomerCreditPanelProps = {
 export function CustomerCreditPanel({ summary }: CustomerCreditPanelProps) {
   return (
     <Card className="credit-card">
-      <SectionTitle title="Credito de clientes" />
+      <SectionTitle title="Crédito de clientes" />
       <strong>{formatCurrency(summary.customerCreditBalance)}</strong>
-      <p>Saldo e uso de credito ficam destacados para conferencia manual antes de aplicar em novos pedidos.</p>
+      <p>Saldo e uso de crédito ficam destacados para conferência manual antes de aplicar em novos pedidos.</p>
       <div className="finance-meta-grid">
         <div>
           <span>Usado hoje</span>

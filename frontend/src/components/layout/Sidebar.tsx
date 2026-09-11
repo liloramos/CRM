@@ -3,8 +3,8 @@ import { menuItems } from '../../constants/routes'
 import type { AuthUser, RouteKey } from '../../types/crm'
 import { Badge } from '../ui/Badge'
 import { Icon } from '../ui/Icon'
+import { UserAvatar } from '../ui/UserAvatar'
 import { SolLogo } from './SolLogo'
-import { initialsFromName } from '../../utils/formatters'
 
 type SidebarProps = {
   activeRoute: RouteKey
@@ -22,6 +22,11 @@ export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, o
   const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
+  const hasManagementRole = user?.roles.some((role) => role === 'super_admin' || role === 'admin_gerente') ?? false
+  const visibleMenuItems = menuItems.filter((item) => (
+    (!item.requiredPermission || user?.permissions.includes(item.requiredPermission))
+    && (!item.managementOnly || hasManagementRole)
+  ))
 
   useEffect(() => {
     activeItemRef.current?.scrollIntoView({ block: 'nearest' })
@@ -77,7 +82,7 @@ export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, o
         <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={15} />
       </button>
       <nav className="sidebar__nav" aria-label="Menu principal">
-        {menuItems.map((item) => {
+        {visibleMenuItems.map((item) => {
           const badge = item.key === 'conversas' && conversationUnreadCount > 0
             ? String(conversationUnreadCount)
             : item.badge
@@ -122,7 +127,7 @@ export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, o
             }}
             type="button"
           >
-            <span className="avatar">{initialsFromName(user?.name ?? 'Usuario')}</span>
+            <UserAvatar avatarUrl={user?.avatarUrl} name={user?.name ?? 'Usuário'} />
             <span className="sidebar__profile-copy">
               <strong>{user?.name ?? 'Operador'}</strong>
               <small>{formatRole(user?.roles[0])}</small>
@@ -132,7 +137,7 @@ export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, o
           {isProfileOpen ? (
             <div className="sidebar__profile-menu" role="menu">
               <div className="sidebar__profile-identity">
-                <span className="avatar avatar--lg">{initialsFromName(user?.name ?? 'Usuario')}</span>
+                <UserAvatar avatarUrl={user?.avatarUrl} className="avatar--lg" name={user?.name ?? 'Usuário'} />
                 <div>
                   <strong>{user?.name ?? 'Operador'}</strong>
                   <span>{user?.email ?? 'Conta local'}</span>
@@ -158,6 +163,7 @@ export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, o
           aria-label="Ajuda e suporte"
           className="sidebar__item sidebar__item--support"
           onBlur={() => setTooltip(null)}
+          onClick={() => onNavigate('suporte')}
           onFocus={(event) => showTooltip('Ajuda e suporte', event)}
           onMouseEnter={(event) => showTooltip('Ajuda e suporte', event)}
           onMouseLeave={() => setTooltip(null)}
@@ -179,7 +185,7 @@ export function Sidebar({ activeRoute, collapsed, conversationUnreadCount = 0, o
 function formatRole(role?: string): string {
   switch (role) {
     case 'super_admin':
-      return 'Super admin'
+      return 'DEV'
     case 'admin_gerente':
       return 'Gerência'
     case 'atendente':

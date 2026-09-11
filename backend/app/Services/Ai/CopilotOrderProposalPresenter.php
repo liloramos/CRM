@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai;
 
+use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\Product;
 use App\Services\Orders\CustomerActiveOrderResolver;
@@ -17,11 +18,23 @@ final class CopilotOrderProposalPresenter
     /** @param array<string,mixed> $safe @return array<string,mixed> */
     public function present(Conversation $conversation, array $safe, array $context = []): array
     {
+        return $this->presentForCompany((int) $conversation->company_id, $safe, $context, $conversation);
+    }
+
+    /** @param array<string,mixed> $safe @return array<string,mixed> */
+    public function presentForSandbox(Company $company, array $safe, array $context = []): array
+    {
+        return $this->presentForCompany((int) $company->id, $safe, $context);
+    }
+
+    /** @param array<string,mixed> $safe @return array<string,mixed> */
+    private function presentForCompany(int $companyId, array $safe, array $context, ?Conversation $conversation = null): array
+    {
         $items = collect(data_get($safe, 'draft_order.items', []))
             ->filter(fn (mixed $item): bool => is_array($item) && (int) ($item['menu_item_id'] ?? 0) > 0)
             ->values();
         $products = $this->eligibility->apply(Product::query())
-            ->where('company_id', $conversation->company_id)
+            ->where('company_id', $companyId)
             ->whereIn('id', $items->pluck('menu_item_id')->unique()->all())
             ->get()
             ->keyBy('id');
@@ -34,7 +47,9 @@ final class CopilotOrderProposalPresenter
                 ? 'A alteracao foi identificada e precisa de revisao humana. Nenhuma mudanca foi aplicada ao pedido.'
                 : 'Nao ha produto seguro para preencher o rascunho.';
         }
-        $target = $this->target($conversation, $blockingReasons, (string) ($safe['intent'] ?? 'UNKNOWN'));
+        $target = $conversation === null
+            ? $this->newOrderTarget()
+            : $this->target($conversation, $blockingReasons, (string) ($safe['intent'] ?? 'UNKNOWN'));
 
         $hasMeatConflict = collect(data_get($safe, 'warnings', []))
             ->contains(fn (array $warning): bool => ($warning['code'] ?? null) === 'CONFLICTING_MEAT_REQUEST');
@@ -85,6 +100,18 @@ final class CopilotOrderProposalPresenter
             'missing_information' => $missing,
             'warnings' => $warnings,
             'requires_human_review' => true,
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function newOrderTarget(): array
+    {
+        return [
+            'state' => 'NEW_ORDER',
+            'requires_human_selection' => false,
+            'choices' => ['NEW_ORDER'],
+            'default_choice' => 'NEW_ORDER',
+            'active_order' => null,
         ];
     }
 

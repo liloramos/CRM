@@ -289,22 +289,6 @@ class OrderCleanupService
             $reasons[] = 'print_confirmed';
         }
 
-        if (
-            in_array($order->fulfillment_status, [
-                Order::FULFILLMENT_STATUS_DELIVERY_OUT,
-                Order::FULFILLMENT_STATUS_DELIVERED,
-                Order::FULFILLMENT_STATUS_READY_FOR_PICKUP,
-                Order::FULFILLMENT_STATUS_PICKED_UP,
-            ], true)
-            || in_array($order->delivery_status, [
-                Order::DELIVERY_STATUS_OUT_FOR_DELIVERY,
-                Order::DELIVERY_STATUS_DELIVERED,
-            ], true)
-            || (int) ($order->delivery_quotes_count ?? 0) > 0
-        ) {
-            $reasons[] = 'delivery_started';
-        }
-
         if ($order->conversation_id !== null || (int) ($order->fragments_count ?? 0) > 0) {
             $reasons[] = 'conversation_linked';
         }

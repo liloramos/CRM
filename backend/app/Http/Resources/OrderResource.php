@@ -18,6 +18,12 @@ class OrderResource extends JsonResource
             'payer_customer_id' => $this->payer_customer_id,
             'conversation_id' => $this->conversation_id,
             'created_by_user_id' => $this->created_by_user_id,
+            'seller_user_id' => $this->seller_user_id,
+            'seller_name_snapshot' => $this->seller_name_snapshot,
+            'seller' => $this->whenLoaded('seller', fn () => $this->seller ? [
+                'id' => (string) $this->seller->id,
+                'name' => $this->seller->name,
+            ] : null),
             'recurring_order_reference_id' => $this->recurring_order_reference_id,
             'delivery_address_id' => $this->delivery_address_id,
             'latest_print_job_id' => $this->latest_print_job_id,

@@ -85,6 +85,20 @@ class AppSessionTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_inactive_user_cannot_start_or_keep_an_app_session(): void
+    {
+        $user = $this->authorizedUser();
+        $user->update(['is_active' => false]);
+
+        $this->postJson(route('api.app.session.login'), [
+            'email' => $user->email,
+            'password' => self::TEST_PASSWORD,
+        ])->assertUnprocessable()->assertJsonValidationErrors('email');
+
+        $this->actingAs($user)->getJson(route('api.app.session.show'))->assertUnauthorized();
+        $this->actingAs($user)->getJson('/api/app/account/profile')->assertForbidden();
+    }
+
     private function authorizedUser(): User
     {
         $this->seed(RoleAndPermissionSeeder::class);

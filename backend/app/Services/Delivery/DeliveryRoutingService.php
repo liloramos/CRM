@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class DeliveryRoutingService
 {
@@ -22,6 +23,7 @@ class DeliveryRoutingService
         private readonly DeliveryRouteProviderInterface $routes,
         private readonly DeliveryPricingService $pricing,
         private readonly DeliveryWorkflowService $delivery,
+        private readonly OrderWorkflowService $orders,
     ) {}
 
     /** @param array<string, mixed> $attributes */
@@ -80,6 +82,85 @@ class DeliveryRoutingService
         ]);
 
         return $this->calculate($order, $address, $actor);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array{quote: DeliveryQuote|null, warning: string|null}
+     */
+    public function updateManualAddress(Order $order, array $attributes, ?User $actor = null): array
+    {
+        $address = DB::transaction(function () use ($order, $attributes): CustomerAddress {
+            $lockedOrder = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $this->orders->assertEditable($lockedOrder);
+
+            $address = $lockedOrder->deliveryAddress ?: new CustomerAddress([
+                'company_id' => $lockedOrder->company_id,
+                'customer_id' => $lockedOrder->payer_customer_id,
+                'label' => 'Entrega',
+            ]);
+            $address->fill([
+                'company_id' => $lockedOrder->company_id,
+                'customer_id' => $lockedOrder->payer_customer_id,
+                'recipient_name' => $lockedOrder->delivery_recipient_name ?: $lockedOrder->customer_name_snapshot,
+                'recipient_phone' => $lockedOrder->delivery_recipient_phone ?: $lockedOrder->customer_phone_snapshot,
+                'postal_code' => $attributes['postal_code'] ?? null,
+                'street' => $attributes['street'],
+                'number' => $attributes['number'],
+                'complement' => $attributes['complement'] ?? null,
+                'neighborhood' => $attributes['neighborhood'],
+                'city' => $attributes['city'],
+                'state' => strtoupper((string) $attributes['state']),
+                'country_code' => 'BR',
+                'reference' => $attributes['reference'] ?? null,
+                'latitude' => null,
+                'longitude' => null,
+                'metadata' => [
+                    ...(array) $address->metadata,
+                    'location_source' => 'manual_address',
+                    'location_updated_at' => now()->toIso8601String(),
+                ],
+            ])->save();
+
+            $lockedOrder->forceFill([
+                'delivery_address_id' => $address->id,
+                'fulfillment_type' => Order::FULFILLMENT_DELIVERY,
+                'fulfillment_status' => Order::FULFILLMENT_STATUS_PENDING,
+                'delivery_status' => Order::DELIVERY_STATUS_ADDRESS_PENDING,
+                'delivery_distance_km' => null,
+                'delivery_fee_base_cents' => 0,
+                'delivery_fee_surcharge_cents' => 0,
+                'delivery_fee_cents' => 0,
+                'delivery_reference' => $address->reference,
+                'delivery_address_snapshot' => $this->delivery->addressSnapshot($address),
+                'delivery_calculated_at' => null,
+            ])->save();
+            $this->orders->recalculateTotals($lockedOrder);
+
+            return $address->refresh();
+        });
+
+        try {
+            $geocoded = $this->geocoding->geocode($this->manualAddressText($address));
+            $address->forceFill([
+                'latitude' => $geocoded->coordinates->latitude,
+                'longitude' => $geocoded->coordinates->longitude,
+                'metadata' => [
+                    ...(array) $address->metadata,
+                    'geocoded_address' => $geocoded->formattedAddress,
+                    'geocoding_provider' => $geocoded->provider,
+                    ...$geocoded->metadata,
+                ],
+            ])->save();
+            $order->forceFill(['delivery_address_snapshot' => $this->delivery->addressSnapshot($address->refresh())])->save();
+
+            return ['quote' => $this->calculate($order->refresh(), $address->refresh(), $actor), 'warning' => null];
+        } catch (Throwable $exception) {
+            return [
+                'quote' => null,
+                'warning' => 'Endereço salvo. Não foi possível geocodificar e recalcular a rota agora; revise a localização antes de despachar. '.$exception->getMessage(),
+            ];
+        }
     }
 
     public function recalculate(Order $order, ?User $actor = null): DeliveryQuote
@@ -189,6 +270,17 @@ class DeliveryRoutingService
 
             return $address->refresh();
         });
+    }
+
+    private function manualAddressText(CustomerAddress $address): string
+    {
+        return collect([
+            trim(implode(', ', array_filter([$address->street, $address->number]))),
+            $address->neighborhood,
+            trim(implode(' - ', array_filter([$address->city, $address->state]))),
+            $address->postal_code ? 'CEP '.$address->postal_code : null,
+            'Brasil',
+        ])->filter()->implode(', ');
     }
 
     /** @param array<string, mixed>|mixed $value */

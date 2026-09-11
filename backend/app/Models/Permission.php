@@ -8,6 +8,16 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 class Permission extends Model
 {
     /**
+     * Permissions that express protected DEV authority and cannot be delegated
+     * as an individual override to a lower access profile.
+     *
+     * @var list<string>
+     */
+    public const PROTECTED_PERMISSIONS = [
+        'roles.manage',
+    ];
+
+    /**
      * @var array<string, string>
      */
     public const DEFAULT_PERMISSIONS = [
@@ -22,8 +32,13 @@ class Permission extends Model
         'menu.manage' => 'Gerenciar cardapio e disponibilidade',
         'orders.view' => 'Visualizar pedidos',
         'orders.manage' => 'Gerenciar pedidos e status',
+        'customers.view' => 'Visualizar clientes',
+        'customers.manage' => 'Gerenciar clientes',
         'payments.view' => 'Visualizar pagamentos e comprovantes',
         'payments.manage' => 'Gerenciar pagamentos, comprovantes e creditos',
+        'finance.view' => 'Visualizar financeiro gerencial',
+        'finance.manage' => 'Executar correcoes financeiras administrativas',
+        'reports.view' => 'Visualizar relatorios gerenciais',
         'delivery.view' => 'Visualizar entregas, retiradas e taxas',
         'delivery.manage' => 'Gerenciar entregas, retiradas e calculo de taxas',
         'printing.view' => 'Visualizar comandas e previas de impressao',
@@ -50,5 +65,13 @@ class Permission extends Model
     public static function defaults(): array
     {
         return self::DEFAULT_PERMISSIONS;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function delegable(): array
+    {
+        return array_values(array_diff(array_keys(self::DEFAULT_PERMISSIONS), self::PROTECTED_PERMISSIONS));
     }
 }

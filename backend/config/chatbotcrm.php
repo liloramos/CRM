@@ -24,6 +24,10 @@ return [
         'allow_destructive_test_cleanup' => env('ALLOW_DESTRUCTIVE_TEST_CLEANUP', false),
     ],
 
+    'counter_sales' => [
+        'max_weight_grams' => (int) env('COUNTER_SALE_MAX_WEIGHT_GRAMS', 10000),
+    ],
+
     'delivery' => [
         'maps' => [
             'provider' => env('DELIVERY_MAPS_PROVIDER', 'fake'),

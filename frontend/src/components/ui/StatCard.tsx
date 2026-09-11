@@ -31,13 +31,15 @@ export function StatCard({
         </span>
         <span>{label}</span>
       </div>
-      <strong>{value}</strong>
-      {trend ? <span className="stat-card__trend">{trend}</span> : null}
-      {showDecoration ? <span className="sparkline" aria-hidden="true" /> : null}
-      {onClick && showActionIndicator ? (
-        <span className="stat-card__action" aria-hidden="true">
-          <Icon name="arrow" size={16} />
-        </span>
+      <div className="stat-card__body">
+        <strong>{value}</strong>
+        {trend ? <span className="stat-card__trend">{trend}</span> : null}
+      </div>
+      {showDecoration || (onClick && showActionIndicator) ? (
+        <div className="stat-card__footer">
+          {showDecoration ? <span className="sparkline" aria-hidden="true" /> : <span />}
+          {onClick && showActionIndicator ? <span className="stat-card__action" aria-hidden="true"><Icon name="arrow" size={16} /></span> : null}
+        </div>
       ) : null}
     </>
   )

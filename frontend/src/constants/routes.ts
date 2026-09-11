@@ -5,6 +5,8 @@ export type MenuItem = {
   label: string
   icon: string
   badge?: string
+  requiredPermission?: string
+  managementOnly?: boolean
   group: 'operacao' | 'analise' | 'configuracao'
 }
 
@@ -13,16 +15,18 @@ export const menuItems: MenuItem[] = [
   { key: 'conversas', label: 'Conversas', icon: 'chat', group: 'operacao' },
   { key: 'caixa', label: 'Caixa', icon: 'cash', group: 'operacao' },
   { key: 'pedidos', label: 'Pedidos', icon: 'orders', group: 'operacao' },
-  { key: 'cardapio', label: 'Cardapio', icon: 'menu', group: 'operacao' },
+  { key: 'cardapio', label: 'Cardápio', icon: 'menu', group: 'operacao' },
   { key: 'entregas', label: 'Entregas', icon: 'delivery', group: 'operacao' },
-  { key: 'pagamentos', label: 'Pagamentos / Pix', icon: 'payment', group: 'operacao' },
-  { key: 'financeiro', label: 'Financeiro', icon: 'finance', group: 'analise' },
-  { key: 'clientes', label: 'Clientes', icon: 'customers', group: 'operacao' },
-  { key: 'relatorios', label: 'Relatorios', icon: 'reports', group: 'analise' },
-  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', group: 'configuracao' },
+  { key: 'pagamentos', label: 'Pagamentos / Pix', icon: 'payment', group: 'operacao', requiredPermission: 'payments.view' },
+  { key: 'financeiro', label: 'Financeiro', icon: 'finance', group: 'analise', requiredPermission: 'finance.view', managementOnly: true },
+  { key: 'clientes', label: 'Clientes', icon: 'customers', group: 'operacao', requiredPermission: 'customers.view' },
+  { key: 'relatorios', label: 'Relatórios', icon: 'reports', group: 'analise', requiredPermission: 'reports.view', managementOnly: true },
+  { key: 'configuracoes', label: 'Configurações', icon: 'settings', group: 'configuracao' },
   { key: 'whatsapp', label: 'WhatsApp / API', icon: 'api', group: 'configuracao' },
-  { key: 'ia', label: 'IA e Automacao', icon: 'ai', group: 'configuracao' },
+  { key: 'ia', label: 'IA e Automação', icon: 'ai', group: 'configuracao' },
+  { key: 'assistente', label: 'Labia', icon: 'spark', group: 'operacao' },
   { key: 'perfil', label: 'Perfil', icon: 'user', group: 'configuracao' },
+  { key: 'empresa', label: 'Empresa', icon: 'settings', group: 'configuracao', managementOnly: true },
 ]
 
 export const routeLabels: Record<RouteKey, string> = {
@@ -32,14 +36,23 @@ export const routeLabels: Record<RouteKey, string> = {
   conversas: 'Conversas',
   caixa: 'Caixa',
   pedidos: 'Pedidos',
-  cardapio: 'Cardapio',
+  cardapio: 'Cardápio',
   entregas: 'Entregas',
   pagamentos: 'Pagamentos / Pix',
   financeiro: 'Financeiro',
   clientes: 'Clientes',
-  relatorios: 'Relatorios',
-  configuracoes: 'Configuracoes',
+  relatorios: 'Relatórios',
+  configuracoes: 'Configurações',
   whatsapp: 'WhatsApp / API',
-  ia: 'IA e Automacao',
+  ia: 'IA e Automação',
+  assistente: 'Labia',
+  suporte: 'Central de Ajuda',
   perfil: 'Perfil',
+  empresa: 'Empresa',
+  'configuracoes-gerais': 'Configurações gerais',
+  'configuracoes-usuarios': 'Usuários e permissões',
+  'configuracoes-marca': 'Aparência e marca',
+  'configuracoes-impressao': 'Impressão',
+  'configuracoes-pagamentos': 'Pagamentos',
+  'configuracoes-seguranca': 'Segurança',
 }

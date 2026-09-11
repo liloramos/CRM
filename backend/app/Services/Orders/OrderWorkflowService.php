@@ -18,6 +18,8 @@ use Illuminate\Support\Facades\DB;
 
 class OrderWorkflowService
 {
+    public function __construct(private readonly OrderSellerEligibilityService $sellerEligibility) {}
+
     /**
      * @param  array<string, mixed>  $attributes
      */
@@ -44,6 +46,8 @@ class OrderWorkflowService
                     ->firstOrFail();
             }
 
+            $seller = $this->sellerEligibility->resolve($lockedCompany, $attributes['seller_user_id'] ?? null);
+
             $order = Order::query()->create([
                 'company_id' => $lockedCompany->id,
                 'payer_customer_id' => $payerCustomer?->id,
@@ -51,6 +55,8 @@ class OrderWorkflowService
                 'customer_phone_snapshot' => $attributes['customer_phone_snapshot'] ?? $payerCustomer?->phone,
                 'conversation_id' => $attributes['conversation_id'] ?? null,
                 'created_by_user_id' => $attributes['created_by_user_id'] ?? null,
+                'seller_user_id' => $seller?->id,
+                'seller_name_snapshot' => $seller?->name,
                 'recurring_order_reference_id' => $attributes['recurring_order_reference_id'] ?? null,
                 'order_date' => $orderDate->toDateString(),
                 'daily_sequence' => $dailySequence,
@@ -83,10 +89,65 @@ class OrderWorkflowService
                 'user_id' => $attributes['created_by_user_id'] ?? null,
                 'reason' => 'order_created',
                 'notes' => $attributes['status_notes'] ?? null,
-                'metadata' => ['origin_channel' => $order->origin_channel],
+                'metadata' => [
+                    'origin_channel' => $order->origin_channel,
+                    'seller_user_id' => $seller?->id,
+                    'seller_name' => $seller?->name,
+                ],
             ]);
 
             return $order;
+        });
+    }
+
+    public function assignSeller(Company $company, Order $order, ?int $sellerUserId, ?User $actor = null): Order
+    {
+        return DB::transaction(function () use ($company, $order, $sellerUserId, $actor): Order {
+            $order = Order::query()
+                ->where('company_id', $company->id)
+                ->whereKey($order->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $order instanceof Order) {
+                throw new DomainException('Este pedido não pertence ao restaurante atual.');
+            }
+
+            $previousSellerId = $order->seller_user_id;
+            $previousSellerName = $order->seller_name_snapshot;
+
+            if (($previousSellerId === null && $sellerUserId === null)
+                || ($previousSellerId !== null && (int) $previousSellerId === (int) $sellerUserId)) {
+                return $order->load('seller');
+            }
+
+            $seller = $this->sellerEligibility->resolve($company, $sellerUserId);
+            $nextSellerId = $seller?->id;
+            $nextSellerName = $seller?->name;
+
+            $order->forceFill([
+                'seller_user_id' => $nextSellerId,
+                'seller_name_snapshot' => $nextSellerName,
+            ])->save();
+
+            $previousLabel = $previousSellerName ?: 'Não atribuído';
+            $nextLabel = $nextSellerName ?: 'Não atribuído';
+
+            $order->statusHistories()->create([
+                'user_id' => $actor?->id,
+                'from_status' => $order->status,
+                'to_status' => $order->status,
+                'reason' => 'order_seller_changed',
+                'notes' => "Responsável alterado: {$previousLabel} → {$nextLabel}.",
+                'metadata' => [
+                    'previous_seller_user_id' => $previousSellerId,
+                    'previous_seller_name' => $previousSellerName,
+                    'seller_user_id' => $nextSellerId,
+                    'seller_name' => $nextSellerName,
+                ],
+            ]);
+
+            return $order->refresh()->load('seller');
         });
     }
 
@@ -108,6 +169,8 @@ class OrderWorkflowService
                 'product_type' => $product->product_type,
                 'menu_rule_code' => $product->menu_rule_code,
                 'quantity' => $quantity,
+                'weight_grams' => $attributes['weight_grams'] ?? null,
+                'price_per_kg_cents' => $attributes['price_per_kg_cents'] ?? null,
                 'unit_price_cents' => $unitPriceCents,
                 'currency' => $attributes['currency'] ?? $product->currency,
                 'item_notes' => $attributes['item_notes'] ?? null,
@@ -339,7 +402,6 @@ class OrderWorkflowService
                 Order::STATUS_PAYMENT_REJECTED,
                 Order::STATUS_READY_TO_PRINT,
                 Order::STATUS_PRINTED,
-                Order::STATUS_OUT_FOR_DELIVERY,
                 Order::STATUS_CANCELLED,
             ],
             Order::STATUS_AWAITING_CUSTOMER_CONFIRMATION => [
@@ -383,11 +445,15 @@ class OrderWorkflowService
             Order::STATUS_IN_PREPARATION => [
                 Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_READY_FOR_PICKUP,
+                Order::STATUS_FINISHED,
+                Order::STATUS_CANCELLED,
+            ],
+            Order::STATUS_READY_FOR_PICKUP => [
+                Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_OUT_FOR_DELIVERY,
                 Order::STATUS_FINISHED,
                 Order::STATUS_CANCELLED,
             ],
-            Order::STATUS_READY_FOR_PICKUP,
             Order::STATUS_OUT_FOR_DELIVERY => [
                 Order::STATUS_AWAITING_PAYMENT,
                 Order::STATUS_FINISHED,
@@ -443,7 +509,9 @@ class OrderWorkflowService
         $unitPriceCents = (int) ($attributes['unit_price_cents'] ?? ($product->base_price_cents ?? 0));
         $item->forceFill([
             'product_id' => $product->id, 'product_name' => $product->name, 'product_type' => $product->product_type,
-            'menu_rule_code' => $product->menu_rule_code, 'quantity' => $quantity, 'unit_price_cents' => $unitPriceCents,
+            'menu_rule_code' => $product->menu_rule_code, 'quantity' => $quantity,
+            'weight_grams' => $attributes['weight_grams'] ?? null, 'price_per_kg_cents' => $attributes['price_per_kg_cents'] ?? null,
+            'unit_price_cents' => $unitPriceCents,
             'currency' => $attributes['currency'] ?? $product->currency, 'item_notes' => $attributes['item_notes'] ?? null,
             'beneficiary_name' => $attributes['beneficiary_name'] ?? null, 'removed_ingredients' => $attributes['removed_ingredients'] ?? null,
             'selected_components' => $attributes['selected_components'] ?? null,

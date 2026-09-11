@@ -138,7 +138,7 @@ export function DashboardPage({
   )
   const waitingPrintOrders = operationalOrders.filter((order) => order.printStatus !== 'impresso')
   const printErrorOrders = operationalOrders.filter((order) => order.printStatus === 'erro')
-  const reviewConversations = safeConversations.filter((conversation) => conversation.mode === 'atencao')
+  const reviewConversations = safeConversations.filter((conversation) => conversation.operationalStatus?.code === 'ATTENTION')
   const hasAnyOperation =
     operationalOrders.length > 0 ||
     safeConversations.length > 0 ||

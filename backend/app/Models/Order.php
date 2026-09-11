@@ -157,6 +157,8 @@ class Order extends Model
         'customer_phone_snapshot',
         'conversation_id',
         'created_by_user_id',
+        'seller_user_id',
+        'seller_name_snapshot',
         'recurring_order_reference_id',
         'delivery_address_id',
         'latest_print_job_id',
@@ -276,6 +278,11 @@ class Order extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
+    public function seller(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'seller_user_id');
     }
 
     public function recurringOrderReference(): BelongsTo

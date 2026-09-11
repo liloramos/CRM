@@ -65,7 +65,7 @@ export function LoginPage() {
               <p>
                 {mode === 'login'
                   ? 'Acesse sua conta para continuar.'
-                  : 'Solicite liberacao ao gerente para acessar o sistema com o perfil adequado.'}
+                  : 'Solicite liberação ao gerente para acessar o sistema com o perfil adequado.'}
               </p>
             </div>
 
@@ -175,7 +175,7 @@ export function LoginPage() {
                   />
                   <div className="auth-note">
                     <strong>Cadastro controlado</strong>
-                    <p>Nenhum usuario e criado automaticamente por esta tela. A liberacao real fica com perfil administrativo.</p>
+                    <p>Nenhum usuário é criado automaticamente por esta tela. A liberação real fica com perfil administrativo.</p>
                   </div>
                   <Button onClick={() => setMode('login')} variant="secondary">
                     Voltar ao login

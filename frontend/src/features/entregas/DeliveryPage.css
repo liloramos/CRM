@@ -392,6 +392,105 @@
   gap: 8px;
 }
 
+.delivery-notification-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.delivery-notification-choice input[type='checkbox'] {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--color-brand);
+  cursor: pointer;
+}
+
+.delivery-notification-choice input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--color-brand-2);
+  outline-offset: 2px;
+}
+
+.delivery-address-editor,
+.delivery-address-editor__closed,
+.delivery-address-readonly {
+  margin-top: 18px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.delivery-address-editor {
+  display: grid;
+  gap: 14px;
+}
+
+.delivery-address-editor__closed,
+.delivery-address-editor__heading,
+.delivery-address-editor__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.delivery-address-editor__closed span,
+.delivery-address-editor__heading span,
+.delivery-address-readonly {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.delivery-address-editor__heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.delivery-address-editor__fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.delivery-address-editor__fields label {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.delivery-address-editor__fields input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  background: var(--color-surface-raised);
+}
+
+.delivery-address-editor__fields input:focus-visible {
+  border-color: var(--color-brand);
+  outline: 2px solid rgba(255, 179, 0, 0.18);
+}
+
+.delivery-address-editor__street,
+.delivery-address-editor__reference {
+  grid-column: span 2;
+}
+
+.delivery-address-editor__footer {
+  justify-content: flex-end;
+}
+
 .delivery-external-links a {
   color: var(--color-brand);
   font-size: 13px;
@@ -607,8 +706,20 @@
   .delivery-details,
   .delivery-settings-form__origin,
   .delivery-pricing-segmented,
-  .delivery-band {
+  .delivery-band,
+  .delivery-address-editor__fields {
     grid-template-columns: 1fr;
+  }
+
+  .delivery-address-editor__street,
+  .delivery-address-editor__reference {
+    grid-column: auto;
+  }
+
+  .delivery-address-editor__closed,
+  .delivery-address-editor__heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .delivery-band__remove {

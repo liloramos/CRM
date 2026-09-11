@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\CustomerAddress;
+use App\Services\Customers\CustomerDeletionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -125,6 +126,27 @@ class CustomerOperationsController extends Controller
         return response()->json([
             'data' => $this->summary($customer),
         ]);
+    }
+
+    public function destroy(
+        Request $request,
+        Customer $customer,
+        CustomerDeletionService $deletion,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        abort_unless((int) $customer->company_id === (int) $company->id, 404);
+
+        $result = $deletion->delete($company, $customer, $request->user());
+
+        if (! $result['deleted']) {
+            return response()->json([
+                'message' => 'Este cliente possui historico operacional ou financeiro e nao pode ser excluido permanentemente.',
+                'code' => 'customer_has_protected_history',
+                'data' => $result['eligibility'],
+            ], 422);
+        }
+
+        return response()->json(['data' => ['deleted' => true, 'customer_id' => (string) $customer->id]]);
     }
 
     /**

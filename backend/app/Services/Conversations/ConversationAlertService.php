@@ -67,7 +67,7 @@ class ConversationAlertService
                 ? Str::uuid()->toString()
                 : data_get($existing?->metadata, 'notification_key');
 
-            return ConversationAlert::query()->updateOrCreate(
+            $alert = ConversationAlert::query()->updateOrCreate(
                 [
                     'company_id' => $company->id,
                     'deduplication_key' => $key,
@@ -95,6 +95,12 @@ class ConversationAlertService
                     ],
                 ],
             )->refresh();
+
+            if ($conversation instanceof Conversation && in_array($type, ConversationAlert::HUMAN_HANDOFF_TYPES, true)) {
+                $this->synchronizeHumanReviewRequired($conversation);
+            }
+
+            return $alert;
         });
     }
 
@@ -219,6 +225,29 @@ class ConversationAlertService
             'resolved_by_user_id' => $user?->id,
         ])->save();
 
+        if (in_array($alert->type, ConversationAlert::HUMAN_HANDOFF_TYPES, true)) {
+            $conversation = $alert->conversation()->first();
+            if ($conversation instanceof Conversation) {
+                $this->synchronizeHumanReviewRequired($conversation);
+            }
+        }
+
         return $alert->refresh();
+    }
+
+    public function synchronizeHumanReviewRequired(Conversation $conversation): bool
+    {
+        $requiresHumanReview = ConversationAlert::query()
+            ->where('company_id', $conversation->company_id)
+            ->where('conversation_id', $conversation->id)
+            ->whereIn('type', ConversationAlert::HUMAN_HANDOFF_TYPES)
+            ->whereIn('status', [ConversationAlert::STATUS_OPEN, ConversationAlert::STATUS_ACKNOWLEDGED])
+            ->exists();
+
+        if ((bool) $conversation->human_review_required !== $requiresHumanReview) {
+            $conversation->forceFill(['human_review_required' => $requiresHumanReview])->save();
+        }
+
+        return $requiresHumanReview;
     }
 }

@@ -61,4 +61,24 @@ class RolePermissionTest extends TestCase
             $this->assertTrue($user->hasPermissionTo($permission));
         }
     }
+
+    public function test_individual_overrides_extend_and_reduce_role_permissions_without_changing_the_role(): void
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $user = User::factory()->create();
+        $user->assignRole(Role::ATENDENTE);
+        $usersManage = Permission::query()->where('name', 'users.manage')->firstOrFail();
+        $ordersManage = Permission::query()->where('name', 'orders.manage')->firstOrFail();
+
+        $user->permissionOverrides()->sync([
+            $usersManage->id => ['granted' => true],
+            $ordersManage->id => ['granted' => false],
+        ]);
+
+        $this->assertTrue($user->hasRole(Role::ATENDENTE));
+        $this->assertTrue($user->hasPermissionTo('users.manage'));
+        $this->assertFalse($user->hasPermissionTo('orders.manage'));
+        $this->assertContains('users.manage', $user->permissionNames());
+        $this->assertNotContains('orders.manage', $user->permissionNames());
+    }
 }

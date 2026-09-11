@@ -472,7 +472,32 @@ class PaymentWorkflowTest extends TestCase
         $voided = $payments->voidLatestConfirmedPayment($paidThenCancelled, $user, 'Estorno humano pendente de tratamento.');
         $this->assertSame(Payment::STATUS_CANCELLED, $voided->status);
         $this->assertSame(Order::STATUS_CANCELLED, $paidThenCancelled->refresh()->status);
+        $this->assertSame(0, $paidThenCancelled->refresh()->amount_paid_cents);
+        $this->assertSame(1300, $paidThenCancelled->refresh()->amount_due_cents);
         $this->assertDatabaseHas('payments', ['id' => $payment->id, 'voided_at' => $voided->voided_at]);
+    }
+
+    public function test_delivery_fee_is_part_of_one_order_payment_and_never_creates_a_second_payment(): void
+    {
+        [$company, $customer, $order] = $this->createOrderWithProduct('n8-casa');
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $order->forceFill([
+            'subtotal_cents' => 800,
+            'delivery_fee_cents' => 801,
+            'total_cents' => 1601,
+            'amount_due_cents' => 1601,
+        ])->save();
+
+        $payment = app(PaymentWorkflowService::class)->confirmOrderPayment($order, $user, [
+            'method' => Payment::METHOD_PIX,
+        ]);
+
+        $this->assertSame(1601, $payment->amount_cents);
+        $this->assertSame(1601, $order->refresh()->amount_paid_cents);
+        $this->assertSame(0, $order->refresh()->amount_due_cents);
+        $this->assertSame(1, $order->payments()->count());
+        $this->assertSame(801, $order->delivery_fee_cents);
+        $this->assertSame(1601, $order->total_cents);
     }
 
     /**

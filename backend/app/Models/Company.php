@@ -38,6 +38,11 @@ class Company extends Model
         return $this->hasMany(OperatingHour::class);
     }
 
+    public function operatingHourExceptions(): HasMany
+    {
+        return $this->hasMany(OperatingHourException::class);
+    }
+
     public function productCategories(): HasMany
     {
         return $this->hasMany(ProductCategory::class);

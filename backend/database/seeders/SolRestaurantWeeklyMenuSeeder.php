@@ -30,6 +30,14 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
 
         foreach ($this->weeklyMenu() as $day => $sections) {
             foreach ($sections as $section => $componentSlugs) {
+                if ($section === WeeklyMenuSection::Meat->value) {
+                    WeeklyMenuComponentItem::query()
+                        ->where('weekly_menu_id', $weeklyMenu->id)
+                        ->where('service_day', $day)
+                        ->where('section', $section)
+                        ->delete();
+                }
+
                 foreach ($componentSlugs as $index => $componentSlug) {
                     WeeklyMenuComponentItem::query()->updateOrCreate(
                         [
@@ -107,9 +115,8 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
                     'porco',
                     'frango-ao-molho',
                     'frango-frito',
-                    'bife-de-figado',
-                    'ovo-frito',
-                    'disquinho',
+                    'file-de-frango-na-chapa',
+                    'churrasco',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -146,9 +153,10 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
                     'almondega',
                     'porco',
                     'frango-ao-molho',
+                    'file-de-frango-na-chapa',
                     'file-de-frango-empanado',
                     'strogonoff-de-frango',
-                    'ovo-frito',
+                    'churrasco',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -188,9 +196,9 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
                     'porco',
                     'frango-ao-molho',
                     'file-de-peixe',
+                    'file-de-frango-na-chapa',
                     'frango-frito',
-                    'ovo-frito',
-                    'bife-de-figado',
+                    'bisteca-de-porco-na-chapa',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -228,11 +236,10 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
                     'almondega',
                     'porco',
                     'frango-ao-molho',
-                    'file-de-frango',
-                    'strogonoff',
-                    'ovo-frito',
-                    'linguica',
-                    'bife-de-figado',
+                    'file-de-frango-na-chapa',
+                    'strogonoff-de-frango',
+                    'linguica-frita',
+                    'bisteca-de-porco-suina',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -272,8 +279,9 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
                     'porco',
                     'frango-ao-molho',
                     'file-de-frango-empanado',
-                    'ovo-frito',
-                    'linguica',
+                    'bisteca-de-porco-na-chapa',
+                    'file-de-frango-na-chapa',
+                    'linguica-frita',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -310,12 +318,9 @@ class SolRestaurantWeeklyMenuSeeder extends Seeder
                 WeeklyMenuSection::Meat->value => [
                     'almondega',
                     'porco',
+                    'file-de-frango-na-chapa',
                     'feijoada',
-                    'file-de-frango',
-                    'ovo-frito',
-                    'linguica',
-                    'bife-de-figado',
-                    'bife',
+                    'linguica-frita',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],

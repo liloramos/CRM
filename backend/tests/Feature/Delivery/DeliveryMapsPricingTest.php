@@ -6,6 +6,7 @@ use App\Contracts\Delivery\DeliveryGeocodingProviderInterface;
 use App\Contracts\Delivery\DeliveryRouteProviderInterface;
 use App\Data\Delivery\DeliveryCoordinates;
 use App\Data\Delivery\DeliveryRoute;
+use App\Data\Delivery\GeocodedDeliveryAddress;
 use App\Data\WhatsApp\IncomingWhatsAppMessage;
 use App\Models\Company;
 use App\Models\Conversation;
@@ -13,9 +14,13 @@ use App\Models\Customer;
 use App\Models\CustomerAddress;
 use App\Models\DeliverySetting;
 use App\Models\Order;
+use App\Models\Role;
+use App\Models\User;
 use App\Services\Delivery\DeliveryPricingService;
 use App\Services\Delivery\DeliveryRoutingService;
 use App\Services\Delivery\WhatsAppDeliveryLocationCapture;
+use Database\Seeders\RoleAndPermissionSeeder;
+use DomainException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -53,6 +58,86 @@ class DeliveryMapsPricingTest extends TestCase
 
         $this->assertSame(500, $service->calculate($setting, 2000)['delivery_fee_cents']);
         $this->assertSame(800, $service->calculate($setting, 2001)['delivery_fee_cents']);
+    }
+
+    public function test_distance_band_settings_accept_an_absent_null_or_legacy_zero_per_km_rate(): void
+    {
+        [$company, $user] = $this->deliverySettingsActor();
+        $basePayload = [
+            'maps_provider' => 'fake',
+            'pricing_mode' => DeliveryPricingService::MODE_DISTANCE_BANDS,
+            'origin' => ['address' => 'Restaurante', 'latitude' => -16.31, 'longitude' => -48.94],
+            'distance_bands' => [['up_to_meters' => 1000, 'fee_cents' => 1230]],
+        ];
+
+        foreach ([
+            $basePayload,
+            [...$basePayload, 'rate_per_km_cents' => null],
+            [...$basePayload, 'rate_per_km_cents' => 0],
+        ] as $payload) {
+            $this->actingAs($user)
+                ->patchJson('/api/app/delivery-settings', $payload)
+                ->assertOk()
+                ->assertJsonPath('data.calculation_mode', DeliveryPricingService::MODE_DISTANCE_BANDS)
+                ->assertJsonPath('data.price_per_km_cents', 0)
+                ->assertJsonPath('data.provider_options.distance_bands.0.up_to_meters', 1000)
+                ->assertJsonPath('data.provider_options.distance_bands.0.fee_cents', 1230);
+        }
+
+        $setting = DeliverySetting::query()->where('company_id', $company->id)->sole();
+        $this->assertSame(1230, app(DeliveryPricingService::class)->calculate($setting, 1000)['delivery_fee_cents']);
+    }
+
+    public function test_per_km_settings_require_a_positive_rate_and_do_not_require_distance_bands(): void
+    {
+        [, $user] = $this->deliverySettingsActor();
+        $basePayload = [
+            'maps_provider' => 'fake',
+            'pricing_mode' => DeliveryPricingService::MODE_PER_KM,
+            'origin' => ['address' => 'Restaurante', 'latitude' => -16.31, 'longitude' => -48.94],
+        ];
+
+        $this->actingAs($user)
+            ->patchJson('/api/app/delivery-settings', [...$basePayload, 'rate_per_km_cents' => 245])
+            ->assertOk()
+            ->assertJsonPath('data.calculation_mode', DeliveryPricingService::MODE_PER_KM)
+            ->assertJsonPath('data.price_per_km_cents', 245)
+            ->assertJsonPath('data.provider_options.distance_bands', []);
+
+        foreach ([$basePayload, [...$basePayload, 'rate_per_km_cents' => 0]] as $payload) {
+            $this->actingAs($user)
+                ->patchJson('/api/app/delivery-settings', $payload)
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('rate_per_km_cents');
+        }
+    }
+
+    public function test_distance_band_settings_require_non_empty_valid_bands(): void
+    {
+        [, $user] = $this->deliverySettingsActor();
+        $basePayload = [
+            'maps_provider' => 'fake',
+            'pricing_mode' => DeliveryPricingService::MODE_DISTANCE_BANDS,
+            'origin' => ['address' => 'Restaurante', 'latitude' => -16.31, 'longitude' => -48.94],
+        ];
+
+        foreach ([$basePayload, [...$basePayload, 'distance_bands' => []]] as $payload) {
+            $this->actingAs($user)
+                ->patchJson('/api/app/delivery-settings', $payload)
+                ->assertUnprocessable()
+                ->assertJsonValidationErrors('distance_bands');
+        }
+
+        $this->actingAs($user)
+            ->patchJson('/api/app/delivery-settings', [
+                ...$basePayload,
+                'distance_bands' => [['up_to_meters' => 0, 'fee_cents' => -1]],
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors([
+                'distance_bands.0.up_to_meters',
+                'distance_bands.0.fee_cents',
+            ]);
     }
 
     public function test_routing_snapshots_the_calculation_and_updates_the_order_total_once(): void
@@ -164,11 +249,166 @@ class DeliveryMapsPricingTest extends TestCase
         $this->assertNotNull($order->refresh()->delivery_address_id);
     }
 
+    public function test_authorized_operator_can_save_structured_address_and_recalculate_route(): void
+    {
+        [$company, $order, $user] = $this->manualAddressFixture();
+        $this->app->instance(DeliveryGeocodingProviderInterface::class, new class implements DeliveryGeocodingProviderInterface
+        {
+            public function name(): string
+            {
+                return 'fake';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+
+            public function geocode(string $address): GeocodedDeliveryAddress
+            {
+                return new GeocodedDeliveryAddress('Rua Nova, 45', new DeliveryCoordinates(-16.32, -48.95), 'fake');
+            }
+        });
+        $this->app->instance(DeliveryRouteProviderInterface::class, new class implements DeliveryRouteProviderInterface
+        {
+            public function name(): string
+            {
+                return 'fake';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+
+            public function calculateRoute(DeliveryCoordinates $origin, DeliveryCoordinates $destination): DeliveryRoute
+            {
+                return new DeliveryRoute(2500, 600, 'fake', 'manual-address-route');
+            }
+        });
+
+        $this->actingAs($user)
+            ->patchJson("/api/app/orders/{$order->id}/delivery/address", $this->manualAddressPayload())
+            ->assertOk()
+            ->assertJsonPath('warning', null)
+            ->assertJsonPath('data.address.street', 'Rua Nova')
+            ->assertJsonPath('data.address.number', '45')
+            ->assertJsonPath('data.distance_meters', 2500)
+            ->assertJsonPath('data.final_fee_cents', 750);
+
+        $this->assertDatabaseHas('customer_addresses', [
+            'company_id' => $company->id,
+            'street' => 'Rua Nova',
+            'number' => '45',
+            'postal_code' => '75000-000',
+            'latitude' => '-16.3200000',
+        ]);
+        $this->assertSame(Order::DELIVERY_STATUS_QUOTED, $order->refresh()->delivery_status);
+    }
+
+    public function test_geocoding_failure_keeps_manual_address_pending_and_permission_is_enforced(): void
+    {
+        [$company, $order, $user] = $this->manualAddressFixture();
+        $unauthorized = User::factory()->create(['company_id' => $company->id]);
+        $this->app->instance(DeliveryGeocodingProviderInterface::class, new class implements DeliveryGeocodingProviderInterface
+        {
+            public function name(): string
+            {
+                return 'fake';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+
+            public function geocode(string $address): never
+            {
+                throw new DomainException('Falha controlada de geocodificação.');
+            }
+        });
+
+        $this->actingAs($unauthorized)
+            ->patchJson("/api/app/orders/{$order->id}/delivery/address", $this->manualAddressPayload())
+            ->assertForbidden();
+
+        $this->actingAs($user)
+            ->patchJson("/api/app/orders/{$order->id}/delivery/address", $this->manualAddressPayload())
+            ->assertOk()
+            ->assertJsonPath('data.address.street', 'Rua Nova')
+            ->assertJsonPath('data.status', Order::DELIVERY_STATUS_ADDRESS_PENDING)
+            ->assertJsonPath('data.quote_id', null)
+            ->assertJsonPath('data.destination', null)
+            ->assertJsonPath('data.final_fee_cents', 0)
+            ->assertJson(fn ($json) => $json->whereType('warning', 'string')->etc());
+
+        $this->assertDatabaseHas('customer_addresses', ['company_id' => $company->id, 'street' => 'Rua Nova', 'number' => '45']);
+        $this->assertSame(Order::DELIVERY_STATUS_ADDRESS_PENDING, $order->refresh()->delivery_status);
+        $this->assertNull($order->delivery_calculated_at);
+    }
+
+    /** @return array{0: Company, 1: Order, 2: User} */
+    private function manualAddressFixture(): array
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $company = $this->company();
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente de entrega']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ATENDENTE);
+        $order = Order::query()->create([
+            'company_id' => $company->id,
+            'payer_customer_id' => $customer->id,
+            'customer_name_snapshot' => $customer->name,
+            'order_date' => now()->toDateString(),
+            'daily_sequence' => 1,
+            'code' => 'ENT-MANUAL-1',
+            'fulfillment_type' => Order::FULFILLMENT_DELIVERY,
+            'subtotal_cents' => 1500,
+            'total_cents' => 1500,
+            'amount_due_cents' => 1500,
+        ]);
+        DeliverySetting::query()->create([
+            'company_id' => $company->id,
+            'is_active' => true,
+            'calculation_mode' => DeliveryPricingService::MODE_PER_KM,
+            'price_per_km_cents' => 300,
+            'provider_options' => ['origin' => ['latitude' => -16.31, 'longitude' => -48.94]],
+        ]);
+
+        return [$company, $order, $user];
+    }
+
+    /** @return array<string, string> */
+    private function manualAddressPayload(): array
+    {
+        return [
+            'postal_code' => '75000-000',
+            'street' => 'Rua Nova',
+            'number' => '45',
+            'complement' => 'Sala 2',
+            'neighborhood' => 'Centro',
+            'city' => 'Anápolis',
+            'state' => 'GO',
+            'reference' => 'Próximo à praça',
+        ];
+    }
+
     private function company(): Company
     {
         return Company::query()->create([
             'name' => 'Restaurante de teste '.uniqid(),
             'slug' => 'restaurante-teste-'.uniqid(),
         ]);
+    }
+
+    /** @return array{0: Company, 1: User} */
+    private function deliverySettingsActor(): array
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $company = $this->company();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        return [$company, $user];
     }
 }

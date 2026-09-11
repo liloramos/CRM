@@ -7,11 +7,16 @@ use App\Models\Conversation;
 use App\Models\Customer;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\PaymentProof;
 use App\Models\Product;
 use App\Models\ProductOption;
 use App\Models\User;
+use App\Services\Conversations\ConversationCopilotAnalysisAvailability;
+use App\Services\Conversations\ConversationOperationalStatusResolver;
 use App\Services\Menu\MenuAvailabilityService;
+use App\Services\Orders\CustomerActiveOrderResolver;
 use App\Services\Orders\OrderCleanupService;
+use App\Services\Orders\OrderSellerEligibilityService;
 use App\Services\Orders\OrderWorkflowService;
 use Illuminate\Support\Collection;
 
@@ -21,6 +26,10 @@ class OperationalCrmPresenter
         private readonly MenuAvailabilityService $menuAvailability,
         private readonly OrderWorkflowService $orders,
         private readonly OrderCleanupService $orderCleanup,
+        private readonly OrderSellerEligibilityService $sellerEligibility,
+        private readonly ConversationOperationalStatusResolver $conversationOperationalStatus,
+        private readonly CustomerActiveOrderResolver $activeOrders,
+        private readonly ConversationCopilotAnalysisAvailability $copilotAnalysisAvailability,
     ) {}
 
     /**
@@ -31,22 +40,24 @@ class OperationalCrmPresenter
         $orders = Order::query()
             ->with([
                 'payerCustomer',
+                'seller',
                 'items.options',
-                'statusHistories' => fn ($query) => $query->latest()->limit(8),
+                'statusHistories' => fn ($query) => $query->with('user')->latest()->limit(8),
                 'latestPrintJob',
-                'payments',
+                'payments.proofs',
             ])
             ->where('company_id', $company->id)
             ->latest()
             ->limit(30)
             ->get();
 
-        $conversations = Conversation::query()
+        $conversations = $this->copilotAnalysisAvailability->withAvailability(Conversation::query()
             ->with([
                 'customer.addresses',
                 'messages' => fn ($query) => $query->latest()->limit(8),
-                'orders' => fn ($query) => $query->latest()->limit(1),
-            ])
+                'alerts' => fn ($query) => $query->currentActionable(),
+                'orders' => fn ($query) => $query->with('payments')->latest()->limit(1),
+            ]))
             ->where('company_id', $company->id)
             ->when(! config('chatbotcrm.whatsapp.demo_data_enabled'), function ($query): void {
                 $query->whereDoesntHave('customer', function ($customers): void {
@@ -94,6 +105,13 @@ class OperationalCrmPresenter
                 'slug' => $company->slug,
             ],
             'orders' => $orders->map(fn (Order $order): array => $this->order($order))->values(),
+            'sellerCandidates' => $this->sellerEligibility
+                ->candidates($company)
+                ->map(fn (User $seller): array => [
+                    'id' => (string) $seller->id,
+                    'name' => $seller->name,
+                ])
+                ->values(),
             'conversations' => $conversations->map(fn (Conversation $conversation): array => $this->conversation($conversation))->values(),
             'customers' => $customers->map(fn (Customer $customer): array => $this->customer($customer))->values(),
             'products' => $products->map(fn (Product $product): array => $this->product($product))->values(),
@@ -131,12 +149,24 @@ class OperationalCrmPresenter
             'conversationId' => $order->conversation_id ? (string) $order->conversation_id : null,
             'resolvedConversationId' => $resolvedConversationId,
             'backendStatus' => $order->status,
+            'seller' => $order->seller ? [
+                'id' => (string) $order->seller->id,
+                'name' => $order->seller->name,
+            ] : null,
+            'sellerName' => $order->seller_name_snapshot,
             'customer' => $this->orderCustomer($order),
             'status' => $this->mapOrderStatus((string) $order->status),
             'paymentStatus' => $this->mapPaymentStatus($order),
             'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'fulfillmentType' => $this->mapFulfillmentType((string) ($order->fulfillment_type ?: Order::FULFILLMENT_PICKUP)),
             'printStatus' => $this->mapPrintStatus((string) $order->print_status),
+            'latestPrintJobId' => $order->latestPrintJob?->id ? (string) $order->latestPrintJob->id : null,
+            'latestPrintJobStatus' => $order->latestPrintJob?->status,
+            'printConfirmationPending' => $order->latestPrintJob?->status === Order::PRINT_STATUS_PRINTING,
+            'hasConfirmedPrint' => $order->printed_at !== null || in_array($order->print_status, [
+                Order::PRINT_STATUS_PRINTED,
+                Order::PRINT_STATUS_MANUAL_CONFIRMED,
+            ], true),
             'channel' => $this->mapChannel((string) $order->origin_channel),
             'createdLabel' => $order->created_at?->format('d/m H:i') ?? 'Agora',
             'availableTransitions' => collect($this->orders->validTransitions($order))
@@ -162,8 +192,11 @@ class OperationalCrmPresenter
             'history' => $order->statusHistories
                 ->map(fn ($history): array => [
                     'id' => (string) $history->id,
-                    'title' => $this->statusLabel((string) $history->to_status),
+                    'title' => $history->reason === 'order_seller_changed'
+                        ? 'Responsável alterado'
+                        : $this->statusLabel((string) $history->to_status),
                     'description' => $history->notes ?: $history->reason ?: 'Atualizacao operacional registrada.',
+                    'actorName' => $history->user?->name,
                     'timeLabel' => $history->created_at?->format('d/m H:i') ?? '',
                 ])
                 ->values(),
@@ -201,6 +234,8 @@ class OperationalCrmPresenter
             'id' => (string) $item->id,
             'name' => $item->product_name,
             'quantity' => (int) $item->quantity,
+            'weightGrams' => $item->weight_grams !== null ? (int) $item->weight_grams : null,
+            'pricePerKgCents' => $item->price_per_kg_cents !== null ? (int) $item->price_per_kg_cents : null,
             'unitPrice' => $this->cents((int) $item->unit_price_cents),
             'totalPrice' => $this->cents((int) $item->total_price_cents),
             'notes' => $item->item_notes ?: 'Sem observação por item.',
@@ -280,16 +315,21 @@ class OperationalCrmPresenter
                 'timeLabel' => $message->created_at?->format('H:i') ?? '',
             ])
             ->values();
+        $activeOrder = $this->activeOrders->forConversation($conversation);
+        $operationalStatus = $this->conversationOperationalStatus->resolve($conversation, $activeOrder);
 
         return [
             'id' => (string) $conversation->id,
             'customer' => $this->customer($conversation->customer),
-            'mode' => $this->mapAutomationMode((string) $conversation->automation_mode, (bool) $conversation->human_review_required),
+            'mode' => $this->mapAutomationMode((string) $conversation->automation_mode),
             'unread' => (int) ($conversation->unread_count ?? 0),
-            'statusLabel' => $conversation->automation_status ?: $conversation->status,
+            'statusLabel' => $operationalStatus['label'],
+            'operationalStatus' => $operationalStatus,
+            'actionableAlertCount' => $conversation->alerts->count(),
+            'hasCopilotAnalysis' => $this->copilotAnalysisAvailability->available($conversation),
             'lastMessage' => $messages->last()['body'] ?? 'Sem mensagens recentes.',
             'messages' => $messages,
-            'linkedOrderId' => $conversation->orders->first()?->id ? (string) $conversation->orders->first()->id : null,
+            'linkedOrderId' => $activeOrder?->id ? (string) $activeOrder->id : null,
         ];
     }
 
@@ -395,6 +435,16 @@ class OperationalCrmPresenter
         $latestPayment = $order->payments
             ->sortByDesc('id')
             ->first();
+        $reviewPayment = $order->payments
+            ->sortByDesc('id')
+            ->first(fn (Payment $payment): bool => in_array($payment->status, [
+                Payment::STATUS_AWAITING_PROOF,
+                Payment::STATUS_PROOF_RECEIVED,
+                Payment::STATUS_PENDING,
+            ], true));
+        $latestProof = ($reviewPayment?->proofs ?? $latestPayment?->proofs ?? collect())
+            ->sortByDesc('id')
+            ->first();
         $cancelledWithoutConfirmedPayment = $this->isCancelledWithoutConfirmedPayment($order);
         $hasConfirmedPayment = $order->payments->contains(
             fn (Payment $payment): bool => $payment->status === Payment::STATUS_CONFIRMED,
@@ -406,10 +456,13 @@ class OperationalCrmPresenter
             'id' => (string) $order->id,
             'orderId' => (string) $order->id,
             'paymentId' => $latestPayment?->id ? (string) $latestPayment->id : null,
+            'conversationId' => $order->conversation_id ? (string) $order->conversation_id : null,
             'label' => $order->origin_channel === Order::CHANNEL_COUNTER
                 ? 'Venda de balcão '.$order->code
                 : 'Pedido '.$order->code,
             'orderCode' => $order->code,
+            'customerName' => $this->orderCustomerName($order),
+            'customerPhone' => $this->orderCustomerPhone($order),
             'status' => $cancelledWithoutConfirmedPayment
                 ? 'cancelado'
                 : ($latestPayment?->voided_at
@@ -426,6 +479,30 @@ class OperationalCrmPresenter
                 : $this->paymentMethodLabel((string) ($order->payment_method ?: 'a_confirmar')),
             'paymentMethod' => $this->mapPaymentMethod((string) ($order->payment_method ?: 'a_confirmar')),
             'createdLabel' => $order->created_at?->format('d/m H:i') ?? '',
+            'createdAt' => $order->created_at?->toIso8601String(),
+            'canConfirmPayment' => ! $cancelledWithoutConfirmedPayment && (int) $order->amount_due_cents > 0,
+            'canReviewProof' => $reviewPayment instanceof Payment
+                && $latestProof?->status === PaymentProof::STATUS_RECEIVED
+                && $order->conversation_id !== null,
+            'items' => $order->items
+                ->sortBy('sort_order')
+                ->map(fn ($item): array => [
+                    'id' => (string) $item->id,
+                    'name' => (string) $item->product_name,
+                    'quantity' => (int) $item->quantity,
+                    'totalPrice' => $this->cents((int) $item->total_price_cents),
+                ])
+                ->values()
+                ->all(),
+            'proof' => $latestProof ? [
+                'id' => (string) $latestProof->id,
+                'status' => (string) $latestProof->status,
+                'amount' => $latestProof->amount_cents !== null ? $this->cents((int) $latestProof->amount_cents) : null,
+                'receivedAt' => $latestProof->received_at?->toIso8601String(),
+                'fileName' => $latestProof->original_filename,
+                'mimeType' => $latestProof->mime_type,
+                'mediaUrl' => $this->paymentProofMediaUrl($latestProof),
+            ] : null,
             'description' => $cancelledWithoutConfirmedPayment
                 ? ($order->origin_channel === Order::CHANNEL_COUNTER
                     ? 'Venda de balcão cancelada sem pagamento confirmado.'
@@ -440,6 +517,13 @@ class OperationalCrmPresenter
                         : 'Pagamento confirmado por atendente.')
                     : 'Aguardando conferencia humana.'))),
         ];
+    }
+
+    private function paymentProofMediaUrl(PaymentProof $proof): ?string
+    {
+        $mediaId = data_get($proof->metadata, 'whatsapp_media_file_id');
+
+        return $mediaId ? route('api.app.conversations.media.show', ['media' => $mediaId], false) : null;
     }
 
     /**
@@ -667,12 +751,8 @@ class OperationalCrmPresenter
         };
     }
 
-    private function mapAutomationMode(string $mode, bool $humanReviewRequired): string
+    private function mapAutomationMode(string $mode): string
     {
-        if ($humanReviewRequired) {
-            return 'atencao';
-        }
-
         return $mode === Conversation::AUTOMATION_MODE_MANUAL ? 'manual' : 'ia';
     }
 

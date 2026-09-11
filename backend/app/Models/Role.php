@@ -7,6 +7,12 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Role extends Model
 {
+    public const AUTHORITY_ATTENDANT = 100;
+
+    public const AUTHORITY_MANAGER = 200;
+
+    public const AUTHORITY_DEV = 300;
+
     public const SUPER_ADMIN = 'super_admin';
 
     public const ADMIN_GERENTE = 'admin_gerente';
@@ -17,9 +23,18 @@ class Role extends Model
      * @var array<string, string>
      */
     public const DEFAULT_ROLES = [
-        self::SUPER_ADMIN => 'Super admin',
-        self::ADMIN_GERENTE => 'Admin/Gerente',
+        self::SUPER_ADMIN => 'DEV',
+        self::ADMIN_GERENTE => 'Gerência',
         self::ATENDENTE => 'Atendente',
+    ];
+
+    /**
+     * @var array<string, int>
+     */
+    public const AUTHORITY_LEVELS = [
+        self::SUPER_ADMIN => self::AUTHORITY_DEV,
+        self::ADMIN_GERENTE => self::AUTHORITY_MANAGER,
+        self::ATENDENTE => self::AUTHORITY_ATTENDANT,
     ];
 
     /**
@@ -38,8 +53,13 @@ class Role extends Model
             'menu.manage',
             'orders.view',
             'orders.manage',
+            'customers.view',
+            'customers.manage',
             'payments.view',
             'payments.manage',
+            'finance.view',
+            'finance.manage',
+            'reports.view',
             'delivery.view',
             'delivery.manage',
             'printing.view',
@@ -60,8 +80,13 @@ class Role extends Model
             'menu.manage',
             'orders.view',
             'orders.manage',
+            'customers.view',
+            'customers.manage',
             'payments.view',
             'payments.manage',
+            'finance.view',
+            'finance.manage',
+            'reports.view',
             'delivery.view',
             'delivery.manage',
             'printing.view',
@@ -77,6 +102,7 @@ class Role extends Model
             'menu.manage',
             'orders.view',
             'orders.manage',
+            'customers.view',
             'payments.view',
             'payments.manage',
             'delivery.view',
@@ -118,5 +144,15 @@ class Role extends Model
     public static function defaultPermissions(): array
     {
         return self::DEFAULT_ROLE_PERMISSIONS;
+    }
+
+    public static function authorityLevel(string $role): int
+    {
+        return self::AUTHORITY_LEVELS[$role] ?? 0;
+    }
+
+    public static function isProtected(string $role): bool
+    {
+        return $role === self::SUPER_ADMIN;
     }
 }

@@ -2,7 +2,10 @@
 
 use App\Http\Controllers\Ai\AiAutomationStatusController;
 use App\Http\Controllers\Ai\ConversationAutomationController;
+use App\Http\Controllers\Api\AccountSecurityController;
+use App\Http\Controllers\Api\AccountSettingsController;
 use App\Http\Controllers\Api\AdminMenuReadController;
+use App\Http\Controllers\Api\AiAutomationSettingsController;
 use App\Http\Controllers\Api\AppSessionController;
 use App\Http\Controllers\Api\ConversationConfigurationController;
 use App\Http\Controllers\Api\ConversationOperationsController;
@@ -11,16 +14,27 @@ use App\Http\Controllers\Api\CustomerOperationsController;
 use App\Http\Controllers\Api\DailyMenuComponentAdjustmentController;
 use App\Http\Controllers\Api\DailyStructuredMenuController;
 use App\Http\Controllers\Api\DeliveryOperationsController;
+use App\Http\Controllers\Api\FinancialOverviewController;
+use App\Http\Controllers\Api\GeneralSettingsController;
+use App\Http\Controllers\Api\MenuCategoryAdminController;
 use App\Http\Controllers\Api\MenuComponentAdminController;
 use App\Http\Controllers\Api\MenuComponentAvailabilityController;
 use App\Http\Controllers\Api\MenuOptionAvailabilityController;
 use App\Http\Controllers\Api\MenuProductAdminController;
+use App\Http\Controllers\Api\OperationalReportController;
 use App\Http\Controllers\Api\OperationalSnapshotController;
 use App\Http\Controllers\Api\OrderOperationsController;
+use App\Http\Controllers\Api\PaymentSettingsController;
+use App\Http\Controllers\Api\PrintSettingsController;
 use App\Http\Controllers\Api\ProductComponentAvailabilityController;
 use App\Http\Controllers\Api\ProductConfigurationController;
 use App\Http\Controllers\Api\StructuredMenuCatalogController;
+use App\Http\Controllers\Api\SupportTicketController;
+use App\Http\Controllers\Api\SystemAssistantController;
+use App\Http\Controllers\Api\UserAvatarController;
+use App\Http\Controllers\Api\UserManagementController;
 use App\Http\Controllers\Api\WeeklyMenuComponentAdminController;
+use App\Http\Controllers\Api\WhatsAppIntegrationController;
 use App\Http\Controllers\Printing\OrderTicketPreviewController;
 use App\Http\Controllers\Printing\PrintJobController;
 use App\Http\Controllers\WhatsApp\WhatsAppStatusController;
@@ -33,9 +47,39 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
     Route::get('session', [AppSessionController::class, 'show'])->name('session.show');
     Route::post('login', [AppSessionController::class, 'login'])->name('session.login');
 
-    Route::middleware('auth')->group(function () {
+    Route::middleware(['auth', 'active'])->group(function () {
+        Route::get('settings/users', [UserManagementController::class, 'index'])->middleware('permission:users.manage');
+        Route::post('settings/users', [UserManagementController::class, 'store'])->middleware('permission:users.manage');
+        Route::patch('settings/users/{user}', [UserManagementController::class, 'update'])->middleware('permission:users.manage');
+        Route::post('settings/users/{user}/avatar', [UserManagementController::class, 'updateAvatar'])->middleware('permission:users.manage');
+        Route::delete('settings/users/{user}/avatar', [UserManagementController::class, 'removeAvatar'])->middleware('permission:users.manage');
+        Route::get('settings/general', [GeneralSettingsController::class, 'show'])->middleware('permission:settings.view')->name('settings.general.show');
+        Route::patch('settings/general', [GeneralSettingsController::class, 'update'])->middleware('permission:settings.manage')->name('settings.general.update');
+        Route::get('settings/payments', [PaymentSettingsController::class, 'show'])->middleware('permission:settings.view')->name('settings.payments.show');
+        Route::patch('settings/payments', [PaymentSettingsController::class, 'update'])->middleware('permission:settings.manage')->name('settings.payments.update');
+        Route::get('integrations/whatsapp', [WhatsAppIntegrationController::class, 'show'])->middleware('permission:settings.view')->name('integrations.whatsapp.show');
+        Route::post('integrations/whatsapp/check', [WhatsAppIntegrationController::class, 'check'])->middleware('permission:settings.manage')->name('integrations.whatsapp.check');
+        Route::get('automation/ai', [AiAutomationSettingsController::class, 'show'])->middleware('permission:settings.view')->name('automation.ai.show');
+        Route::patch('automation/ai', [AiAutomationSettingsController::class, 'update'])->middleware('permission:settings.manage')->name('automation.ai.update');
+        Route::patch('automation/ai/guidance', [AiAutomationSettingsController::class, 'updateGuidance'])->middleware('permission:settings.manage')->name('automation.ai.guidance.update');
+        Route::post('automation/ai/sandbox', [AiAutomationSettingsController::class, 'sandbox'])->middleware('permission:settings.view')->name('automation.ai.sandbox');
+        Route::get('settings/printing', [PrintSettingsController::class, 'show'])->middleware('permission:printing.view')->name('settings.printing.show');
+        Route::patch('settings/printing', [PrintSettingsController::class, 'update'])->middleware('permission:printing.manage')->name('settings.printing.update');
         Route::post('logout', [AppSessionController::class, 'logout'])->name('session.logout');
+        Route::get('account/security', [AccountSecurityController::class, 'show'])->name('account.security.show');
+        Route::get('account/profile', [AccountSettingsController::class, 'profile'])->name('account.profile');
+        Route::patch('account/profile', [AccountSettingsController::class, 'updateProfile'])->name('account.profile.update');
+        Route::post('account/profile/avatar', [AccountSettingsController::class, 'updateAvatar'])->name('account.profile.avatar.update');
+        Route::delete('account/profile/avatar', [AccountSettingsController::class, 'removeAvatar'])->name('account.profile.avatar.remove');
+        Route::get('users/{user}/avatar', UserAvatarController::class)->name('users.avatar');
+        Route::get('account/company', [AccountSettingsController::class, 'company'])->name('account.company');
+        Route::patch('account/company', [AccountSettingsController::class, 'updateCompany'])->name('account.company.update');
+        Route::post('account/company/logo', [AccountSettingsController::class, 'updateCompanyLogo'])->name('account.company.logo.update');
+        Route::get('account/company/logo', [AccountSettingsController::class, 'companyLogo'])->name('account.company.logo');
         Route::get('operational-snapshot', OperationalSnapshotController::class)->name('operational-snapshot');
+        Route::post('assistant', SystemAssistantController::class)->name('assistant');
+        Route::get('support/tickets', [SupportTicketController::class, 'index'])->name('support.tickets.index');
+        Route::post('support/tickets', [SupportTicketController::class, 'store'])->name('support.tickets.store');
         Route::get('menu/catalog', StructuredMenuCatalogController::class)->name('menu.catalog');
         Route::get('menu/day', DailyStructuredMenuController::class)->name('menu.day');
         Route::get('menu/products/{product}/configuration', ProductConfigurationController::class)
@@ -55,6 +99,11 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('menu/products', [MenuProductAdminController::class, 'store'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.store');
+        Route::delete('menu/products/{product}', [MenuProductAdminController::class, 'destroy'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.products.destroy');
+        Route::get('menu/products/{product}/image', [MenuProductAdminController::class, 'image'])
+            ->name('menu.products.image.show');
         Route::post('menu/products/{product}/image', [MenuProductAdminController::class, 'replaceImage'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.image.replace');
@@ -64,6 +113,15 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::patch('menu/products/{product}', [MenuProductAdminController::class, 'update'])
             ->middleware('permission:menu.manage')
             ->name('menu.products.update');
+        Route::post('menu/categories', [MenuCategoryAdminController::class, 'store'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.categories.store');
+        Route::patch('menu/categories/{category}', [MenuCategoryAdminController::class, 'update'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.categories.update');
+        Route::delete('menu/categories/{category}', [MenuCategoryAdminController::class, 'destroy'])
+            ->middleware('permission:menu.manage')
+            ->name('menu.categories.destroy');
         Route::patch('menu/product-component-options/{option}', [MenuProductAdminController::class, 'updateComponentOption'])
             ->middleware('permission:menu.manage')
             ->name('menu.product-component-options.update');
@@ -106,6 +164,15 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('customers', [CustomerOperationsController::class, 'index'])->name('customers.index');
         Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
         Route::patch('customers/{customer}', [CustomerOperationsController::class, 'update'])->name('customers.update');
+        Route::delete('customers/{customer}', [CustomerOperationsController::class, 'destroy'])
+            ->middleware(['permission:customers.manage', 'role:super_admin,admin_gerente'])
+            ->name('customers.destroy');
+        Route::get('financial-overview', FinancialOverviewController::class)
+            ->middleware(['permission:finance.view', 'role:super_admin,admin_gerente'])
+            ->name('financial-overview');
+        Route::get('reports/operational', OperationalReportController::class)
+            ->middleware(['permission:reports.view', 'role:super_admin,admin_gerente'])
+            ->name('reports.operational');
         Route::get('deliveries', [DeliveryOperationsController::class, 'index'])
             ->middleware('permission:orders.view')
             ->name('deliveries.index');
@@ -122,9 +189,21 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('counter-sales/products', [CounterSaleController::class, 'products'])
             ->middleware('permission:orders.view')
             ->name('counter-sales.products');
+        Route::get('counter-sales/drafts', [CounterSaleController::class, 'drafts'])
+            ->middleware('permission:orders.view')
+            ->name('counter-sales.drafts.index');
         Route::post('counter-sales', [CounterSaleController::class, 'store'])
             ->middleware('permission:orders.manage')
             ->name('counter-sales.store');
+        Route::post('counter-sales/drafts', [CounterSaleController::class, 'storeDraft'])
+            ->middleware('permission:orders.manage')
+            ->name('counter-sales.drafts.store');
+        Route::post('counter-sales/{order}/finalize', [CounterSaleController::class, 'finalizeDraft'])
+            ->middleware('permission:orders.manage')
+            ->name('counter-sales.drafts.finalize');
+        Route::patch('counter-sales/{order}/customer', [CounterSaleController::class, 'updateDraftCustomer'])
+            ->middleware('permission:orders.manage')
+            ->name('counter-sales.drafts.customer.update');
         Route::post('counter-sales/{order}/cancel', [CounterSaleController::class, 'cancel'])
             ->middleware('permission:orders.manage')
             ->name('counter-sales.cancel');
@@ -149,21 +228,40 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::post('orders/{order}/cancel', [OrderOperationsController::class, 'cancel'])->name('orders.cancel');
         Route::post('orders/{order}/payments/confirm', [OrderOperationsController::class, 'confirmPayment'])->name('orders.payments.confirm');
         Route::post('orders/{order}/payments/void', [OrderOperationsController::class, 'voidPayment'])
-            ->middleware('permission:orders.manage')
+            ->middleware(['permission:finance.manage', 'role:super_admin,admin_gerente'])
             ->name('orders.payments.void');
-        Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])->name('orders.status.update');
+        Route::post('orders/{order}/payments/{payment}/void', [OrderOperationsController::class, 'voidSpecificPayment'])
+            ->middleware(['permission:finance.manage', 'role:super_admin,admin_gerente'])
+            ->name('orders.payments.void-specific');
+        Route::patch('orders/{order}/status', [OrderOperationsController::class, 'updateStatus'])
+            ->middleware('permission:orders.manage')
+            ->name('orders.status.update');
+        Route::patch('orders/{order}/seller', [OrderOperationsController::class, 'updateSeller'])
+            ->middleware('permission:orders.manage')
+            ->name('orders.seller.update');
         Route::post('orders/{order}/fulfillment/{action}', [OrderOperationsController::class, 'advanceFulfillment'])
             ->whereIn('action', ['ready', 'start-delivery', 'delivered', 'picked-up'])
+            ->middleware('permission:orders.manage')
             ->name('orders.fulfillment.advance');
         Route::post('orders/{order}/delivery/coordinates', [DeliveryOperationsController::class, 'setCoordinates'])
             ->middleware('permission:orders.manage')->name('orders.delivery.coordinates');
         Route::post('orders/{order}/delivery/geocode', [DeliveryOperationsController::class, 'geocodeAddress'])
             ->middleware('permission:orders.manage')->name('orders.delivery.geocode');
+        Route::patch('orders/{order}/delivery/address', [DeliveryOperationsController::class, 'updateAddress'])
+            ->middleware('permission:orders.manage')->name('orders.delivery.address');
         Route::post('orders/{order}/delivery/recalculate', [DeliveryOperationsController::class, 'recalculate'])
             ->middleware('permission:orders.manage')->name('orders.delivery.recalculate');
         Route::post('orders/{order}/delivery/fee-override', [DeliveryOperationsController::class, 'overrideFee'])
             ->middleware('permission:orders.manage')->name('orders.delivery.fee-override');
-        Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])->name('orders.ticket-preview');
+        Route::post('orders/{order}/ticket-preview', [OrderOperationsController::class, 'previewTicket'])
+            ->middleware('permission:printing.view')
+            ->name('orders.ticket-preview');
+        Route::post('orders/{order}/print/start', [OrderOperationsController::class, 'startTicketPrint'])
+            ->middleware('permission:printing.manage')
+            ->name('orders.print.start');
+        Route::post('orders/{order}/print/confirm', [OrderOperationsController::class, 'confirmTicketPrint'])
+            ->middleware('permission:printing.manage')
+            ->name('orders.print.confirm');
         Route::get('conversation-quick-replies', [ConversationConfigurationController::class, 'quickReplies'])
             ->middleware('permission:whatsapp.view')
             ->name('conversation-quick-replies.index');
@@ -243,7 +341,7 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
     });
 });
 
-Route::middleware(['auth', 'verified'])->group(function () {
+Route::middleware(['auth', 'active', 'verified'])->group(function () {
     Route::inertia('dashboard', 'dashboard')->name('dashboard');
 
     Route::get('settings/whatsapp/status', [WhatsAppStatusController::class, 'show'])

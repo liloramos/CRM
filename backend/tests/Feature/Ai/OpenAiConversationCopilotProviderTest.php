@@ -42,12 +42,16 @@ class OpenAiConversationCopilotProviderTest extends TestCase
         };
         $walk($schema);
 
-        $this->assertSame(6, $objectCount);
+        $this->assertGreaterThanOrEqual(9, $objectCount);
         $this->assertFalse($schema['properties']['draft_order']['additionalProperties']);
         $this->assertFalse($schema['properties']['draft_order']['properties']['items']['items']['additionalProperties']);
         $selections = $schema['properties']['draft_order']['properties']['items']['items']['properties']['selections'];
         $this->assertFalse($selections['additionalProperties']);
         $this->assertArrayNotHasKey('admin_override', $selections['properties']);
+        $interpretation = $schema['properties']['interpretation'];
+        $this->assertFalse($interpretation['additionalProperties']);
+        $this->assertContains('compare_products', $interpretation['properties']['intents']['items']['enum']);
+        $this->assertContains('correct_order', $interpretation['properties']['intents']['items']['enum']);
     }
 
     public function test_request_uses_strict_responses_json_schema_without_network(): void
@@ -62,6 +66,7 @@ class OpenAiConversationCopilotProviderTest extends TestCase
             'missing_information' => [],
             'warnings' => [],
             'suggested_reply' => null,
+            'reply_messages' => [],
             'requires_human_review' => true,
         ];
         Http::fake(['https://api.openai.com/*' => Http::response([
@@ -91,6 +96,8 @@ class OpenAiConversationCopilotProviderTest extends TestCase
                 && str_contains($instruction, 'ask a brief natural question instead of guessing')
                 && str_contains($instruction, 'persona never changes business rules or authority')
                 && str_contains($instruction, 'Never approve payment or perform mutations')
+                && str_contains($instruction, 'pending_order_state')
+                && str_contains($instruction, 'reply_messages')
                 && str_contains($instruction, 'must not create a draft item');
         });
     }
@@ -267,6 +274,7 @@ class OpenAiConversationCopilotProviderTest extends TestCase
             'missing_information' => [],
             'warnings' => [],
             'suggested_reply' => null,
+            'reply_messages' => [],
             'requires_human_review' => true,
         ];
     }

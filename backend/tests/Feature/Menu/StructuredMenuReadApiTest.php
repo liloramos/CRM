@@ -171,10 +171,10 @@ class StructuredMenuReadApiTest extends TestCase
         $n9Bife = $this->group($n9, 'variacao_bife')['component_options'][0];
         $this->assertSame('bife', $n9Bife['slug']);
         $this->assertSame(400, $n9Bife['price_delta_cents']);
-        $this->assertSame(2200, $n9Bife['final_price_cents']);
+        $this->assertSame(2300, $n9Bife['final_price_cents']);
         $this->assertTrue($n9Bife['link_active']);
         $this->assertFalse($n9Bife['requires_confirmation']);
-        $this->assertSame(2200, $n9['meat_configuration']['beef_only']['final_price_cents']);
+        $this->assertSame(2300, $n9['meat_configuration']['beef_only']['final_price_cents']);
         $this->assertSame(700, $n9['additions'][0]['price_cents']);
         $this->assertSame(1, $n9['additions'][0]['max_quantity']);
 
@@ -621,9 +621,8 @@ class StructuredMenuReadApiTest extends TestCase
                         'porco',
                         'frango-ao-molho',
                         'frango-frito',
-                        'bife-de-figado',
-                        'ovo-frito',
-                        'disquinho',
+                        'file-de-frango-na-chapa',
+                        'churrasco',
                     ],
                     WeeklyMenuSection::Extra->value => $extras,
                 ],
@@ -663,9 +662,10 @@ class StructuredMenuReadApiTest extends TestCase
                         'almondega',
                         'porco',
                         'frango-ao-molho',
+                        'file-de-frango-na-chapa',
                         'file-de-frango-empanado',
                         'strogonoff-de-frango',
-                        'ovo-frito',
+                        'churrasco',
                     ],
                     WeeklyMenuSection::Extra->value => $extras,
                 ],
@@ -708,9 +708,9 @@ class StructuredMenuReadApiTest extends TestCase
                         'porco',
                         'frango-ao-molho',
                         'file-de-peixe',
+                        'file-de-frango-na-chapa',
                         'frango-frito',
-                        'ovo-frito',
-                        'bife-de-figado',
+                        'bisteca-de-porco-na-chapa',
                     ],
                     WeeklyMenuSection::Extra->value => $extras,
                 ],
@@ -751,11 +751,10 @@ class StructuredMenuReadApiTest extends TestCase
                         'almondega',
                         'porco',
                         'frango-ao-molho',
-                        'file-de-frango',
-                        'strogonoff',
-                        'ovo-frito',
-                        'linguica',
-                        'bife-de-figado',
+                        'file-de-frango-na-chapa',
+                        'strogonoff-de-frango',
+                        'linguica-frita',
+                        'bisteca-de-porco-suina',
                     ],
                     WeeklyMenuSection::Extra->value => $extras,
                 ],
@@ -798,8 +797,9 @@ class StructuredMenuReadApiTest extends TestCase
                         'porco',
                         'frango-ao-molho',
                         'file-de-frango-empanado',
-                        'ovo-frito',
-                        'linguica',
+                        'bisteca-de-porco-na-chapa',
+                        'file-de-frango-na-chapa',
+                        'linguica-frita',
                     ],
                     WeeklyMenuSection::Extra->value => $extras,
                 ],
@@ -839,12 +839,9 @@ class StructuredMenuReadApiTest extends TestCase
                     WeeklyMenuSection::Meat->value => [
                         'almondega',
                         'porco',
+                        'file-de-frango-na-chapa',
                         'feijoada',
-                        'file-de-frango',
-                        'ovo-frito',
-                        'linguica',
-                        'bife-de-figado',
-                        'bife',
+                        'linguica-frita',
                     ],
                     WeeklyMenuSection::Extra->value => $extras,
                 ],

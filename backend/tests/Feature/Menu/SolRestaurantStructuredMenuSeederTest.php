@@ -36,13 +36,13 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         $company = $this->solRestaurant();
 
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
-        $this->assertSame(30, Product::query()->where('company_id', $company->id)->count());
-        $this->assertSame(65, DB::table('menu_components')->where('company_id', $company->id)->count());
+        $this->assertSame(33, Product::query()->where('company_id', $company->id)->count());
+        $this->assertSame(70, DB::table('menu_components')->where('company_id', $company->id)->count());
         $this->assertSame(12, DB::table('product_option_groups')->where('company_id', $company->id)->count());
         $this->assertSame(33, DB::table('product_group_components')->count());
         $this->assertSame(5, DB::table('product_group_products')->count());
         $this->assertSame(1, WeeklyMenu::query()->where('company_id', $company->id)->count());
-        $this->assertSame(210, WeeklyMenuComponentItem::query()->where('company_id', $company->id)->count());
+        $this->assertSame(207, WeeklyMenuComponentItem::query()->where('company_id', $company->id)->count());
         $this->assertSame(0, DB::table('product_options')->count());
         $this->assertSame(0, DB::table('daily_menu_overrides')->count());
         $this->assertSame(0, DB::table('daily_menu_option_overrides')->count());
@@ -236,7 +236,7 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         $this->assertNotNull($n9Link);
         $this->assertSame(['bife'], $this->componentSlugs('n9-tradicional', 'variacao_bife'));
         $this->assertSame(400, $n9Link->price_delta_cents);
-        $this->assertSame(2200, $n9Link->final_price_cents);
+        $this->assertSame(2300, $n9Link->final_price_cents);
         $this->assertFalse($n9Link->requires_confirmation);
         $this->assertTrue($n9Link->is_active);
 
@@ -540,6 +540,9 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
             'n8-casa',
             'n8-tradicional',
             'n9-tradicional',
+            'self-service',
+            'comida-por-kg-comum',
+            'comida-por-kg-somente-carne',
             'separadinha',
             'combo-n8-casa-baby',
             'combo-n8-com-latinha',
@@ -611,9 +614,8 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
                     'porco',
                     'frango-ao-molho',
                     'frango-frito',
-                    'bife-de-figado',
-                    'ovo-frito',
-                    'disquinho',
+                    'file-de-frango-na-chapa',
+                    'churrasco',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -650,9 +652,10 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
                     'almondega',
                     'porco',
                     'frango-ao-molho',
+                    'file-de-frango-na-chapa',
                     'file-de-frango-empanado',
                     'strogonoff-de-frango',
-                    'ovo-frito',
+                    'churrasco',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -692,9 +695,9 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
                     'porco',
                     'frango-ao-molho',
                     'file-de-peixe',
+                    'file-de-frango-na-chapa',
                     'frango-frito',
-                    'ovo-frito',
-                    'bife-de-figado',
+                    'bisteca-de-porco-na-chapa',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -732,11 +735,10 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
                     'almondega',
                     'porco',
                     'frango-ao-molho',
-                    'file-de-frango',
-                    'strogonoff',
-                    'ovo-frito',
-                    'linguica',
-                    'bife-de-figado',
+                    'file-de-frango-na-chapa',
+                    'strogonoff-de-frango',
+                    'linguica-frita',
+                    'bisteca-de-porco-suina',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -776,8 +778,9 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
                     'porco',
                     'frango-ao-molho',
                     'file-de-frango-empanado',
-                    'ovo-frito',
-                    'linguica',
+                    'bisteca-de-porco-na-chapa',
+                    'file-de-frango-na-chapa',
+                    'linguica-frita',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],
@@ -814,12 +817,9 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
                 WeeklyMenuSection::Meat->value => [
                     'almondega',
                     'porco',
+                    'file-de-frango-na-chapa',
                     'feijoada',
-                    'file-de-frango',
-                    'ovo-frito',
-                    'linguica',
-                    'bife-de-figado',
-                    'bife',
+                    'linguica-frita',
                 ],
                 WeeklyMenuSection::Extra->value => $extras,
             ],

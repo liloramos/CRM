@@ -3,6 +3,7 @@
 namespace Tests\Feature\Ai;
 
 use App\Contracts\Ai\ConversationCopilotProviderInterface;
+use App\Models\AutomationEvent;
 use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\Customer;
@@ -21,6 +22,90 @@ use Tests\TestCase;
 class ConversationCopilotContextBoundaryTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_automation_events_before_the_operational_boundary_cannot_supply_the_current_goal(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-08 12:00:00');
+        try {
+            $company = $this->companyWithOperationalDayStart('00:00');
+            $conversation = $this->conversationFor($company);
+            $oldAt = CarbonImmutable::parse('2026-09-05 12:00:00', 'America/Sao_Paulo');
+            $old = Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'sender' => 'customer',
+                'direction' => 'inbound',
+                'content' => 'entrega',
+                'type' => 'text',
+                'received_at' => $oldAt,
+            ]);
+            $old->forceFill(['created_at' => $oldAt, 'updated_at' => $oldAt])->save();
+            AutomationEvent::query()->create([
+                'company_id' => $company->id,
+                'conversation_id' => $conversation->id,
+                'message_id' => $old->id,
+                'provider' => 'test',
+                'event_type' => AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION,
+                'status' => AutomationEvent::STATUS_RECORDED,
+                'payload' => [
+                    'assistant_goal' => ['type' => 'choose_option', 'slot' => 'fulfillment', 'allowed_values' => []],
+                    'conversation_references' => [['product_id' => 999, 'name' => 'Antigo']],
+                    'order_context' => ['has_context' => false],
+                ],
+                'response_payload' => ['execution_result' => 'not_executed'],
+                'processed_at' => $oldAt,
+            ]);
+            $trigger = Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'sender' => 'customer',
+                'direction' => 'inbound',
+                'content' => 'oi',
+                'type' => 'text',
+                'received_at' => now(),
+            ]);
+
+            $context = app(ConversationCopilotContextBuilder::class)->forConversation($conversation->fresh(), $trigger);
+
+            $this->assertNull(data_get($context, 'conversation_frame.last_assistant_goal'));
+            $this->assertSame([], data_get($context, 'conversation_frame.active_references'));
+            $this->assertSame($trigger->id, data_get($context, 'trigger_message.id'));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_explicit_trigger_survives_an_older_provider_timestamp_than_an_existing_outbound(): void
+    {
+        CarbonImmutable::setTestNow('2026-09-08 12:00:00');
+        try {
+            $company = $this->companyWithOperationalDayStart('00:00');
+            $conversation = $this->conversationFor($company);
+            Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'sender' => 'assistant',
+                'direction' => 'outbound',
+                'content' => 'resposta já persistida',
+                'type' => 'text',
+                'sent_at' => now(),
+            ]);
+            $trigger = Message::query()->create([
+                'conversation_id' => $conversation->id,
+                'sender' => 'customer',
+                'direction' => 'inbound',
+                'content' => 'repolho com tomate',
+                'type' => 'text',
+                'external_message_id' => 'wamid.late-trigger',
+                'received_at' => now()->subMinute(),
+            ]);
+
+            $context = app(ConversationCopilotContextBuilder::class)->forConversation($conversation->fresh(), $trigger);
+
+            $this->assertSame($trigger->id, data_get($context, 'latest_message.id'));
+            $this->assertSame($trigger->id, data_get($context, 'latest_customer_message_for_turn.id'));
+            $this->assertSame('wamid.late-trigger', data_get($context, 'trigger_message.external_message_id'));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
 
     public function test_cancelled_manual_n8_without_meat_does_not_block_the_next_n8_pork_proposal(): void
     {
@@ -54,7 +139,7 @@ class ConversationCopilotContextBoundaryTest extends TestCase
                 'cancelled_at' => CarbonImmutable::parse('2026-07-06 11:55:00'),
             ])->save();
 
-            $current = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'quero uma N8 de porco', 'type' => 'text', 'received_at' => now()]);
+            $current = Message::query()->create(['conversation_id' => $conversation->id, 'sender' => 'customer', 'direction' => 'inbound', 'content' => 'quero uma N8 Livre de porco', 'type' => 'text', 'received_at' => now()]);
             $current->forceFill(['created_at' => CarbonImmutable::parse('2026-07-06 12:00:00'), 'updated_at' => CarbonImmutable::parse('2026-07-06 12:00:00')])->save();
 
             $provider = new class implements ConversationCopilotProviderInterface
@@ -96,7 +181,7 @@ class ConversationCopilotContextBoundaryTest extends TestCase
             $this->assertTrue($provider->receivedContext['cycle_boundary']['applied']);
             $this->assertSame('closed_customer_order', $provider->receivedContext['cycle_boundary']['source']);
             $this->assertNull($provider->receivedContext['active_order']);
-            $this->assertSame(['quero uma N8 de porco'], array_column($provider->receivedContext['messages'], 'body'));
+            $this->assertSame(['quero uma N8 Livre de porco'], array_column($provider->receivedContext['messages'], 'body'));
             $this->assertSame('n8-tradicional', $item['menu_item_slug']);
             $this->assertSame('traditional', $item['selections']['meat_mode'] ?? 'traditional');
             $this->assertSame(['Porco'], $item['selections']['meats']);
@@ -337,7 +422,7 @@ class ConversationCopilotContextBoundaryTest extends TestCase
             $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
             $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente']);
             $conversation = Conversation::query()->create(['company_id' => $company->id, 'customer_id' => $customer->id, 'channel' => 'whatsapp', 'status' => 'open', 'started_at' => now()]);
-            $this->messageAt($conversation, 'quero uma N8 de porco e uma N5 sem carne', '2026-08-21 12:00:00');
+            $this->messageAt($conversation, 'quero uma N8 Livre de porco e uma N5 sem carne', '2026-08-21 12:00:00');
 
             $provider = new class implements ConversationCopilotProviderInterface
             {
@@ -372,7 +457,8 @@ class ConversationCopilotContextBoundaryTest extends TestCase
             $this->assertSame('none', $items['n5-casa']['selections']['meat_mode']);
             $this->assertNotContains('CARNE', array_column($analysis['missing_information'], 'code'));
             $this->assertNotContains('UNGROUNDED_PRODUCT', array_column($analysis['warnings'], 'code'));
-            $this->assertStringStartsWith('Entendi:', $analysis['suggested_reply']);
+            $this->assertStringContainsString('Confere seu item:', $analysis['suggested_reply']);
+            $this->assertSame('CONFIRM_ITEM', data_get($analysis, 'metadata.order_context.next_objective'));
             $this->assertStringNotContainsString('o cliente deseja', $analysis['suggested_reply']);
             $this->assertSame('READY', $analysis['proposal']['applyability']);
             $this->assertSame('NEW_ORDER', $analysis['proposal']['target']['state']);
@@ -424,7 +510,8 @@ class ConversationCopilotContextBoundaryTest extends TestCase
             $this->assertSame(['Porco'], $items['n8-tradicional']['selections']['meats']);
             $this->assertSame('none', $items['n5-casa']['selections']['meat_mode']);
             $this->assertNotContains('CARNE', array_column($analysis['missing_information'], 'code'));
-            $this->assertStringStartsWith('Entendi:', $analysis['suggested_reply']);
+            $this->assertStringContainsString('Confere seu item:', $analysis['suggested_reply']);
+            $this->assertSame('CONFIRM_ITEM', data_get($analysis, 'metadata.order_context.next_objective'));
             $this->assertStringNotContainsString('o cliente deseja', $analysis['suggested_reply']);
             $this->assertSame('READY', $analysis['proposal']['applyability']);
             $this->assertSame('NEW_ORDER', $analysis['proposal']['target']['state']);
@@ -441,13 +528,13 @@ class ConversationCopilotContextBoundaryTest extends TestCase
         $n5 = ['product' => 'n5', 'quantity' => 1, 'selections' => ['meat_mode' => 'none']];
 
         return [
-            'both products correct' => [[$n8, $n5], 'quero uma N8 de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
-            'n8 casa rejected and recovered' => [[$n8Casa, $n5], 'quero uma N8 de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
-            'only n5 returned' => [[$n5], 'quero uma N8 de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
-            'only n8 returned' => [[$n8], 'quero uma N8 de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
-            'no items returned' => [[], 'quero uma N8 de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
-            'products returned in reverse order' => [[$n5, $n8], 'quero uma N8 de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
-            'inbound n5 before n8' => [[$n8, $n5], 'quero uma N5 sem carne e uma N8 de porco', ['n5-casa', 'n8-tradicional']],
+            'both products correct' => [[$n8, $n5], 'quero uma N8 Livre de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
+            'n8 casa rejected and recovered' => [[$n8Casa, $n5], 'quero uma N8 Livre de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
+            'only n5 returned' => [[$n5], 'quero uma N8 Livre de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
+            'only n8 returned' => [[$n8], 'quero uma N8 Livre de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
+            'no items returned' => [[], 'quero uma N8 Livre de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
+            'products returned in reverse order' => [[$n5, $n8], 'quero uma N8 Livre de porco e uma N5 sem carne', ['n8-tradicional', 'n5-casa']],
+            'inbound n5 before n8' => [[$n8, $n5], 'quero uma N5 sem carne e uma N8 Livre de porco', ['n5-casa', 'n8-tradicional']],
         ];
     }
 

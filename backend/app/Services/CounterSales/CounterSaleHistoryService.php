@@ -16,6 +16,40 @@ class CounterSaleHistoryService
 {
     public function __construct(private readonly StructuredProductConfigurationService $configuration) {}
 
+    /** @return list<array<string, mixed>> */
+    public function openDrafts(Company $company): array
+    {
+        return Order::query()
+            ->with(['payerCustomer', 'seller', 'items.product', 'items.options'])
+            ->where('company_id', $company->id)
+            ->where('origin_channel', Order::CHANNEL_COUNTER)
+            ->where('fulfillment_type', Order::FULFILLMENT_COUNTER)
+            ->where('status', Order::STATUS_DRAFT)
+            ->whereHas('statusHistories', fn (Builder $query): Builder => $query->where('reason', 'counter_sale_draft_opened'))
+            ->latest('created_at')
+            ->get()
+            ->map(fn (Order $order): array => $this->draftSummary($order, $company))
+            ->values()
+            ->all();
+    }
+
+    /** @return array<string, mixed> */
+    public function draft(Company $company, Order $order): array
+    {
+        if (
+            (int) $order->company_id !== (int) $company->id
+            || $order->status !== Order::STATUS_DRAFT
+            || ! $this->isCounterSale($order)
+            || ! $order->statusHistories()->where('reason', 'counter_sale_draft_opened')->exists()
+        ) {
+            throw new DomainException('Esta comanda aberta não pertence ao restaurante atual.');
+        }
+
+        $order->loadMissing(['payerCustomer', 'seller', 'items.product', 'items.options']);
+
+        return $this->draftSummary($order, $company);
+    }
+
     /**
      * @param  array{date_from?: string, date_to?: string, payment_method?: string, status?: string}  $filters
      * @return array<string, mixed>
@@ -60,7 +94,7 @@ class CounterSaleHistoryService
             throw new DomainException('Esta venda de balcão não pertence ao restaurante atual.');
         }
 
-        $order->loadMissing(['items.product', 'payments', 'statusHistories.user']);
+        $order->loadMissing(['payerCustomer', 'seller', 'items.product', 'payments', 'statusHistories.user']);
         $timezone = $this->timezone($company);
 
         return [
@@ -74,6 +108,8 @@ class CounterSaleHistoryService
                     'productName' => $item->product_name,
                     'productImageUrl' => $item->product ? $this->configuration->productImageUrl($item->product) : null,
                     'quantity' => (int) $item->quantity,
+                    'weightGrams' => $item->weight_grams !== null ? (int) $item->weight_grams : null,
+                    'pricePerKgCents' => $item->price_per_kg_cents !== null ? (int) $item->price_per_kg_cents : null,
                     'unitPriceCents' => (int) $item->unit_price_cents,
                     'subtotalCents' => (int) $item->total_price_cents,
                 ])
@@ -83,7 +119,9 @@ class CounterSaleHistoryService
                 ->sortByDesc('created_at')
                 ->map(fn ($history): array => [
                     'id' => (string) $history->id,
-                    'title' => $this->statusLabel((string) $history->to_status),
+                    'title' => $history->reason === 'order_seller_changed'
+                        ? 'Responsável alterado'
+                        : $this->statusLabel((string) $history->to_status),
                     'description' => $history->notes ?: 'Atualização operacional registrada.',
                     'actorName' => $history->user?->name,
                     'timeLabel' => $history->created_at?->setTimezone($timezone)->format('d/m H:i') ?? '',
@@ -97,10 +135,11 @@ class CounterSaleHistoryService
     private function baseQuery(Company $company): Builder
     {
         return Order::query()
-            ->with(['items.product', 'payments', 'statusHistories.user'])
+            ->with(['payerCustomer', 'seller', 'items.product', 'payments', 'statusHistories.user'])
             ->where('company_id', $company->id)
             ->where('origin_channel', Order::CHANNEL_COUNTER)
-            ->where('fulfillment_type', Order::FULFILLMENT_COUNTER);
+            ->where('fulfillment_type', Order::FULFILLMENT_COUNTER)
+            ->whereIn('status', [Order::STATUS_FINISHED, Order::STATUS_CANCELLED]);
     }
 
     /** @param array<string, string> $filters @return array{0: CarbonImmutable, 1: CarbonImmutable} */
@@ -158,6 +197,7 @@ class CounterSaleHistoryService
     {
         $timezone = $this->timezone($company);
         $isCancelled = $order->status === Order::STATUS_CANCELLED;
+        $isDraft = $order->status === Order::STATUS_DRAFT;
 
         return [
             'id' => (string) $order->id,
@@ -168,9 +208,83 @@ class CounterSaleHistoryService
             'totalCents' => (int) $order->total_cents,
             'paymentMethod' => $order->payment_method,
             'paymentMethodLabel' => $this->paymentMethodLabel((string) $order->payment_method),
-            'status' => $isCancelled ? 'cancelled' : 'completed',
-            'statusLabel' => $isCancelled ? 'Cancelada' : 'Concluída',
-            'isCancellable' => ! $isCancelled && $this->isCompleted($order),
+            'status' => $isCancelled ? 'cancelled' : ($isDraft ? 'draft' : 'completed'),
+            'statusLabel' => $isCancelled ? 'Cancelada' : ($isDraft ? 'Comanda aberta' : 'Concluída'),
+            'isCancellable' => $isDraft || (! $isCancelled && $this->isCompleted($order)),
+            'seller' => $order->seller ? [
+                'id' => (string) $order->seller->id,
+                'name' => $order->seller->name,
+            ] : null,
+            'sellerName' => $order->seller_name_snapshot,
+            'customer' => $this->customerSummary($order),
+            'customerSnapshot' => $this->customerSnapshot($order),
+        ];
+    }
+
+    /** @return array<string, mixed> */
+    private function draftSummary(Order $order, Company $company): array
+    {
+        $item = $order->items->sortBy('sort_order')->first();
+        $product = $item?->product;
+        $isWeight = data_get($product?->metadata, 'pricing_mode') === 'weight';
+
+        return [
+            'id' => (string) $order->id,
+            'code' => $order->code,
+            'productId' => $product?->id,
+            'productName' => $item?->product_name ?: 'Produto não identificado',
+            'menuRuleCode' => $item?->menu_rule_code,
+            'openedAtLabel' => $order->created_at?->setTimezone($this->timezone($company))->format('d/m/Y H:i') ?? '',
+            'timeLabel' => $order->created_at?->setTimezone($this->timezone($company))->format('H:i') ?? '',
+            'status' => 'draft',
+            'statusLabel' => 'Comanda aberta',
+            'weightPending' => $isWeight && $item?->weight_grams === null,
+            'weightGrams' => $item?->weight_grams !== null ? (int) $item->weight_grams : null,
+            'pricePerKgCents' => $item?->price_per_kg_cents !== null ? (int) $item->price_per_kg_cents : null,
+            'selectedComponents' => is_array($item?->selected_components) ? $item->selected_components : [],
+            'hasExtraBeef' => $item?->options->contains('group_code', 'bife_adicional') ?? false,
+            'notes' => $order->general_notes,
+            'seller' => $order->seller ? [
+                'id' => (string) $order->seller->id,
+                'name' => $order->seller->name,
+            ] : null,
+            'sellerName' => $order->seller_name_snapshot,
+            'customer' => $this->customerSummary($order),
+            'customerSnapshot' => $this->customerSnapshot($order),
+        ];
+    }
+
+    /** @return array{id: string, name: string, phone: ?string, phoneLabel: string}|null */
+    private function customerSummary(Order $order): ?array
+    {
+        $customer = $order->payerCustomer;
+        if ($customer === null) {
+            return null;
+        }
+
+        return [
+            'id' => (string) $customer->id,
+            'name' => $customer->name,
+            'phone' => $customer->phone,
+            'phoneLabel' => $customer->phone ?: 'Sem telefone cadastrado',
+        ];
+    }
+
+    /** @return array{name: string, phone: ?string}|null */
+    private function customerSnapshot(Order $order): ?array
+    {
+        if ($order->payer_customer_id !== null) {
+            return null;
+        }
+
+        $name = trim((string) $order->customer_name_snapshot);
+        if ($name === '') {
+            return null;
+        }
+
+        return [
+            'name' => $name,
+            'phone' => $order->customer_phone_snapshot,
         ];
     }
 
@@ -181,7 +295,7 @@ class CounterSaleHistoryService
 
         return [
             'methodLabel' => $this->paymentMethodLabel((string) ($payment?->method ?: $order->payment_method)),
-            'statusLabel' => $payment?->voided_at ? 'Anulado' : 'Confirmado',
+            'statusLabel' => ! $payment ? 'Não pago' : ($payment->voided_at ? 'Anulado' : 'Confirmado'),
             'amountCents' => (int) ($payment?->confirmed_amount_cents ?: $order->amount_paid_cents),
             'confirmedAtLabel' => $payment?->confirmed_at?->setTimezone($timezone)->format('d/m H:i')
                 ?? $order->payment_confirmed_at?->setTimezone($timezone)->format('d/m H:i'),
@@ -229,6 +343,7 @@ class CounterSaleHistoryService
     private function statusLabel(string $status): string
     {
         return match ($status) {
+            Order::STATUS_DRAFT => 'Comanda aberta',
             Order::STATUS_FINISHED => 'Venda concluída',
             Order::STATUS_CANCELLED => 'Venda cancelada',
             Order::STATUS_PAYMENT_CONFIRMED => 'Pagamento confirmado',

@@ -37,7 +37,7 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
 
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
         $this->assertSame(count($this->officialProducts()), Product::query()->where('company_id', $company->id)->count());
-        $this->assertSame(65, MenuComponent::query()->where('company_id', $company->id)->count());
+        $this->assertSame(70, MenuComponent::query()->where('company_id', $company->id)->count());
     }
 
     public function test_official_categories_exist_once(): void
@@ -67,7 +67,10 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'n5-casa' => 800,
             'n8-casa' => 1300,
             'n8-tradicional' => 1600,
-            'n9-tradicional' => 1800,
+            'n9-tradicional' => 1900,
+            'self-service' => 1900,
+            'comida-por-kg-comum' => 5500,
+            'comida-por-kg-somente-carne' => 7000,
             'separadinha' => 2000,
             'combo-n8-casa-baby' => 1500,
             'combo-n8-com-latinha' => 2000,
@@ -342,7 +345,10 @@ class SolRestaurantOfficialMenuSeederTest extends TestCase
             'n5-casa' => 800,
             'n8-casa' => 1300,
             'n8-tradicional' => 1600,
-            'n9-tradicional' => 1800,
+            'n9-tradicional' => 1900,
+            'self-service' => 1900,
+            'comida-por-kg-comum' => 5500,
+            'comida-por-kg-somente-carne' => 7000,
             'separadinha' => 2000,
             'combo-n8-casa-baby' => 1500,
             'combo-n8-com-latinha' => 2000,

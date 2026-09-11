@@ -15,12 +15,18 @@ final class CopilotProductGroundingGuard
         private readonly CopilotMenuAliasResolver $aliases,
         private readonly StructuredProductConfigurationService $productConfiguration,
         private readonly CopilotProductEligibility $eligibility,
+        private readonly CopilotDailyMeatEntityResolver $meats,
     ) {}
 
     /** @param list<array<string,mixed>> $messages */
     public function isGrounded(Product $product, array $messages): bool
     {
-        return $this->aliases->isExplicitlyReferenced($product, $messages);
+        if ($this->aliases->isExplicitlyReferenced($product, $messages)) {
+            return true;
+        }
+
+        return $product->menu_rule_code === 'n8_tradicional'
+            && $this->isExplicitTraditionalN8Segment($this->productSegment($messages, 'n8'));
     }
 
     /** @param list<array<string,mixed>> $messages */
@@ -35,14 +41,14 @@ final class CopilotProductGroundingGuard
     }
 
     /** @param list<array<string,mixed>> $messages @return array<string,mixed>|null */
-    public function recoverN8Traditional(Company $company, array $messages): ?array
+    public function recoverN8Traditional(Company $company, array $messages, ?CarbonInterface $date = null): ?array
     {
         $text = $this->productSegment($messages, 'n8');
-        if ($text === null || str_contains($this->key($text), 'n8casa')) {
+        if (! $this->isExplicitTraditionalN8Segment($text)) {
             return null;
         }
 
-        $product = $this->aliases->resolve($company, null, 'n8');
+        $product = $this->aliases->resolve($company, null, 'n8-tradicional');
         if (! $product?->is_active || ! $product->is_available_by_default) {
             return null;
         }
@@ -51,14 +57,14 @@ final class CopilotProductGroundingGuard
             'menu_item_id' => $product->id,
             'menu_item_slug' => $product->slug,
             'quantity' => 1,
-            'selections' => ['meats' => $this->explicitN8Meats($text)],
+            'selections' => ['meats' => $this->meats->names($company, $product, $date ?? CarbonImmutable::today(), $this->customerText($messages))],
             'removed_components' => [],
             'item_notes' => '',
         ];
     }
 
     /** @param array<string,mixed> $item @param list<array<string,mixed>> $messages @return array<string,mixed> */
-    public function enrichN8Traditional(Product $product, array $item, array $messages): array
+    public function enrichN8Traditional(Company $company, Product $product, CarbonInterface $date, array $item, array $messages): array
     {
         $text = $this->productSegment($messages, 'n8');
         if ($product->menu_rule_code !== 'n8_tradicional' || $text === null || str_contains($this->key($text), 'n8casa')) {
@@ -69,21 +75,22 @@ final class CopilotProductGroundingGuard
         if (str_contains($text, 'sem carne') || preg_match('/\bnao\s+(?:quero|quero)\s+carne\b/', $text) === 1) {
             return [...$item, 'selections' => [...$selections, 'meat_mode' => 'none', 'meat' => null, 'meats' => [], 'extra_beef' => 0]];
         }
-        $meats = is_array($selections['meats'] ?? null) ? $selections['meats'] : [];
-        foreach ($this->explicitN8Meats($text) as $meat) {
-            if (! in_array($meat, $meats, true)) {
-                $meats[] = $meat;
+        $meats = collect((array) ($selections['meats'] ?? []));
+        foreach ($this->meats->names($company, $product, $date, $this->customerText($messages)) as $meat) {
+            if (! $meats->contains(fn (mixed $existing): bool => is_string($existing) && $this->key($existing) === $this->key($meat))) {
+                $meats->push($meat);
             }
         }
 
-        return [...$item, 'selections' => [...$selections, 'meats' => $meats]];
+        return [...$item, 'selections' => [...$selections, 'meats' => $meats->values()->all()]];
     }
 
     /** @param list<array<string,mixed>> $messages @return list<array<string,mixed>> */
     public function recoverExplicitItems(Company $company, array $messages, ?CarbonInterface $date = null): array
     {
         $items = [];
-        $n8 = $this->recoverN8Traditional($company, $messages);
+        $date ??= CarbonImmutable::today();
+        $n8 = $this->recoverN8Traditional($company, $messages, $date);
         if ($n8 !== null) {
             $items[] = $n8;
         }
@@ -96,7 +103,7 @@ final class CopilotProductGroundingGuard
                     'menu_item_id' => $n5->id,
                     'menu_item_slug' => $n5->slug,
                     'quantity' => 1,
-                    'selections' => ['meats' => $this->explicitMeats($n5Text)],
+                    'selections' => ['meats' => $this->meats->names($company, $n5, $date, $this->customerText($messages))],
                     'removed_components' => [],
                     'item_notes' => '',
                 ];
@@ -119,6 +126,23 @@ final class CopilotProductGroundingGuard
         }
 
         return collect($items)->unique('menu_item_id')->values()->all();
+    }
+
+    /** @param list<array<string,mixed>> $items @param list<array<string,mixed>> $messages @return list<array<string,mixed>> */
+    public function orderByExplicitReferences(Company $company, array $items, array $messages): array
+    {
+        $positions = array_flip($this->aliases->explicitlyReferencedProductIds($company, $messages));
+
+        return collect($items)
+            ->map(fn (array $item, int $index): array => [
+                'item' => $item,
+                'position' => $positions[(int) ($item['menu_item_id'] ?? 0)] ?? PHP_INT_MAX,
+                'index' => $index,
+            ])
+            ->sortBy(fn (array $entry): string => sprintf('%020d:%020d', $entry['position'], $entry['index']))
+            ->pluck('item')
+            ->values()
+            ->all();
     }
 
     /** @param list<array<string,mixed>> $messages */
@@ -158,18 +182,6 @@ final class CopilotProductGroundingGuard
         return null;
     }
 
-    /** @return list<string> */
-    private function explicitN8Meats(string $text): array
-    {
-        return $this->explicitMeats($text);
-    }
-
-    /** @return list<string> */
-    private function explicitMeats(string $text): array
-    {
-        return preg_match('/\bporco\b/', $text) === 1 ? ['porco'] : [];
-    }
-
     /** @param list<array<string,mixed>> $messages */
     private function customerText(array $messages): string
     {
@@ -178,6 +190,19 @@ final class CopilotProductGroundingGuard
             ->pluck('body')
             ->map(fn (mixed $body): string => Str::of((string) $body)->ascii()->lower()->squish()->toString())
             ->implode(' ');
+    }
+
+    private function isExplicitTraditionalN8Segment(?string $text): bool
+    {
+        if ($text === null) {
+            return false;
+        }
+
+        $key = $this->key($text);
+
+        return str_contains($key, 'n8livre')
+            || str_contains($key, 'n8tradicional')
+            || preg_match('/\bn8\s+(?:so|somente|apenas)\s+bife\b/', $text) === 1;
     }
 
     private function key(string $value): string

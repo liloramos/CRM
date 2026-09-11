@@ -17,20 +17,13 @@ class ConversationOperationalStatusResolver
         $activeAlerts = collect($conversation->alerts ?? [])
             ->filter(fn (ConversationAlert $alert): bool => $alert->isCurrentActionable());
 
-        $reviewRequiredForOperationalReason = (bool) $conversation->human_review_required
-            && ! ($conversation->automation_mode === Conversation::AUTOMATION_MODE_MANUAL
-                && $conversation->automation_status === Conversation::AUTOMATION_STATUS_MANUAL_TAKEOVER);
-
-        if ($reviewRequiredForOperationalReason || $activeAlerts->contains(
-            fn (ConversationAlert $alert): bool => $alert->severity === ConversationAlert::SEVERITY_CRITICAL
-                || $alert->type === ConversationAlert::TYPE_MESSAGE_SEND_FAILED
-                || $alert->type === ConversationAlert::TYPE_PAYMENT_REJECTED,
-        ) || ($order?->payment_status === Payment::ORDER_STATUS_REJECTED)) {
+        if ($activeAlerts->isNotEmpty() || ($order?->payment_status === Payment::ORDER_STATUS_REJECTED)) {
             $alert = $activeAlerts->first(fn (ConversationAlert $candidate): bool => $candidate->severity === ConversationAlert::SEVERITY_CRITICAL
                 || $candidate->type === ConversationAlert::TYPE_MESSAGE_SEND_FAILED
-                || $candidate->type === ConversationAlert::TYPE_PAYMENT_REJECTED);
+                || $candidate->type === ConversationAlert::TYPE_PAYMENT_REJECTED)
+                ?? $activeAlerts->first();
 
-            return $this->status('ATTENTION', 'Atenção', 'red', $alert?->message ?: ($conversation->handoff_reason ?: 'É necessária uma ação humana.'), 100);
+            return $this->status('ATTENTION', 'Atenção', 'red', $alert?->message ?: 'É necessária uma ação humana.', 100);
         }
 
         if (! $order instanceof Order) {

@@ -55,6 +55,13 @@ class CounterSaleController extends Controller
         ]);
     }
 
+    public function drafts(Request $request, CounterSaleHistoryService $history): JsonResponse
+    {
+        return response()->json([
+            'data' => $history->openDrafts($this->resolveCompany($request)),
+        ]);
+    }
+
     public function store(
         Request $request,
         CounterSaleWorkflowService $sales,
@@ -65,12 +72,24 @@ class CounterSaleController extends Controller
             'items' => ['required', 'array', 'min:1', 'max:40'],
             'items.*.product_id' => ['required', 'integer'],
             'items.*.quantity' => ['required', 'integer', 'min:1', 'max:50'],
+            'items.*.weight_grams' => ['nullable', 'integer'],
+            'items.*.selected_components' => ['nullable', 'array', 'max:30'],
+            'items.*.selected_components.*' => ['string', 'max:100'],
+            'items.*.additions' => ['nullable', 'array', 'max:10'],
+            'items.*.additions.*' => ['array:code,quantity'],
+            'items.*.additions.*.code' => ['required', Rule::in(['extra_beef'])],
+            'items.*.additions.*.quantity' => ['required', 'integer', 'min:1'],
             'payment_method' => ['required', Rule::in([
                 Payment::METHOD_CASH,
                 Payment::METHOD_PIX,
                 Payment::METHOD_DEBIT_CARD,
                 Payment::METHOD_CREDIT_CARD,
             ])],
+            'customer_id' => ['nullable', 'integer'],
+            'customer_name' => ['nullable', 'string', 'max:120'],
+            'customer_phone' => ['nullable', 'string', 'max:40'],
+            'save_customer' => ['nullable', 'boolean'],
+            'seller_user_id' => ['nullable', 'integer'],
         ]);
 
         try {
@@ -79,6 +98,8 @@ class CounterSaleController extends Controller
                 $request->user(),
                 $validated['items'],
                 $validated['payment_method'],
+                $this->customerAttributes($validated),
+                $validated['seller_user_id'] ?? null,
             );
         } catch (DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
@@ -87,6 +108,141 @@ class CounterSaleController extends Controller
         return response()->json([
             'data' => $presenter->order($order->load($this->orderRelations())),
         ], 201);
+    }
+
+    public function storeDraft(
+        Request $request,
+        CounterSaleWorkflowService $sales,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $validated = $request->validate([
+            'product_id' => ['required', 'integer'],
+            'weight_grams' => ['nullable', 'integer'],
+            'selected_components' => ['nullable', 'array', 'max:30'],
+            'selected_components.*' => ['string', 'max:100'],
+            'additions' => ['nullable', 'array', 'max:10'],
+            'additions.*' => ['array:code,quantity'],
+            'additions.*.code' => ['required', Rule::in(['extra_beef'])],
+            'additions.*.quantity' => ['required', 'integer', 'min:1'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+            'customer_id' => ['nullable', 'integer'],
+            'customer_name' => ['nullable', 'string', 'max:120'],
+            'customer_phone' => ['nullable', 'string', 'max:40'],
+            'save_customer' => ['nullable', 'boolean'],
+            'seller_user_id' => ['nullable', 'integer'],
+        ]);
+
+        try {
+            $order = $sales->openDraft(
+                $company,
+                $request->user(),
+                [
+                    'product_id' => $validated['product_id'],
+                    'quantity' => 1,
+                    ...array_intersect_key($validated, array_flip([
+                        'weight_grams',
+                        'selected_components',
+                        'additions',
+                    ])),
+                ],
+                $validated['notes'] ?? null,
+                $this->customerAttributes($validated),
+                $validated['seller_user_id'] ?? null,
+            );
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->load($this->orderRelations())),
+        ], 201);
+    }
+
+    public function updateDraftCustomer(
+        Request $request,
+        Order $order,
+        CounterSaleWorkflowService $sales,
+        CounterSaleHistoryService $history,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $validated = $request->validate([
+            'customer_id' => ['present', 'nullable', 'integer'],
+            'customer_name' => ['nullable', 'string', 'max:120'],
+            'customer_phone' => ['nullable', 'string', 'max:40'],
+            'save_customer' => ['nullable', 'boolean'],
+            'seller_user_id' => ['nullable', 'integer'],
+        ]);
+
+        try {
+            $order = $sales->updateDraftCustomer(
+                $company,
+                $request->user(),
+                $order,
+                $this->customerAttributes($validated),
+            );
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $history->draft($company, $order),
+        ]);
+    }
+
+    public function finalizeDraft(
+        Request $request,
+        Order $order,
+        CounterSaleWorkflowService $sales,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $validated = $request->validate([
+            'weight_grams' => ['nullable', 'integer'],
+            'selected_components' => ['nullable', 'array', 'max:30'],
+            'selected_components.*' => ['string', 'max:100'],
+            'additions' => ['nullable', 'array', 'max:10'],
+            'additions.*' => ['array:code,quantity'],
+            'additions.*.code' => ['required', Rule::in(['extra_beef'])],
+            'additions.*.quantity' => ['required', 'integer', 'min:1'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+            'payment_method' => ['required', Rule::in([
+                Payment::METHOD_CASH,
+                Payment::METHOD_PIX,
+                Payment::METHOD_DEBIT_CARD,
+                Payment::METHOD_CREDIT_CARD,
+            ])],
+            'customer_id' => ['nullable', 'integer'],
+            'customer_name' => ['nullable', 'string', 'max:120'],
+            'customer_phone' => ['nullable', 'string', 'max:40'],
+            'save_customer' => ['nullable', 'boolean'],
+        ]);
+
+        try {
+            $order = $sales->finalizeDraft(
+                $company,
+                $request->user(),
+                $order,
+                array_intersect_key($validated, array_flip([
+                    'weight_grams',
+                    'selected_components',
+                    'additions',
+                    'notes',
+                    'customer_id',
+                    'customer_name',
+                    'customer_phone',
+                    'save_customer',
+                    'seller_user_id',
+                ])),
+                $validated['payment_method'],
+            );
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->load($this->orderRelations())),
+        ]);
     }
 
     public function cancel(
@@ -130,10 +286,22 @@ class CounterSaleController extends Controller
     {
         return [
             'payerCustomer',
+            'seller',
             'items.options',
-            'statusHistories' => fn ($query) => $query->latest()->limit(8),
+            'statusHistories' => fn ($query) => $query->with('user')->latest()->limit(8),
             'latestPrintJob',
             'payments',
         ];
+    }
+
+    /** @param array<string, mixed> $validated @return array<string, mixed> */
+    private function customerAttributes(array $validated): array
+    {
+        return array_intersect_key($validated, array_flip([
+            'customer_id',
+            'customer_name',
+            'customer_phone',
+            'save_customer',
+        ]));
     }
 }

@@ -151,11 +151,15 @@ class StructuredProductConfigurationService
             'slug' => $product->slug,
             'name' => $product->name,
             'product_type' => $product->product_type,
+            'menu_rule_code' => $product->menu_rule_code,
+            'pricing_mode' => data_get($product->metadata, 'pricing_mode', 'unit'),
+            'weight_unit' => data_get($product->metadata, 'weight_unit'),
             'base_price_cents' => $product->base_price_cents,
             'currency' => $product->currency,
             'is_active' => (bool) $product->is_active,
             'is_available_by_default' => (bool) $product->is_available_by_default,
             'administrative_status' => $this->administrativeStatus($product),
+            'is_archived' => $this->isArchivedProduct($product),
             'is_legacy' => $this->isLegacyProduct($product),
             'legacy_reason' => $this->legacyReason($product),
             'display_order' => $product->display_order,
@@ -351,6 +355,7 @@ class StructuredProductConfigurationService
                     'same_component_only' => false,
                 ],
                 'allow_no_meat' => (bool) data_get($product->composition_rules, 'traditional_meat_selection.allow_none', false),
+                'additional_meat_price_cents' => data_get($product->composition_rules, 'standard_meat_additional_price_cents'),
             ],
             'beef_only' => [
                 'enabled' => $this->componentOptionIsConfigured($beefOnly),
@@ -438,11 +443,20 @@ class StructuredProductConfigurationService
 
     private function administrativeStatus(Product $product): string
     {
+        if ($this->isArchivedProduct($product)) {
+            return 'archived';
+        }
+
         if ($this->isLegacyProduct($product)) {
             return 'legacy';
         }
 
         return $product->is_active ? 'active' : 'inactive';
+    }
+
+    private function isArchivedProduct(Product $product): bool
+    {
+        return is_string(data_get($product->metadata, 'catalog_archived_at'));
     }
 
     private function isLegacyProduct(Product $product): bool
@@ -462,7 +476,14 @@ class StructuredProductConfigurationService
 
         $disk = Storage::disk('public');
 
-        return $disk->exists($path) ? $disk->url($path) : null;
+        if (! $disk->exists($path)) {
+            return null;
+        }
+
+        return route('api.app.menu.products.image.show', [
+            'product' => $product,
+            'v' => substr(sha1($path), 0, 12),
+        ], false);
     }
 
     private function legacyReason(Product $product): ?string

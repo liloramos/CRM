@@ -60,10 +60,21 @@ export function SelectField({
       return
     }
 
+    const viewportPadding = 12
+    const estimatedMenuHeight = Math.min(340, window.innerHeight - viewportPadding * 2)
+    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding
+    const spaceAbove = rect.top - viewportPadding
+    const opensAbove = spaceBelow < Math.min(estimatedMenuHeight, 220) && spaceAbove > spaceBelow
+    const availableHeight = Math.max(120, opensAbove ? spaceAbove - 6 : spaceBelow - 6)
+    const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2)
+    const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding)
+
     setMenuStyle({
-      left: rect.left,
-      top: rect.bottom + 6,
-      width: rect.width,
+      left,
+      top: opensAbove ? Math.max(viewportPadding, rect.top - 6) : rect.bottom + 6,
+      width,
+      maxHeight: availableHeight,
+      transform: opensAbove ? 'translateY(-100%)' : undefined,
     })
   }
 

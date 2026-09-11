@@ -11,6 +11,7 @@ class CounterSaleCatalogService
     public function __construct(
         private readonly CounterSaleProductEligibility $eligibility,
         private readonly StructuredProductConfigurationService $configuration,
+        private readonly CounterSaleBeefAdditionalResolver $beefAdditional,
     ) {}
 
     /**
@@ -18,10 +19,29 @@ class CounterSaleCatalogService
      */
     public function products(Company $company, CarbonInterface $date): array
     {
-        return $this->eligibility->query($company)
+        $products = $this->eligibility->query($company)
             ->get()
-            ->filter(fn ($product): bool => $this->eligibility->isEligible($company, $product, $date))
-            ->map(fn ($product): array => $this->configuration->productSummary($product, $company, $date))
+            ->filter(fn ($product): bool => $this->eligibility->isEligible($company, $product, $date));
+        $hasConfigurableProduct = $products->contains(fn ($product): bool => data_get($product->metadata, 'pricing_mode') === 'weight'
+            || $product->menu_rule_code === 'self_service_counter');
+        $beefAdditional = $hasConfigurableProduct ? $this->beefAdditional->resolve($company) : null;
+
+        return $products
+            ->map(function ($product) use ($company, $date, $beefAdditional): array {
+                $summary = $this->configuration->productSummary($product, $company, $date);
+                $acceptsBeefAdditional = $summary['pricing_mode'] === 'weight'
+                    || $summary['menu_rule_code'] === 'self_service_counter';
+
+                return [
+                    ...$summary,
+                    'additions' => $acceptsBeefAdditional && $beefAdditional !== null ? [[
+                        'code' => 'extra_beef',
+                        'name' => $beefAdditional['name'],
+                        'price_cents' => $beefAdditional['price_cents'],
+                        'max_quantity' => $beefAdditional['max_quantity'],
+                    ]] : [],
+                ];
+            })
             ->values()
             ->all();
     }

@@ -32,6 +32,21 @@ final class CompanyOperatingHoursService
             return $this->result(self::STATUS_UNKNOWN, $timezone, $now, false, '');
         }
 
+        $exception = $company->operatingHourExceptions()->whereDate('date', $now->toDateString())->first();
+        if ($exception !== null) {
+            if (! $exception->is_open || blank($exception->opens_at) || blank($exception->closes_at)) {
+                return $this->result(self::STATUS_CLOSED, $timezone, $now, false, $this->schedule($configured));
+            }
+
+            $opens = CarbonImmutable::parse($now->toDateString().' '.$exception->opens_at, $timezone);
+            $closes = CarbonImmutable::parse($now->toDateString().' '.$exception->closes_at, $timezone);
+            if ($closes->lessThanOrEqualTo($opens)) {
+                $closes = $closes->addDay();
+            }
+
+            return $this->result($now->betweenIncluded($opens, $closes) ? self::STATUS_OPEN : self::STATUS_CLOSED, $timezone, $now, true, $this->schedule($configured));
+        }
+
         $today = $configured->firstWhere('weekday', $now->dayOfWeek);
         if ($today === null) {
             return $this->result(self::STATUS_CLOSED, $timezone, $now, false, $this->schedule($configured));

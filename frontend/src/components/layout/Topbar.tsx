@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthUser } from '../../types/crm'
 import { IconButton } from '../ui/Button'
 import { Icon } from '../ui/Icon'
-import { initialsFromName } from '../../utils/formatters'
+import { UserAvatar } from '../ui/UserAvatar'
 
 type TopbarProps = {
   isSyncing: boolean
@@ -79,7 +79,7 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: T
             onKeyDown={handleProfileKeyDown}
             type="button"
           >
-            <span className="avatar">{initialsFromName(user?.name ?? 'Usuario')}</span>
+            <UserAvatar avatarUrl={user?.avatarUrl} name={user?.name ?? 'Usuário'} />
             <span className="user-chip__copy">
               <strong>{user?.name ?? 'Operador'}</strong>
               <small>{roleLabel}</small>
@@ -90,7 +90,7 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: T
           {isProfileOpen ? (
             <div className="user-menu__popover" role="menu">
               <div className="user-menu__identity">
-                <span className="avatar avatar--lg">{initialsFromName(user?.name ?? 'Usuario')}</span>
+                <UserAvatar avatarUrl={user?.avatarUrl} className="avatar--lg" name={user?.name ?? 'Usuário'} />
                 <div>
                   <strong>{user?.name ?? 'Operador'}</strong>
                   <span>{user?.email ?? 'Conta local'}</span>
@@ -120,7 +120,7 @@ export function Topbar({ isSyncing, lastSyncedAt, onLogout, onRefresh, user }: T
 function formatRole(role?: string): string {
   switch (role) {
     case 'super_admin':
-      return 'Super admin'
+      return 'DEV'
     case 'admin_gerente':
       return 'Gerência'
     case 'atendente':

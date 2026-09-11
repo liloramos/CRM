@@ -10,6 +10,7 @@ use App\Services\Printing\PrintWorkflowService;
 use DomainException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Throwable;
 
 class OrderTicketPreviewController extends Controller
 {
@@ -30,8 +31,19 @@ class OrderTicketPreviewController extends Controller
                 ]);
         } catch (DomainException $exception) {
             return $this->htmlResponse(
-                $this->errorHtml('Nao foi possivel carregar a comanda.', $exception->getMessage()),
+                $this->errorHtml('Não foi possível carregar o documento.', $exception->getMessage()),
                 Response::HTTP_UNPROCESSABLE_ENTITY,
+            );
+        } catch (Throwable $exception) {
+            report($exception);
+
+            $message = $order->status === Order::STATUS_DRAFT
+                ? 'A comanda permanece aberta. Tente novamente ou solicite apoio técnico.'
+                : 'A venda continua concluída. Tente novamente ou solicite apoio técnico.';
+
+            return $this->htmlResponse(
+                $this->errorHtml('Não foi possível carregar o documento.', $message),
+                Response::HTTP_INTERNAL_SERVER_ERROR,
             );
         }
 

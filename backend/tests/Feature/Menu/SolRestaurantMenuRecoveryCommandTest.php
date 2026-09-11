@@ -7,6 +7,8 @@ use App\Models\Company;
 use App\Models\CompanySetting;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductGroupComponent;
+use App\Models\ProductOptionGroup;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -47,7 +49,7 @@ class SolRestaurantMenuRecoveryCommandTest extends TestCase
             'company_id' => $company->id,
             'slug' => 'n9-tradicional',
             'name' => 'N9 Livre',
-            'base_price_cents' => 1800,
+            'base_price_cents' => 1900,
         ]);
         $this->assertDatabaseHas('products', [
             'company_id' => $company->id,
@@ -81,6 +83,24 @@ class SolRestaurantMenuRecoveryCommandTest extends TestCase
             ->serviceDays()
             ->where('is_active', true)
             ->count());
+
+        $countsBeforeForcedRerun = [
+            'products' => Product::query()->where('company_id', $company->id)->count(),
+            'option_groups' => ProductOptionGroup::query()->where('company_id', $company->id)->count(),
+            'component_links' => ProductGroupComponent::query()
+                ->whereHas('group', fn ($query) => $query->where('company_id', $company->id))
+                ->count(),
+        ];
+
+        $this->artisan('sol:restore-menu', ['--force-official' => true])->assertSuccessful();
+
+        $this->assertSame($countsBeforeForcedRerun, [
+            'products' => Product::query()->where('company_id', $company->id)->count(),
+            'option_groups' => ProductOptionGroup::query()->where('company_id', $company->id)->count(),
+            'component_links' => ProductGroupComponent::query()
+                ->whereHas('group', fn ($query) => $query->where('company_id', $company->id))
+                ->count(),
+        ]);
     }
 
     public function test_rerun_preserves_manual_and_unknown_records_without_force(): void

@@ -102,8 +102,13 @@ class SolRestaurantMenuComponentSeeder extends Seeder
                 'Strogonoff de frango',
                 'Filé de peixe empanado',
                 'Filé de frango',
+                'Filé de frango na chapa',
                 'Strogonoff',
                 'Linguiça',
+                'Linguiça frita',
+                'Bisteca de porco na chapa',
+                'Bisteca de porco suína',
+                'Churrasco',
                 'Feijoada',
                 'Bife',
             ],
@@ -128,8 +133,8 @@ class SolRestaurantMenuComponentSeeder extends Seeder
     private function descriptionFor(string $name): ?string
     {
         return match ($name) {
-            'Bife' => 'A DOCX cita bife como variação/adicional; preço operacional será modelado em etapa posterior.',
-            'Ovo frito' => 'Cadastrado como carne do cardápio semanal; o papel de adicional pago permanece pendente.',
+            'Bife' => 'Opção paga para marmitas, conforme as regras estruturadas do produto.',
+            'Ovo frito' => 'Ingrediente disponível conforme o cardápio e a disponibilidade do dia.',
             default => null,
         };
     }

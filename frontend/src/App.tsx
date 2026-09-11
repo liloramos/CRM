@@ -12,6 +12,17 @@ import { CustomersPage } from './features/clientes/CustomersPage'
 import { ConversationsPage } from './features/conversas/ConversationsPage'
 import { CounterSalesPage } from './features/caixa/CounterSalesPage'
 import { SettingsPage } from './features/configuracoes/SettingsPage'
+import { AccountPage } from './features/configuracoes/AccountPage'
+import { GeneralSettingsPage } from './features/configuracoes/GeneralSettingsPage'
+import { UserManagementPage } from './features/configuracoes/UserManagementPage'
+import { BrandSettingsPage } from './features/configuracoes/BrandSettingsPage'
+import { PrintSettingsPage } from './features/configuracoes/PrintSettingsPage'
+import { PaymentSettingsPage } from './features/configuracoes/PaymentSettingsPage'
+import { SecuritySettingsPage } from './features/configuracoes/SecuritySettingsPage'
+import { WhatsAppIntegrationPage } from './features/configuracoes/WhatsAppIntegrationPage'
+import { SystemAssistantPage } from './features/assistente/SystemAssistantPage'
+import { SupportPage } from './features/suporte/SupportPage'
+import { AiAutomationPage } from './features/configuracoes/AiAutomationPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DeliveryPage } from './features/entregas/DeliveryPage'
 import { FinancePage } from './features/financeiro/FinancePage'
@@ -24,17 +35,20 @@ import {
   advanceOrderFulfillment,
   cancelOrder,
   cleanupTestOrders,
+  confirmOrderPrint,
   confirmOrderPayment,
   createCustomer,
   createDraftOrder,
   createOrderFromConversation,
   deleteDraftOrder,
+  deleteCustomer,
   deleteOrdersPermanently,
   deleteOrderPermanently,
   describeApiError,
   generateTicketPreview,
   approveConversationPaymentProof,
   getConversations,
+  getConversation,
   getOrderTicketPreviewUrl,
   getResolvedProductConfiguration,
   analyzeConversationCopilot,
@@ -51,8 +65,10 @@ import {
   type ConversationMediaSendOptions,
   type CopilotOrderProposal,
   setConversationAutomationMode,
+  startOrderPrint,
   updateCustomer,
   updateOrderStatus,
+  updateOrderSeller,
   updateOrderItem,
   voidOrderPayment,
   ApiError,
@@ -63,9 +79,9 @@ import type {
   AuthUser,
   BackendOrderStatus,
   Conversation,
-  ConversationAlert,
   ConversationMessage,
   CustomerSummary,
+  FinanceEntry,
   FulfillmentApiType,
   OperationalSnapshot,
   OperationalNotification,
@@ -130,7 +146,7 @@ type PendingCopilotDraft = {
 }
 
 function App() {
-  const { logout, status: authStatus, user } = useAuth()
+  const { logout, refresh: refreshAuth, status: authStatus, user } = useAuth()
   const [activeRoute, setActiveRoute] = useState<RouteKey>('dashboard')
   const [snapshot, setSnapshot] = useState<OperationalSnapshot | null>(null)
   const [snapshotSource, setSnapshotSource] = useState<SnapshotSource>('api')
@@ -138,7 +154,6 @@ function App() {
   const [snapshotError, setSnapshotError] = useState<string | null>(null)
   const [isLoadingConversations, setIsLoadingConversations] = useState(false)
   const [conversationError, setConversationError] = useState<string | null>(null)
-  const [conversationAlerts, setConversationAlerts] = useState<ConversationAlert[]>([])
   const [operationalNotifications, setOperationalNotifications] = useState<OperationalNotification[]>([])
   const [notificationsHydrated, setNotificationsHydrated] = useState(false)
   const conversationSyncAtRef = useRef<string | null>(null)
@@ -149,9 +164,11 @@ function App() {
   const [conversationRefreshNonce, setConversationRefreshNonce] = useState(0)
   const conversationReadBusyRef = useRef<Set<string>>(new Set())
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
   const [activeModal, setActiveModal] = useState<AppModal>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [paymentFeedback, setPaymentFeedback] = useState<string | null>(null)
   const [isActionBusy, setIsActionBusy] = useState(false)
   const [selectedProductId, setSelectedProductId] = useState<string>('')
   const [itemQuantity, setItemQuantity] = useState(1)
@@ -178,6 +195,7 @@ function App() {
   const [newOrderWalkInPhone, setNewOrderWalkInPhone] = useState('')
   const [newOrderNotes, setNewOrderNotes] = useState('')
   const [newOrderFulfillmentType, setNewOrderFulfillmentType] = useState<FulfillmentApiType>('pickup')
+  const [newOrderSellerId, setNewOrderSellerId] = useState('')
   const [statusTarget, setStatusTarget] = useState<BackendOrderStatus | ''>('')
   const [statusReason, setStatusReason] = useState('')
   const [statusNotes, setStatusNotes] = useState('')
@@ -187,6 +205,7 @@ function App() {
   const [paymentAmount, setPaymentAmount] = useState('')
   const [paymentNotes, setPaymentNotes] = useState('')
   const [paymentVoidReason, setPaymentVoidReason] = useState('')
+  const [paymentToVoidId, setPaymentToVoidId] = useState<string | null>(null)
   const [deleteConfirmation, setDeleteConfirmation] = useState('')
   const [bulkDeleteOrderIds, setBulkDeleteOrderIds] = useState<string[]>([])
   const [blockedOrderDeletions, setBlockedOrderDeletions] = useState<BlockedOrderDeletion[]>([])
@@ -311,7 +330,6 @@ function App() {
         return
       }
 
-      setConversationAlerts(response.alerts)
       setOperationalNotifications(response.notifications)
       setNotificationsHydrated(true)
       conversationSyncAtRef.current = response.generatedAt ?? new Date().toISOString()
@@ -511,6 +529,29 @@ function App() {
   const selectedConversationUnread = selectedConversation?.unread ?? 0
 
   useEffect(() => {
+    if (activeRoute !== 'conversas' || !selectedConversationId) {
+      return undefined
+    }
+
+    let active = true
+    void getConversation(selectedConversationId)
+      .then((conversation) => {
+        if (!active) return
+        setSnapshot((current) => current ? {
+          ...current,
+          conversations: mergeConversations(current.conversations, [conversation]),
+        } : current)
+      })
+      .catch(() => {
+        // Polling remains the fallback if detail hydration is temporarily unavailable.
+      })
+
+    return () => {
+      active = false
+    }
+  }, [activeRoute, selectedConversationId])
+
+  useEffect(() => {
     if (activeRoute !== 'conversas' || document.hidden || !selectedConversationReadId || selectedConversationUnread <= 0) {
       return undefined
     }
@@ -532,10 +573,15 @@ function App() {
       ? snapshot?.orders.find((order) => order.id === selectedConversation.linkedOrderId)
       : undefined)
   const canManageOrders = user?.permissions.includes('orders.manage') ?? false
+  const canViewPrinting = user?.permissions.includes('printing.view') ?? false
+  const canManagePrinting = user?.permissions.includes('printing.manage') ?? false
   const hasPrivilegedDeletionRole = user?.roles.some((role) => role === 'super_admin' || role === 'admin_gerente') ?? false
   const canPermanentlyDeleteOrders = snapshot?.capabilities.can_permanently_delete_orders
     ?? (canManageOrders && hasPrivilegedDeletionRole)
   const canRunDestructiveTestCleanup = snapshot?.capabilities.can_run_destructive_test_cleanup ?? false
+  const hasManagementRole = user?.roles.some((role) => role === 'super_admin' || role === 'admin_gerente') ?? false
+  const canManageCustomers = hasManagementRole && (user?.permissions.includes('customers.manage') ?? false)
+  const canManageFinance = hasManagementRole && (user?.permissions.includes('finance.manage') ?? false)
 
   function handleNewOrder() {
     openNewOrderModal()
@@ -587,6 +633,7 @@ function App() {
         fulfillment_type: newOrderFulfillmentType,
         general_notes: newOrderNotes.trim() || 'Pedido manual criado na operação local.',
         pickup_person_name: customerName,
+        seller_user_id: newOrderSellerId || null,
       })
 
       setSelectedOrderId(response.data.id)
@@ -1073,6 +1120,7 @@ function App() {
 
       applyUpdatedOrder(response.data)
       setActiveModal(null)
+      setPaymentFeedback(`Pagamento do pedido ${selectedOrder.code} confirmado com segurança.`)
       setPaymentAmount('')
       setPaymentNotes('')
       await loadSnapshot()
@@ -1084,7 +1132,7 @@ function App() {
     }
   }
 
-  function handlePrintTicket(orderId: string) {
+  async function handlePrintTicket(orderId: string) {
     setActionError(null)
 
     if (!orderId.trim() || snapshotSource !== 'api') {
@@ -1101,11 +1149,7 @@ function App() {
       return
     }
 
-    const ticketWindow = window.open(
-      getOrderTicketPreviewUrl(orderId, true),
-      '_blank',
-      'popup=yes,width=420,height=720',
-    )
+    const ticketWindow = window.open('', '_blank', 'popup=yes,width=420,height=720')
 
     if (!ticketWindow) {
       setActionError('O navegador bloqueou a janela de impressão. Libere pop-ups para este sistema e tente novamente.')
@@ -1114,7 +1158,37 @@ function App() {
     }
 
     ticketWindow.opener = null
-    ticketWindow.focus()
+    setIsActionBusy(true)
+
+    try {
+      const response = await startOrderPrint(orderId)
+      applyUpdatedOrder(response.data.order)
+      ticketWindow.location.href = getOrderTicketPreviewUrl(orderId, true, 'kitchen', response.data.preview.id)
+      ticketWindow.focus()
+      await loadSnapshot()
+    } catch (error) {
+      ticketWindow.close()
+      setActionError(error instanceof Error ? error.message : 'Não foi possível iniciar a impressão da comanda.')
+      setActiveModal('print-error')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleConfirmPrint(orderId: string) {
+    setActionError(null)
+    setIsActionBusy(true)
+
+    try {
+      const response = await confirmOrderPrint(orderId)
+      applyUpdatedOrder(response.data)
+      await loadSnapshot()
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Não foi possível confirmar a impressão da comanda.')
+      setActiveModal('print-error')
+    } finally {
+      setIsActionBusy(false)
+    }
   }
 
   async function handleToggleAutomationMode() {
@@ -1159,10 +1233,11 @@ function App() {
     setActionError(null)
 
     try {
-      const response = await voidOrderPayment(selectedOrder.id, paymentVoidReason.trim())
+      const response = await voidOrderPayment(selectedOrder.id, paymentVoidReason.trim(), paymentToVoidId ?? undefined)
       applyUpdatedOrder(response.data, false)
       setActiveModal(null)
       setPaymentVoidReason('')
+      setPaymentToVoidId(null)
       await loadSnapshot()
       refreshConversationState()
     } catch (error) {
@@ -1230,6 +1305,16 @@ function App() {
 
   async function handleConversationCopilotAnalyze(conversationId: string) {
     const response = await analyzeConversationCopilot(conversationId)
+    try {
+      const conversation = await getConversation(conversationId)
+      setSnapshot((current) => current ? {
+        ...current,
+        conversations: mergeConversations(current.conversations, [conversation]),
+      } : current)
+    } catch {
+      // The canonical list poll will hydrate the persisted analysis state.
+    }
+    refreshConversationState()
     return response.data
   }
 
@@ -1395,6 +1480,34 @@ function App() {
     replaceCustomer(customer)
   }
 
+  async function handleAssignSeller(orderId: string, sellerUserId: string | null) {
+    if (!canManageOrders || !isPersistedBackendId(orderId)) {
+      setActionError('Você não pode alterar o responsável deste pedido.')
+      return
+    }
+
+    setIsActionBusy(true)
+    setActionError(null)
+
+    try {
+      const response = await updateOrderSeller(orderId, sellerUserId)
+      applyUpdatedOrder(response.data)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Não foi possível alterar o responsável.')
+      throw error
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleDeleteCustomerFromPage(customerId: string) {
+    await deleteCustomer(customerId)
+    setSnapshot((current) => current ? {
+      ...current,
+      customers: current.customers.filter((customer) => customer.id !== customerId),
+    } : current)
+  }
+
   async function handleApproveConversationPayment(conversationId: string, proofId: string, confirmedAmountCents: number, notes?: string) {
     setIsActionBusy(true)
     setConversationError(null)
@@ -1425,6 +1538,54 @@ function App() {
       refreshConversationState()
     } catch (error) {
       setConversationError(error instanceof Error ? error.message : 'Não foi possível rejeitar o comprovante.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  function handleOpenPaymentEntry(entry: FinanceEntry) {
+    setSelectedOrderId(entry.orderId)
+    setPaymentMethod(paymentMethodForForm(entry.paymentMethod))
+    setPaymentAmount(formatDecimalInput(entry.pendingAmount > 0 ? entry.pendingAmount : entry.amount))
+    setPaymentNotes(`Conferência operacional do pedido ${entry.orderCode}, cliente ${entry.customerName}.`)
+    setActionError(null)
+    setPaymentFeedback(null)
+    setActiveModal('confirm-payment')
+  }
+
+  async function handleApprovePaymentFromQueue(entry: FinanceEntry) {
+    if (!entry.conversationId || !entry.proof) return
+    setIsActionBusy(true)
+    setPaymentFeedback(null)
+    try {
+      const confirmedAmountCents = Math.round((entry.proof.amount ?? (entry.pendingAmount || entry.amount)) * 100)
+      const conversation = await approveConversationPaymentProof(entry.conversationId, entry.proof.id, {
+        confirmed_amount_cents: confirmedAmountCents,
+        notes: `Aprovado na fila de pagamentos para ${entry.orderCode}.`,
+      })
+      replaceConversation(conversation)
+      await loadSnapshot()
+      refreshConversationState()
+      setPaymentFeedback(`Comprovante do pedido ${entry.orderCode}, cliente ${entry.customerName}, aprovado.`)
+    } catch (error) {
+      setPaymentFeedback(error instanceof Error ? error.message : 'Não foi possível aprovar o comprovante selecionado.')
+    } finally {
+      setIsActionBusy(false)
+    }
+  }
+
+  async function handleRejectPaymentFromQueue(entry: FinanceEntry, reason: string) {
+    if (!entry.conversationId || !entry.proof) return
+    setIsActionBusy(true)
+    setPaymentFeedback(null)
+    try {
+      const conversation = await rejectConversationPaymentProof(entry.conversationId, entry.proof.id, { reason })
+      replaceConversation(conversation)
+      await loadSnapshot()
+      refreshConversationState()
+      setPaymentFeedback(`Comprovante do pedido ${entry.orderCode}, cliente ${entry.customerName}, enviado para correção.`)
+    } catch (error) {
+      setPaymentFeedback(error instanceof Error ? error.message : 'Não foi possível rejeitar o comprovante selecionado.')
     } finally {
       setIsActionBusy(false)
     }
@@ -1475,8 +1636,9 @@ function App() {
     setActiveModal(modal)
   }
 
-  function handleOpenVoidPayment(orderId: string) {
+  function handleOpenVoidPayment(orderId: string, paymentId?: string) {
     setSelectedOrderId(orderId)
+    setPaymentToVoidId(paymentId ?? null)
     setPaymentVoidReason('')
     setActionError(null)
     setActiveModal('void-payment')
@@ -1531,7 +1693,7 @@ function App() {
     }
     const product = snapshot?.products.find((candidate) => candidate.id === item.edit?.productId)
     if (!product) {
-      setActionError('A configuracao atual deste produto nao esta disponivel para edicao.')
+      setActionError('A configuração atual deste produto não está disponível para edição.')
       return
     }
     const draft = hydrateEditableOrderItem(product, item)
@@ -1627,6 +1789,7 @@ function App() {
     setNewOrderWalkInPhone('')
     setNewOrderNotes('')
     setNewOrderFulfillmentType('pickup')
+    setNewOrderSellerId('')
   }
 
   function renderPage() {
@@ -1656,7 +1819,6 @@ function App() {
       case 'conversas':
         return (
           <ConversationsPage
-            alerts={conversationAlerts}
             conversations={snapshot.conversations}
             error={conversationError}
             isActionBusy={isActionBusy}
@@ -1688,17 +1850,23 @@ function App() {
         return (
           <CounterSalesPage
             canManageOrders={canManageOrders}
+            canViewPrinting={canViewPrinting}
             onSaleChanged={loadSnapshot}
+            sellerCandidates={snapshot.sellerCandidates}
           />
         )
       case 'pedidos':
         return (
           <OrdersPage
+            canManageFinance={canManageFinance}
             canManageOrders={canManageOrders}
+            canManagePrinting={canManagePrinting}
             canPermanentlyDeleteOrders={canPermanentlyDeleteOrders}
             canRunDestructiveTestCleanup={canRunDestructiveTestCleanup}
-            isLoading={isLoadingSnapshot}
+            canViewPrinting={canViewPrinting}
+            isLoading={isLoadingSnapshot || isActionBusy}
             onAdvanceOrder={handleAdvanceOrderFulfillment}
+            onConfirmPrint={handleConfirmPrint}
             onNewOrder={handleNewOrder}
             onOpenConversation={(conversationId) => { setSelectedConversationId(conversationId); setActiveRoute('conversas') }}
             onEditItem={openEditItem}
@@ -1722,7 +1890,9 @@ function App() {
             }}
             onRequestPermanentDelete={handleOpenPermanentDelete}
             onSelectOrder={setSelectedOrderId}
+            onAssignSeller={handleAssignSeller}
             orders={snapshot.orders}
+            sellerCandidates={snapshot.sellerCandidates}
             selectedOrder={selectedOrder}
           />
         )
@@ -1734,17 +1904,26 @@ function App() {
           />
         )
       case 'entregas':
-        return <DeliveryPage />
+        return <DeliveryPage canManageDelivery={canManageOrders} onOrderChanged={loadSnapshot} />
       case 'pagamentos':
         return (
           <FinancePage
-            canConfirmPayment={selectedOrder !== undefined && selectedOrder.status !== 'cancelado' && selectedOrder.amountDue > 0}
+            canConfirmPayment={user?.permissions.includes('payments.manage') ?? false}
+            canReviewPaymentProof={user?.permissions.includes('whatsapp.manage') ?? false}
+            canManageFinance={canManageFinance}
             entries={snapshot.financeEntries}
             expenses={snapshot.expenses}
+            isPaymentActionBusy={isActionBusy}
             mode="pagamentos"
+            onApprovePaymentProof={handleApprovePaymentFromQueue}
+            onConfirmPayment={handleOpenPaymentEntry}
+            onOpenConversation={(conversationId) => { setSelectedConversationId(conversationId); setActiveRoute('conversas') }}
             onOpenModal={openModal}
+            onOpenOrder={(orderId) => { setSelectedOrderId(orderId); setActiveRoute('pedidos') }}
             onOpenPermanentDelete={handleOpenPermanentDelete}
+            onRejectPaymentProof={handleRejectPaymentFromQueue}
             onOpenVoidPayment={handleOpenVoidPayment}
+            paymentFeedback={paymentFeedback}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
           />
@@ -1752,13 +1931,22 @@ function App() {
       case 'financeiro':
         return (
           <FinancePage
-            canConfirmPayment={selectedOrder !== undefined && selectedOrder.status !== 'cancelado' && selectedOrder.amountDue > 0}
+            canConfirmPayment={user?.permissions.includes('payments.manage') ?? false}
+            canReviewPaymentProof={user?.permissions.includes('whatsapp.manage') ?? false}
+            canManageFinance={canManageFinance}
             entries={snapshot.financeEntries}
             expenses={snapshot.expenses}
+            isPaymentActionBusy={isActionBusy}
             mode="financeiro"
+            onApprovePaymentProof={handleApprovePaymentFromQueue}
+            onConfirmPayment={handleOpenPaymentEntry}
+            onOpenConversation={(conversationId) => { setSelectedConversationId(conversationId); setActiveRoute('conversas') }}
             onOpenModal={openModal}
+            onOpenOrder={(orderId) => { setSelectedOrderId(orderId); setActiveRoute('pedidos') }}
             onOpenPermanentDelete={handleOpenPermanentDelete}
+            onRejectPaymentProof={handleRejectPaymentFromQueue}
             onOpenVoidPayment={handleOpenVoidPayment}
+            paymentFeedback={paymentFeedback}
             paymentMethods={snapshot.paymentMethods}
             summary={snapshot.financialSummary}
           />
@@ -1766,19 +1954,40 @@ function App() {
       case 'clientes':
         return (
           <CustomersPage
+            canDeleteCustomers={canManageCustomers}
             customers={snapshot.customers}
+            initialSelectedCustomerId={selectedCustomerId}
             onCreateCustomer={handleCreateCustomerFromPage}
+            onDeleteCustomer={handleDeleteCustomerFromPage}
             onUpdateCustomer={handleUpdateCustomerFromPage}
           />
         )
       case 'relatorios':
         return <ReportsPage />
       case 'whatsapp':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="whatsapp" />
+        return <WhatsAppIntegrationPage onNavigate={handleNavigation} />
       case 'ia':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="ia" />
+        return <AiAutomationPage />
+      case 'assistente':
+        return user?.company ? <SystemAssistantPage companyId={user.company.id} currentRoute={activeRoute} onNavigate={handleNavigation} onOpenCustomer={(customerId) => { setSelectedCustomerId(customerId); handleNavigation('clientes') }} onOpenOrder={(orderId) => { setSelectedOrderId(orderId); handleNavigation('pedidos') }} userId={user.id} /> : null
+      case 'suporte':
+        return <SupportPage onNavigate={handleNavigation} />
       case 'perfil':
-        return <SettingsPage integrations={snapshot.integrations} onNavigate={handleNavigation} onOpenModal={openModal} variant="perfil" />
+        return <AccountPage key="profile" onProfileChanged={refreshAuth} />
+      case 'empresa':
+        return <AccountPage company key="company" />
+      case 'configuracoes-gerais':
+        return <GeneralSettingsPage onBack={() => handleNavigation('configuracoes')} />
+      case 'configuracoes-usuarios':
+        return <UserManagementPage onBack={() => handleNavigation('configuracoes')} onUsersChanged={() => void loadSnapshot()} />
+      case 'configuracoes-marca':
+        return <BrandSettingsPage onNavigate={handleNavigation} />
+      case 'configuracoes-impressao':
+        return <PrintSettingsPage onBack={() => handleNavigation('configuracoes')} />
+      case 'configuracoes-pagamentos':
+        return <PaymentSettingsPage onBack={() => handleNavigation('configuracoes')} />
+      case 'configuracoes-seguranca':
+        return <SecuritySettingsPage onNavigate={handleNavigation} />
       case 'configuracoes':
       default:
         return (
@@ -1824,6 +2033,7 @@ function App() {
         activeRoute={activeRoute}
         hydrated={notificationsHydrated}
         notifications={operationalNotifications}
+        storageScope={user?.id ?? 'anonymous'}
         onOpenConversation={(conversationId) => {
           setSelectedConversationId(conversationId)
           setActiveRoute('conversas')
@@ -1888,6 +2098,7 @@ function App() {
           newOrderCustomerResults={newOrderCustomerResults}
           newOrderFulfillmentType={newOrderFulfillmentType}
           newOrderNotes={newOrderNotes}
+          newOrderSellerId={newOrderSellerId}
           onAutomationModeChange={setAutomationMode}
           onBeneficiaryNameChange={setBeneficiaryName}
           onCancelNotesChange={setCancelNotes}
@@ -1911,6 +2122,7 @@ function App() {
           onNewOrderCustomerQueryChange={setNewOrderCustomerQuery}
           onNewOrderFulfillmentTypeChange={setNewOrderFulfillmentType}
           onNewOrderNotesChange={setNewOrderNotes}
+          onNewOrderSellerIdChange={setNewOrderSellerId}
           onNewOrderWalkInPhoneChange={setNewOrderWalkInPhone}
           onPaymentAmountChange={setPaymentAmount}
           onPaymentMethodChange={setPaymentMethod}
@@ -1938,6 +2150,7 @@ function App() {
           selectedConversation={selectedConversation}
           selectedNewOrderCustomer={selectedNewOrderCustomer}
           selectedOrder={selectedOrder}
+          sellerCandidates={snapshot.sellerCandidates}
           selectedOptionIds={selectedOptionIds}
           selectedProductId={selectedProductId}
           statusNotes={statusNotes}
@@ -2416,10 +2629,21 @@ function primaryLabelForModal(modal: AppModal): string {
     case 'edit-item':
       return 'Salvar alterações'
     case 'toggle-ai':
-      return 'Confirmar alteracao'
+      return 'Confirmar alteração'
     default:
       return 'Confirmar'
   }
+}
+
+function paymentMethodForForm(method: FinanceEntry['paymentMethod']): 'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other' {
+  return ({
+    pix: 'pix',
+    dinheiro: 'cash',
+    cartao: 'credit_card',
+    credito_cliente: 'customer_credit',
+    misto: 'other',
+    a_confirmar: 'pix',
+  } as const)[method]
 }
 
 function emptyOperationalSnapshot(user: AuthUser | null): OperationalSnapshot {
@@ -2434,6 +2658,7 @@ function emptyOperationalSnapshot(user: AuthUser | null): OperationalSnapshot {
       destructive_cleanup_environment: 'unknown',
     },
     orders: [],
+    sellerCandidates: [],
     conversations: [],
     customers: [],
     products: [],
@@ -2494,6 +2719,7 @@ function mergeConversation(current: Conversation | undefined, incoming: Conversa
   return {
     ...current,
     ...incoming,
+    hasCopilotAnalysis: current.hasCopilotAnalysis === true || incoming.hasCopilotAnalysis === true,
     messages: sortConversationMessages(Array.from(messages.values())),
   }
 }

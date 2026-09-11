@@ -3,6 +3,7 @@
 namespace Tests\Feature\Ai;
 
 use App\Contracts\Ai\ConversationCopilotProviderInterface;
+use App\Models\AutomationEvent;
 use App\Models\Company;
 use App\Models\Conversation;
 use App\Models\Customer;
@@ -17,6 +18,7 @@ use App\Services\Ai\ConversationCopilotService;
 use App\Services\Ai\CopilotOrderProposalPresenter;
 use App\Services\Ai\Providers\FakeConversationCopilotProvider;
 use App\Services\Orders\OrderWorkflowService;
+use Carbon\CarbonImmutable;
 use Database\Seeders\RoleAndPermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -24,6 +26,220 @@ use Tests\TestCase;
 class ConversationCopilotTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_conversation_list_exposes_existing_copilot_analysis_without_requiring_an_alert(): void
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $company = Company::query()->create(['name' => 'Empresa A', 'slug' => 'empresa-a']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+
+        foreach ([Conversation::AUTOMATION_MODE_AUTOMATIC, Conversation::AUTOMATION_MODE_MANUAL] as $mode) {
+            $customer = Customer::query()->create(['company_id' => $company->id, 'name' => "Cliente {$mode}"]);
+            $conversation = Conversation::query()->create([
+                'company_id' => $company->id,
+                'customer_id' => $customer->id,
+                'channel' => 'whatsapp',
+                'status' => 'open',
+                'automation_mode' => $mode,
+                'started_at' => now(),
+            ]);
+            AutomationEvent::query()->create([
+                'company_id' => $company->id,
+                'conversation_id' => $conversation->id,
+                'provider' => 'openai',
+                'event_type' => AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION,
+                'status' => AutomationEvent::STATUS_DISPATCHED,
+                'requires_human_confirmation' => false,
+                'payload' => ['intent' => 'ORDER_CONTINUE'],
+                'processed_at' => now(),
+            ]);
+        }
+
+        $conversations = collect($this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->json('data.conversations'));
+
+        $this->assertCount(2, $conversations);
+        $this->assertTrue($conversations->every(fn (array $conversation): bool => $conversation['hasCopilotAnalysis'] === true));
+        $this->assertTrue($conversations->every(fn (array $conversation): bool => $conversation['alerts'] === []));
+
+        $snapshotConversations = collect($this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.conversations'));
+
+        $this->assertCount(2, $snapshotConversations);
+        $this->assertTrue($snapshotConversations->every(fn (array $conversation): bool => $conversation['hasCopilotAnalysis'] === true));
+        $this->assertTrue($snapshotConversations->every(fn (array $conversation): bool => $conversation['actionableAlertCount'] === 0));
+    }
+
+    public function test_manual_copilot_analysis_remains_detectable_after_reload_and_detail_reselection(): void
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $company = Company::query()->create(['name' => 'Empresa A', 'slug' => 'empresa-a']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente manual']);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_MANUAL,
+            'started_at' => now(),
+        ]);
+        Message::query()->create([
+            'conversation_id' => $conversation->id,
+            'sender' => 'customer',
+            'direction' => 'inbound',
+            'sender_type' => 'customer',
+            'content' => 'oi',
+            'type' => 'text',
+            'received_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', false);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/copilot/analyze")
+            ->assertOk();
+
+        $this->assertNotNull($conversation->refresh()->last_ai_suggestion_at);
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->getJson("/api/app/conversations/{$conversation->id}")
+            ->assertOk()
+            ->assertJsonPath('data.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', true);
+    }
+
+    public function test_incremental_conversation_reload_detects_a_new_automatic_copilot_analysis(): void
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $createdAt = CarbonImmutable::now();
+        $company = Company::query()->create(['name' => 'Empresa A', 'slug' => 'empresa-a']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente automatico']);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
+            'started_at' => $createdAt,
+        ]);
+        $since = $createdAt->addSecond();
+        $this->travelTo($createdAt->addSeconds(2));
+        $event = AutomationEvent::query()->create([
+            'company_id' => $company->id,
+            'conversation_id' => $conversation->id,
+            'provider' => 'openai',
+            'event_type' => AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION,
+            'status' => AutomationEvent::STATUS_DISPATCHED,
+            'requires_human_confirmation' => false,
+            'payload' => ['intent' => 'ORDER_CONTINUE'],
+            'processed_at' => now(),
+        ]);
+
+        $this->assertTrue($event->updated_at->isAfter($since));
+        $this->assertSame(1, Conversation::query()
+            ->whereKey($conversation->id)
+            ->whereHas('automationEvents', fn ($events) => $events->where('updated_at', '>', $since))
+            ->count());
+
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations?since='.urlencode($since->toIso8601String()))
+            ->assertOk()
+            ->assertJsonCount(1, 'data.conversations')
+            ->assertJsonPath('data.conversations.0.id', (string) $conversation->id)
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', true);
+    }
+
+    public function test_canonical_analysis_availability_survives_snapshot_poll_detail_reselection_and_mode_changes(): void
+    {
+        $this->seed(RoleAndPermissionSeeder::class);
+        $createdAt = CarbonImmutable::now();
+        $company = Company::query()->create(['name' => 'Empresa A', 'slug' => 'empresa-a']);
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+        $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente persistente']);
+        $conversation = Conversation::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $customer->id,
+            'channel' => 'whatsapp',
+            'status' => 'open',
+            'automation_mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
+            'started_at' => $createdAt,
+        ]);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', false);
+
+        $since = $createdAt->addSecond();
+        $this->travelTo($createdAt->addSeconds(2));
+        AutomationEvent::query()->create([
+            'company_id' => $company->id,
+            'conversation_id' => $conversation->id,
+            'provider' => 'openai',
+            'event_type' => AutomationEvent::TYPE_COPILOT_AUTOMATION_DECISION,
+            'status' => AutomationEvent::STATUS_DISPATCHED,
+            'requires_human_confirmation' => false,
+            'payload' => ['intent' => 'PRODUCT_CLARIFICATION'],
+            'processed_at' => now(),
+        ]);
+
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations?since='.urlencode($since->toIso8601String()))
+            ->assertOk()
+            ->assertJsonCount(1, 'data.conversations')
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->getJson("/api/app/conversations/{$conversation->id}")
+            ->assertOk()
+            ->assertJsonPath('data.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/mode", [
+                'mode' => Conversation::AUTOMATION_MODE_MANUAL,
+                'reason' => 'Atendimento assumido.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->postJson("/api/app/conversations/{$conversation->id}/mode", [
+                'mode' => Conversation::AUTOMATION_MODE_AUTOMATIC,
+                'reason' => 'Automação reativada.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->assertJsonPath('data.conversations.0.hasCopilotAnalysis', true);
+        $this->actingAs($user)
+            ->getJson("/api/app/conversations/{$conversation->id}")
+            ->assertOk()
+            ->assertJsonPath('data.hasCopilotAnalysis', true);
+
+        $this->assertSame(0, $conversation->alerts()->currentActionable()->count());
+    }
 
     public function test_analysis_without_a_current_inbound_message_is_internal_and_does_not_resurrect_order_context(): void
     {
@@ -310,7 +526,10 @@ class ConversationCopilotTest extends TestCase
 
         $analysis = app(ConversationCopilotService::class)->analyze($conversation);
 
-        $this->assertSame('Entendi: 1 N5 Casa. Confere?', $analysis['suggested_reply']);
+        $this->assertStringContainsString('1x N5 Casa', $analysis['suggested_reply']);
+        $this->assertStringContainsString('Está tudo certo?', $analysis['suggested_reply']);
+        $this->assertStringNotContainsString('confirmei pagamento', mb_strtolower($analysis['suggested_reply']));
+        $this->assertSame('CONFIRM_ITEM', data_get($analysis, 'metadata.order_context.next_objective'));
     }
 
     public function test_product_clarification_replaces_a_biased_provider_example_with_current_company_candidates(): void

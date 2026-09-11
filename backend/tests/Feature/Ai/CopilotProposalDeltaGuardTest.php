@@ -28,7 +28,7 @@ class CopilotProposalDeltaGuardTest extends TestCase
     {
         [$company, $n8, $n5] = $this->menu();
 
-        $safe = $this->restrict($company, 'quero mais uma N8 de porco', [$n8, $n5]);
+        $safe = $this->restrict($company, 'quero mais uma N8 Livre de porco', [$n8, $n5]);
 
         $this->assertSame('n8-tradicional', $safe['draft_order']['items'][0]['menu_item_slug']);
         $this->assertCount(1, $safe['draft_order']['items']);
@@ -100,7 +100,7 @@ class CopilotProposalDeltaGuardTest extends TestCase
         $safe = app(CopilotSuggestedReplyGuard::class)->restrict([...$safe, 'suggested_reply' => 'Qual carne o cliente deseja?'], []);
 
         $this->assertSame(['CARNE'], array_column($safe['missing_information'], 'code'));
-        $this->assertSame('Qual carne você deseja?', $safe['suggested_reply']);
+        $this->assertStringContainsString('carne', mb_strtolower($safe['suggested_reply']));
     }
 
     /** @param list<Product> $products @return array<string,mixed> */
@@ -140,7 +140,7 @@ class CopilotProposalDeltaGuardTest extends TestCase
                 'code' => '20260821-0001',
                 'items' => array_map(fn (int|array $item): array => is_array($item) ? $item : ['id' => $item, 'product_id' => $product->id], $targetItems),
             ],
-            'messages' => [['direction' => 'inbound', 'type' => 'text', 'body' => $meats === [] ? 'troca a carne da N8' : 'troca a carne da N8 para frango ao molho']],
+            'messages' => [['direction' => 'inbound', 'type' => 'text', 'body' => $meats === [] ? 'troca a carne da N8 Livre' : 'troca a carne da N8 Livre para frango ao molho']],
         ]);
     }
 

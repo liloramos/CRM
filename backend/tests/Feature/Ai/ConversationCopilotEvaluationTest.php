@@ -75,12 +75,19 @@ class ConversationCopilotEvaluationTest extends TestCase
             }
             $scores = $scorer->score($fixture, $analysis);
             $intentCorrect = $scores['intent'];
-            $this->assertTrue($intentCorrect, $fixture['id'].' '.$fixture['category'].' intent');
+            $this->assertTrue(
+                $intentCorrect,
+                $fixture['id'].' '.$fixture['category'].' intent expected='.$fixture['intent'].' actual='.($analysis['intent'] ?? 'null'),
+            );
 
             if (isset($fixture['product'])) {
                 $item = $analysis['draft_order']['items'][0] ?? [];
                 $productCorrect = $scores['product'];
-                $this->assertTrue($productCorrect, $fixture['id'].' '.$fixture['category'].' product');
+                $this->assertTrue(
+                    $productCorrect,
+                    $fixture['id'].' '.$fixture['category'].' product expected='.$fixture['product'].' actual='.($item['menu_item_slug'] ?? 'null')
+                        .' warnings='.json_encode(array_column($analysis['warnings'] ?? [], 'code')),
+                );
                 if (($fixture['expected_quantity'] ?? null) !== null) {
                     $quantityCorrect = $scores['quantity'];
                     $this->assertTrue($quantityCorrect, $fixture['id'].' '.$fixture['category'].' quantity');

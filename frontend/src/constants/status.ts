@@ -2,7 +2,7 @@ import type { BadgeTone } from '../types/crm'
 
 export const orderStatusConfig = {
   novo: { label: 'Novo', tone: 'warning' },
-  em_conferencia: { label: 'Em conferencia', tone: 'info' },
+  em_conferencia: { label: 'Em conferência', tone: 'info' },
   aguardando_pagamento: { label: 'Aguardando pagamento', tone: 'warning' },
   comprovante_recebido: { label: 'Comprovante recebido', tone: 'info' },
   pagamento_confirmado: { label: 'Pagamento confirmado', tone: 'success' },
@@ -17,15 +17,15 @@ export const orderStatusConfig = {
 } satisfies Record<string, { label: string; tone: BadgeTone }>
 
 export const printStatusConfig = {
-  aguardando: { label: 'Aguardando impressao', tone: 'warning' },
+  aguardando: { label: 'Aguardando impressão', tone: 'warning' },
   imprimindo: { label: 'Imprimindo', tone: 'info' },
   impresso: { label: 'Impresso', tone: 'success' },
-  reimpressao: { label: 'Reimpressao solicitada', tone: 'manual' },
-  erro: { label: 'Falha na impressao', tone: 'danger' },
+  reimpressao: { label: 'Reimpressão solicitada', tone: 'manual' },
+  erro: { label: 'Falha na impressão', tone: 'danger' },
 } satisfies Record<string, { label: string; tone: BadgeTone }>
 
 export const conversationModeConfig = {
   ia: { label: 'IA assistindo', tone: 'success' },
   manual: { label: 'Atendimento manual', tone: 'manual' },
-  atencao: { label: 'Atencao necessaria', tone: 'danger' },
+  atencao: { label: 'Atenção necessária', tone: 'danger' },
 } satisfies Record<string, { label: string; tone: BadgeTone }>

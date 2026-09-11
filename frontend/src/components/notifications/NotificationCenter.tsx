@@ -5,11 +5,13 @@ import './NotificationCenter.css'
 
 const SOUND_PREFERENCE_KEY = 'chatbotcrm.notifications.sound-enabled'
 const SEEN_NOTIFICATIONS_KEY = 'chatbotcrm.notifications.seen-ids'
+const DISMISSED_NOTIFICATIONS_KEY = 'chatbotcrm.notifications.dismissed-ids'
 
 type NotificationCenterProps = {
   activeRoute: RouteKey
   hydrated: boolean
   notifications: OperationalNotification[]
+  storageScope: string
   onOpenConversation: (conversationId: string) => void
   onOpenOrder: (orderId: string) => void
   onOpenPayments: () => void
@@ -19,18 +21,25 @@ export function NotificationCenter({
   activeRoute,
   hydrated,
   notifications,
+  storageScope,
   onOpenConversation,
   onOpenOrder,
   onOpenPayments,
 }: NotificationCenterProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [soundEnabled, setSoundEnabled] = useState(readSoundPreference)
+  const [actionStatus, setActionStatus] = useState<string | null>(null)
   const [unseenIds, setUnseenIds] = useState<Set<string>>(new Set())
+  const [dismissedIds, setDismissedIds] = useState(() => readDismissedIds(storageScope))
   const knownIdsRef = useRef<Set<string> | null>(null)
-  const seenIdsRef = useRef(readSeenIds())
+  const seenIdsRef = useRef(readSeenIds(storageScope))
   const audioContextRef = useRef<AudioContext | null>(null)
   const audioUnlockedRef = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const visibleNotifications = useMemo(
+    () => notifications.filter((notification) => !dismissedIds.has(notification.id)),
+    [dismissedIds, notifications],
+  )
 
   useEffect(() => {
     const unlock = () => {
@@ -50,15 +59,16 @@ export function NotificationCenter({
   useEffect(() => {
     if (!hydrated) return
 
-    const currentIds = new Set(notifications.map((notification) => notification.id))
+    const currentIds = new Set(visibleNotifications.map((notification) => notification.id))
 
     if (knownIdsRef.current === null) {
       knownIdsRef.current = currentIds
+      setUnseenIds(new Set([...currentIds].filter((id) => !seenIdsRef.current.has(id))))
       return
     }
 
-    const newNotifications = notifications.filter((notification) => !knownIdsRef.current?.has(notification.id))
-    notifications.forEach((notification) => knownIdsRef.current?.add(notification.id))
+    const newNotifications = visibleNotifications.filter((notification) => !knownIdsRef.current?.has(notification.id))
+    visibleNotifications.forEach((notification) => knownIdsRef.current?.add(notification.id))
     setUnseenIds((current) => {
       const next = new Set([...current].filter((id) => currentIds.has(id)))
       newNotifications.forEach((notification) => {
@@ -70,7 +80,7 @@ export function NotificationCenter({
     if (newNotifications.length > 0 && soundEnabled && audioUnlockedRef.current && document.visibilityState === 'visible') {
       playNotificationSound(getAudioContext(audioContextRef))
     }
-  }, [hydrated, notifications, soundEnabled])
+  }, [hydrated, soundEnabled, visibleNotifications])
 
   useEffect(() => {
     if (!isOpen) return undefined
@@ -90,7 +100,13 @@ export function NotificationCenter({
     }
   }, [isOpen])
 
-  const recentNotifications = useMemo(() => notifications.slice(0, 20), [notifications])
+  useEffect(() => {
+    if (!actionStatus) return undefined
+    const timeout = window.setTimeout(() => setActionStatus(null), 2400)
+    return () => window.clearTimeout(timeout)
+  }, [actionStatus])
+
+  const recentNotifications = useMemo(() => visibleNotifications.slice(0, 20), [visibleNotifications])
 
   function markSeen(ids: string[]) {
     ids.forEach((id) => seenIdsRef.current.add(id))
@@ -99,15 +115,11 @@ export function NotificationCenter({
       ids.forEach((id) => next.delete(id))
       return next
     })
-    writeSeenIds(seenIdsRef.current)
+    writeSeenIds(storageScope, seenIdsRef.current)
   }
 
   function toggleCenter() {
-    setIsOpen((current) => {
-      const next = !current
-      if (next) markSeen(notifications.map((notification) => notification.id))
-      return next
-    })
+    setIsOpen((current) => !current)
   }
 
   function openNotification(notification: OperationalNotification) {
@@ -124,6 +136,16 @@ export function NotificationCenter({
     writeSoundPreference(next)
     audioUnlockedRef.current = true
     if (next) playNotificationSound(getAudioContext(audioContextRef))
+    setActionStatus(next ? 'Som das notificações ativado.' : 'Som das notificações desativado.')
+  }
+
+  function clearAll() {
+    const next = new Set(dismissedIds)
+    visibleNotifications.forEach((notification) => next.add(notification.id))
+    markSeen(visibleNotifications.map((notification) => notification.id))
+    setDismissedIds(next)
+    writeDismissedIds(storageScope, next)
+    setActionStatus('Notificações limpas neste dispositivo.')
   }
 
   return (
@@ -135,10 +157,15 @@ export function NotificationCenter({
               <strong>Notificações</strong>
               <span>{unseenIds.size > 0 ? `${unseenIds.size} nova${unseenIds.size > 1 ? 's' : ''}` : 'Tudo visto'}</span>
             </div>
-            <button aria-label={soundEnabled ? 'Desativar som' : 'Ativar som'} className="notification-center__sound" onClick={toggleSound} title={soundEnabled ? 'Desativar som' : 'Ativar som'} type="button">
-              <Icon name={soundEnabled ? 'sound' : 'sound-off'} size={17} />
-            </button>
+            <div className="notification-center__actions">
+              {unseenIds.size > 0 ? <button className="notification-center__text-action" onClick={() => { markSeen(visibleNotifications.map((notification) => notification.id)); setActionStatus('Notificações marcadas como vistas.') }} type="button">Marcar vistas</button> : null}
+              {visibleNotifications.length > 0 ? <button className="notification-center__text-action" onClick={clearAll} type="button">Limpar todas</button> : null}
+              <button aria-label={soundEnabled ? 'Desativar som' : 'Ativar som'} className="notification-center__sound" onClick={toggleSound} title={soundEnabled ? 'Desativar som' : 'Ativar som'} type="button">
+                <Icon name={soundEnabled ? 'sound' : 'sound-off'} size={17} />
+              </button>
+            </div>
           </header>
+          {actionStatus ? <p className="notification-center__feedback" role="status">{actionStatus}</p> : null}
           <div className="notification-center__list">
             {recentNotifications.length > 0 ? recentNotifications.map((notification) => (
               <button className={`notification-center__item notification-center__item--${notification.severity}`} key={notification.id} onClick={() => openNotification(notification)} type="button">
@@ -149,7 +176,7 @@ export function NotificationCenter({
                   <time>{formatNotificationTime(notification.occurredAt)}</time>
                 </span>
               </button>
-            )) : <p>Nenhuma notificação recente.</p>}
+            )) : <p>Nenhuma notificação nova.</p>}
           </div>
         </section>
       ) : null}
@@ -199,20 +226,37 @@ function writeSoundPreference(enabled: boolean) {
   }
 }
 
-function readSeenIds(): Set<string> {
+function readSeenIds(scope: string): Set<string> {
   try {
-    const value = JSON.parse(window.localStorage.getItem(SEEN_NOTIFICATIONS_KEY) ?? '[]')
+    const value = JSON.parse(window.localStorage.getItem(`${SEEN_NOTIFICATIONS_KEY}:${scope}`) ?? '[]')
     return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [])
   } catch {
     return new Set()
   }
 }
 
-function writeSeenIds(ids: Set<string>) {
+function writeSeenIds(scope: string, ids: Set<string>) {
   try {
-    window.localStorage.setItem(SEEN_NOTIFICATIONS_KEY, JSON.stringify([...ids].slice(-200)))
+    window.localStorage.setItem(`${SEEN_NOTIFICATIONS_KEY}:${scope}`, JSON.stringify([...ids].slice(-200)))
   } catch {
     // Seen state remains valid for the current session when storage is restricted.
+  }
+}
+
+function readDismissedIds(scope: string): Set<string> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(`${DISMISSED_NOTIFICATIONS_KEY}:${scope}`) ?? '[]')
+    return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeDismissedIds(scope: string, ids: Set<string>) {
+  try {
+    window.localStorage.setItem(`${DISMISSED_NOTIFICATIONS_KEY}:${scope}`, JSON.stringify([...ids].slice(-300)))
+  } catch {
+    // Dismissed state remains valid for the current session when storage is restricted.
   }
 }
 

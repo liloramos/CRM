@@ -16,12 +16,17 @@ use Laravel\Fortify\Contracts\PasskeyUser;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
-#[Fillable(['company_id', 'name', 'email', 'password'])]
+#[Fillable(['company_id', 'name', 'email', 'phone', 'job_title', 'can_be_seller', 'is_active', 'avatar_path', 'password'])]
 #[Hidden(['password', 'two_factor_secret', 'two_factor_recovery_codes', 'remember_token'])]
 class User extends Authenticatable implements PasskeyUser
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable;
+
+    protected $attributes = [
+        'can_be_seller' => false,
+        'is_active' => true,
+    ];
 
     /**
      * Get the attributes that should be cast.
@@ -33,6 +38,8 @@ class User extends Authenticatable implements PasskeyUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'can_be_seller' => 'boolean',
+            'is_active' => 'boolean',
             /* @chisel-2fa */
             'two_factor_confirmed_at' => 'datetime',
             /* @end-chisel-2fa */
@@ -49,9 +56,21 @@ class User extends Authenticatable implements PasskeyUser
         return $this->belongsToMany(Role::class)->withTimestamps();
     }
 
+    public function permissionOverrides(): BelongsToMany
+    {
+        return $this->belongsToMany(Permission::class)
+            ->withPivot('granted')
+            ->withTimestamps();
+    }
+
     public function createdOrders(): HasMany
     {
         return $this->hasMany(Order::class, 'created_by_user_id');
+    }
+
+    public function sellerOrders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'seller_user_id');
     }
 
     public function orderStatusHistories(): HasMany
@@ -182,6 +201,14 @@ class User extends Authenticatable implements PasskeyUser
             return true;
         }
 
+        $override = $this->permissionOverrides()
+            ->where('name', $permission)
+            ->first();
+
+        if ($override instanceof Permission) {
+            return (bool) $override->pivot->granted;
+        }
+
         return $this->roles()
             ->whereHas('permissions', fn ($query) => $query->where('name', $permission))
             ->exists();
@@ -192,7 +219,11 @@ class User extends Authenticatable implements PasskeyUser
      */
     public function roleNames(): array
     {
-        return $this->roles()->pluck('name')->all();
+        return $this->roles()
+            ->pluck('name')
+            ->sortByDesc(fn (string $role): int => Role::authorityLevel($role))
+            ->values()
+            ->all();
     }
 
     /**
@@ -204,12 +235,37 @@ class User extends Authenticatable implements PasskeyUser
             return array_keys(Permission::defaults());
         }
 
-        return $this->roles()
+        $permissions = $this->roles()
             ->with('permissions:id,name')
             ->get()
             ->flatMap(fn (Role $role) => $role->permissions->pluck('name'))
             ->unique()
-            ->values()
-            ->all();
+            ->keyBy(fn (string $name): string => $name);
+
+        $this->permissionOverrides()
+            ->get(['permissions.id', 'permissions.name'])
+            ->each(function (Permission $permission) use ($permissions): void {
+                if ((bool) $permission->pivot->granted) {
+                    $permissions->put($permission->name, $permission->name);
+                } else {
+                    $permissions->forget($permission->name);
+                }
+            });
+
+        return $permissions->keys()->values()->all();
+    }
+
+    public function authorityLevel(): int
+    {
+        return $this->roleNames()
+            ? max(array_map(fn (string $role): int => Role::authorityLevel($role), $this->roleNames()))
+            : 0;
+    }
+
+    public function primaryRoleName(): ?string
+    {
+        return collect($this->roleNames())
+            ->sortByDesc(fn (string $role): int => Role::authorityLevel($role))
+            ->first();
     }
 }

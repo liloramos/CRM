@@ -59,7 +59,10 @@ final class CopilotIntentGroundingGuard
         }
 
         if ($items === [] && in_array('PRODUCT', $missingCodes, true)) {
-            return 'UNKNOWN';
+            return $this->hasPurchaseCue($latest)
+                && in_array((string) data_get($context, 'latest_intent'), ['ORDER_CREATE', 'ORDER_CONTINUE'], true)
+                ? (string) data_get($context, 'latest_intent')
+                : 'UNKNOWN';
         }
 
         return $proposed;

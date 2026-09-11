@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductGroupComponent;
 use App\Models\ProductOptionGroup;
 use App\Services\Menu\DailyStructuredMenuService;
+use App\Services\Menu\MenuComponentPresentation;
 use App\Services\Orders\OrderItemSelectionValidator;
 use Carbon\CarbonInterface;
 use DomainException;
@@ -22,6 +23,9 @@ class CopilotOrderItemSelectionAdapter
         private readonly CopilotSelectionGroundingGuard $grounding,
         private readonly CopilotMeatModeGroundingGuard $meatModes,
         private readonly CopilotRemovalGroundingGuard $removals,
+        private readonly CopilotCanonicalEntityResolver $entities,
+        private readonly CopilotDailyMeatEntityResolver $dailyMeatEntities,
+        private readonly MenuComponentPresentation $componentPresentation,
     ) {}
 
     /**
@@ -180,6 +184,7 @@ class CopilotOrderItemSelectionAdapter
                 'removed_components' => $validated['removed_ingredients'] ?? [],
                 'resolved_selections' => $validated['selected_components'] ?? [],
                 'unit_price_cents' => $validated['unit_price_cents'] ?? $product->base_price_cents,
+                'canonical_selection_quote' => $validated['selection_quote'] ?? null,
                 // This is server-produced output from OrderItemSelectionValidator. It is
                 // consumed only by the ACT_SAFE order stager, never by provider output.
                 'validated_order_options' => $validated['options'] ?? [],
@@ -200,10 +205,7 @@ class CopilotOrderItemSelectionAdapter
             return $item;
         }
 
-        $text = collect($customerMessages)
-            ->reverse()
-            ->first(fn (array $message): bool => ($message['direction'] ?? null) === 'inbound' && ($message['type'] ?? 'text') === 'text');
-        $text = $this->key((string) data_get($text, 'body', ''));
+        $text = $this->customerText($customerMessages);
         if ($text === '') {
             return $item;
         }
@@ -219,32 +221,36 @@ class CopilotOrderItemSelectionAdapter
             })
             ->values()
             ->all();
-        foreach ($this->dailyMeatCandidates($company, $product, $date) as $component) {
-            $names = [$component->slug, $component->name, $component->display_name];
-            if (collect($names)->map(fn ($name): string => $this->key((string) $name))->filter(fn (string $name): bool => strlen($name) > 2 && str_contains($text, $name))->isNotEmpty()) {
-                $name = (string) ($component->display_name ?: $component->name);
-                if (! collect($meats)->contains(fn (string $meat): bool => $this->key($meat) === $this->key($name))) {
-                    $meats[] = $name;
-                }
-            }
-        }
-        foreach (['frango', 'porco', 'almondega'] as $reference) {
-            if (! str_contains($text, $reference)) {
-                continue;
-            }
-
-            $component = $this->resolveDailyMeat($company, $product, $date, $reference);
+        $dailyResolution = $this->dailyMeatEntities->resolve($company, $product, $date, $text);
+        $candidates = collect($dailyResolution['components']);
+        $resolution = collect($dailyResolution)->except('components')->all();
+        foreach ($resolution['resolved'] as $match) {
+            $component = $candidates->firstWhere('id', (int) $match['canonical_id']);
             if (! $component instanceof MenuComponent) {
                 continue;
             }
-
             $name = (string) ($component->display_name ?: $component->name);
             if (! collect($meats)->contains(fn (string $meat): bool => $this->key($meat) === $this->key($name))) {
                 $meats[] = $name;
             }
         }
 
-        return [...$item, 'selections' => [...$selections, 'meat' => null, 'meats' => $meats]];
+        return [
+            ...$item,
+            'selections' => [...$selections, 'meat' => null, 'meats' => $meats],
+            'canonical_entity_resolution' => [
+                ...(array) ($item['canonical_entity_resolution'] ?? []),
+                'meats' => $resolution,
+            ],
+        ];
+    }
+
+    /** @param list<array<string,mixed>> $customerMessages @return list<string> */
+    public function explicitDailyMeatNames(Company $company, Product $product, CarbonInterface $date, array $customerMessages): array
+    {
+        $text = $this->customerText($customerMessages);
+
+        return $this->dailyMeatEntities->names($company, $product, $date, $text);
     }
 
     /**
@@ -264,6 +270,9 @@ class CopilotOrderItemSelectionAdapter
         $text = $this->customerText($customerMessages);
         if ($text === '') {
             return ['item' => $item, 'warnings' => []];
+        }
+        if ($this->removals->isGrounded('salada', $customerMessages)) {
+            $text = (string) preg_replace('/\b(?:sem|nao\s+(?:quero|coloca|mande))\s+saladas?\b/ui', ' ', Str::ascii($text));
         }
 
         $day = $this->dailyMenu->day($company, $date);
@@ -287,24 +296,63 @@ class CopilotOrderItemSelectionAdapter
             ->filter(fn (mixed $id): bool => is_numeric($id) && (int) $id > 0)
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
-        foreach ($available as $component) {
-            if (($this->dailyComponentIsExplicit($component, $text)
-                || $this->uniqueDailyComponentShortFormIsExplicit($component, $available, $text))
-                && ! in_array((int) data_get($component, 'id'), $componentIds, true)) {
-                $componentIds[] = (int) data_get($component, 'id');
+        $all = $available->concat($unavailable)->unique(fn (mixed $component): int => (int) data_get($component, 'id'))->values();
+        $availableIdsLookup = array_fill_keys(array_map('intval', $availableIds), true);
+        $resolution = $this->entities->resolve($text, $this->entityRows($all, false, $availableIdsLookup));
+        foreach ($resolution['resolved'] as $match) {
+            $id = (int) $match['canonical_id'];
+            if (($match['available_today'] ?? false) && ! in_array($id, $componentIds, true)) {
+                $componentIds[] = $id;
             }
         }
 
         $warnings = [];
-        if ($unavailable->contains(fn (mixed $component): bool => $this->dailyComponentIsExplicit($component, $text))) {
+        if (collect($resolution['resolved'])->contains(fn (array $match): bool => ! ($match['available_today'] ?? false))) {
             $warnings[] = [
                 'code' => 'UNAVAILABLE_DAILY_COMPONENT',
                 'message' => 'Um componente citado pelo cliente não está disponível hoje e não foi incluído.',
             ];
         }
 
+        $resolvedIds = collect($resolution['resolved'])->pluck('canonical_id')->map(fn (mixed $id): int => (int) $id);
+        $confirmedIds = $resolvedIds
+            ->merge(array_map('intval', $componentIds))
+            ->unique()
+            ->values();
+        $existingCandidates = collect((array) ($item['daily_component_candidates'] ?? []))
+            ->filter(fn (mixed $candidate): bool => is_array($candidate))
+            ->reject(fn (array $candidate): bool => $confirmedIds->intersect(
+                array_map('intval', (array) ($candidate['component_ids'] ?? [])),
+            )->isNotEmpty());
+        $newCandidates = collect($resolution['ambiguous'])->map(fn (array $candidate): array => [
+            'token' => (string) ($candidate['matched_text'] ?? ''),
+            'component_ids' => array_values(array_filter(array_map('intval', (array) ($candidate['candidate_ids'] ?? [])), fn (int $id): bool => isset($availableIdsLookup[$id]))),
+            'names' => array_values((array) ($candidate['candidate_names'] ?? [])),
+            'selection_source' => 'customer_explicit',
+            'status' => 'candidate',
+            'span' => [
+                'char_start' => (int) ($candidate['char_start'] ?? 0),
+                'char_end' => (int) ($candidate['char_end'] ?? 0),
+                'token_start' => (int) ($candidate['token_start'] ?? 0),
+                'token_end' => (int) ($candidate['token_end'] ?? 0),
+            ],
+        ])->filter(fn (array $candidate): bool => count($candidate['component_ids']) > 1);
+        $candidates = $existingCandidates
+            ->merge($newCandidates)
+            ->unique(fn (array $candidate): string => implode(',', array_map('intval', (array) ($candidate['component_ids'] ?? []))))
+            ->values()
+            ->all();
+
         return [
-            'item' => [...$item, 'daily_component_ids' => array_values(array_unique($componentIds))],
+            'item' => [
+                ...$item,
+                'daily_component_ids' => array_values(array_unique($componentIds)),
+                'daily_component_candidates' => $candidates,
+                'canonical_entity_resolution' => [
+                    ...(array) ($item['canonical_entity_resolution'] ?? []),
+                    'components' => $resolution,
+                ],
+            ],
             'warnings' => $warnings,
         ];
     }
@@ -477,116 +525,85 @@ class CopilotOrderItemSelectionAdapter
     {
         $meats = $this->meatValues($product, $selections);
         $meats = is_array($meats) ? $meats : [$meats];
-        $components = [];
+        $components = collect();
+        $unresolved = [];
         foreach ($meats as $meat) {
             if (! is_string($meat)) {
                 continue;
             }
-            $component = $this->resolveDailyMeat($company, $product, $date, $meat);
+            if ($this->isTraditionalMarmita($product)) {
+                $resolution = $this->dailyMeatEntities->resolve($company, $product, $date, $meat);
+                if ($resolution['ambiguous'] !== []) {
+                    $warnings[] = ['code' => 'AMBIGUOUS_MEAT', 'message' => 'A carne informada corresponde a mais de uma opcao disponivel.'];
+
+                    continue;
+                }
+                $component = collect($resolution['components'])->firstWhere(
+                    'id',
+                    (int) data_get($resolution, 'resolved.0.canonical_id'),
+                );
+            } else {
+                $component = $this->resolveLink($product, 'carne', $meat)?->component;
+            }
             if (! $component) {
-                $warnings[] = ['code' => 'UNRESOLVED_MEAT', 'message' => 'Uma carne sugerida nao pertence de forma inequivoca ao produto.'];
+                $unresolved[] = $meat;
 
                 continue;
             }
-            $components[] = $component;
+            $components->put((int) $component->id, $component);
         }
 
-        return $components;
+        foreach ($unresolved as $meat) {
+            if ($this->selectionIsCoveredByCanonicalMeats($meat, $components->values()->all())) {
+                continue;
+            }
+            $warnings[] = ['code' => 'UNRESOLVED_MEAT', 'message' => 'Uma carne sugerida nao pertence de forma inequivoca ao produto.'];
+        }
+
+        return $components->values()->all();
+    }
+
+    /** @param list<MenuComponent> $components */
+    private function selectionIsCoveredByCanonicalMeats(string $selection, array $components): bool
+    {
+        $residual = $this->key($selection);
+        if ($residual === '' || $components === []) {
+            return false;
+        }
+
+        $identities = collect($components)
+            ->flatMap(fn (MenuComponent $component): array => [
+                $this->key((string) $component->slug),
+                $this->key((string) $component->name),
+                $this->key((string) $component->display_name),
+            ])
+            ->filter()
+            ->unique()
+            ->sortByDesc(fn (string $identity): int => strlen($identity));
+        foreach ($identities as $identity) {
+            $residual = str_replace($identity, '', $residual);
+        }
+
+        return in_array($residual, ['', 'e', 'com'], true);
     }
 
     private function resolveDailyMeat(Company $company, Product $product, CarbonInterface $date, string $value): ?MenuComponent
     {
-        $link = $this->resolveLink($product, 'carne', $value);
-        if ($link?->component) {
-            return $link->component;
+        $resolution = $this->dailyMeatEntities->resolve($company, $product, $date, $value);
+        if ($resolution['ambiguous'] !== [] || count($resolution['resolved']) !== 1) {
+            return null;
         }
 
-        $needle = $this->key($value);
-        $availableMeats = collect($this->dailyMeatCandidates($company, $product, $date));
-        $matches = $availableMeats
-            ->filter(fn (MenuComponent $component): bool => in_array($needle, [
-                $this->key((string) $component->slug),
-                $this->key((string) $component->name),
-                $this->key((string) $component->display_name),
-            ], true))
-            ->values();
-
-        if ($matches->count() === 1) {
-            return $matches->first();
-        }
-
-        $partialMatches = $availableMeats
-            ->filter(function (MenuComponent $component) use ($needle): bool {
-                foreach ([$component->slug, $component->name, $component->display_name] as $candidate) {
-                    $candidate = $this->key((string) $candidate);
-                    if ($candidate !== '' && (str_starts_with($candidate, $needle) || str_starts_with($needle, $candidate))) {
-                        return true;
-                    }
-                }
-
-                return false;
-            })
-            ->values();
-
-        if ($partialMatches->count() === 1) {
-            return $partialMatches->first();
-        }
-
-        // Short aliases such as "frango" are safe only when the day's menu
-        // contains one unambiguous component whose canonical name includes it.
-        $containsMatches = $availableMeats
-            ->filter(function (MenuComponent $component) use ($needle): bool {
-                if (strlen($needle) < 4) {
-                    return false;
-                }
-
-                foreach ([$component->slug, $component->name, $component->display_name] as $candidate) {
-                    if (str_contains($this->key((string) $candidate), $needle)) {
-                        return true;
-                    }
-                }
-
-                return false;
-            })
-            ->values();
-
-        return $containsMatches->count() === 1 ? $containsMatches->first() : null;
+        return collect($resolution['components'])->firstWhere(
+            'id',
+            (int) data_get($resolution, 'resolved.0.canonical_id'),
+        );
     }
 
     /** @return list<MenuComponent> */
     private function dailyMeatCandidates(Company $company, Product $product, CarbonInterface $date): array
     {
-        $availableMeatIds = collect(data_get($this->dailyMenu->day($company, $date), 'sections.meat', []))
-            ->filter(fn (array $item): bool => (bool) ($item['available'] ?? false))
-            ->map(fn (array $item): int => (int) data_get($item, 'component.id'))
-            ->filter(fn (int $id): bool => $id > 0)
-            ->unique()
-            ->all();
-        $availableMeats = MenuComponent::query()
-            ->where('company_id', $company->id)
-            ->where('is_active', true)
-            ->where('component_type', 'meat')
-            ->whereIn('id', $availableMeatIds)
-            ->get()
-            ->values();
-        $productMeatIds = $product->optionGroups
-            ->filter(fn ($group): bool => $this->key((string) $group->code) === 'carne')
-            ->flatMap(fn ($group) => $group->componentOptions)
-            ->filter(fn (ProductGroupComponent $link): bool => $link->is_active)
-            ->pluck('menu_component_id')
-            ->map(fn (mixed $id): int => (int) $id)
-            ->all();
-
-        // N8/N9 Livre select traditional meats from the daily menu. Their structured
-        // groups configure beef rules, not a static whitelist of the day's meats.
-        if (in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true)) {
-            return $availableMeats->all();
-        }
-
-        return $availableMeats
-            ->filter(fn (MenuComponent $component): bool => in_array((int) $component->id, $productMeatIds, true))
-            ->values()
-            ->all();
+        return $this->dailyMeatEntities->candidates($company, $product, $date);
     }
 
     /** @param list<array<string,mixed>> $warnings */
@@ -691,60 +708,64 @@ class CopilotOrderItemSelectionAdapter
             ->implode(' ');
     }
 
-    private function dailyComponentIsExplicit(mixed $component, string $text): bool
+    /**
+     * @param  iterable<mixed>  $components
+     * @param  array<int,bool>  $availableIds
+     * @return list<array<string,mixed>>
+     */
+    private function entityRows(iterable $components, bool $meat, array $availableIds = []): array
     {
-        $haystack = $this->key($text);
-        $identities = collect([
-            data_get($component, 'slug'),
-            data_get($component, 'name'),
-            data_get($component, 'display_name'),
-        ])
-            ->map(fn (mixed $value): string => $this->key((string) $value))
-            ->filter(fn (string $value): bool => $value !== '')
-            ->all();
-        if (collect($identities)->contains(fn (string $identity): bool => str_contains($haystack, $identity))) {
-            return true;
-        }
+        $components = collect($components)->values();
+        $tokens = $components->mapWithKeys(function (mixed $component): array {
+            $identityTokens = Str::of((string) (data_get($component, 'display_name') ?: data_get($component, 'name')))
+                ->ascii()
+                ->lower()
+                ->replaceMatches('/[^a-z0-9]+/', ' ')
+                ->squish()
+                ->explode(' ')
+                ->filter(fn (string $token): bool => strlen($token) >= 4 && $token !== 'para')
+                ->unique()
+                ->values()
+                ->all();
 
-        // “Purê” is a unique short form for the canonical Purê de batata entry. We only
-        // accept a shortened identity when it resolves to exactly one component for today.
-        $short = collect($identities)->filter(fn (string $identity): bool => str_starts_with($identity, 'pure'))->first();
+            return [(int) data_get($component, 'id') => $identityTokens];
+        });
+        $tokenCounts = $components
+            ->filter(fn (mixed $component): bool => $availableIds === [] || isset($availableIds[(int) data_get($component, 'id')]))
+            ->flatMap(fn (mixed $component): array => $tokens->get((int) data_get($component, 'id'), []))
+            ->countBy();
 
-        return $short !== null && str_contains($haystack, 'pure');
-    }
-
-    private function uniqueDailyComponentShortFormIsExplicit(mixed $component, $available, string $text): bool
-    {
-        $haystack = Str::of($text)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->squish()->toString();
-        $tokens = $this->componentLeadingTokens($component);
-
-        return collect($tokens)->contains(function (string $token) use ($available, $haystack): bool {
-            if (preg_match('/\b'.preg_quote($token, '/').'\b/', $haystack) !== 1) {
-                return false;
+        return $components->map(function (mixed $component) use ($tokens, $tokenCounts, $meat, $availableIds): array {
+            $id = (int) data_get($component, 'id');
+            $identityTokens = $tokens->get($id, []);
+            $leading = (string) ($identityTokens[0] ?? '');
+            $aliases = [
+                ...collect($identityTokens)
+                    ->filter(fn (string $token): bool => $token === $leading || (int) $tokenCounts->get($token, 0) === 1)
+                    ->map(fn (string $token): array => ['value' => $token, 'source' => 'inferred_alias'])
+                    ->all(),
+                ...($component instanceof MenuComponent ? $this->componentPresentation->searchAliases($component) : []),
+            ];
+            if (! $meat && collect([
+                data_get($component, 'slug'), data_get($component, 'name'), data_get($component, 'display_name'),
+            ])->contains(fn (mixed $value): bool => $this->key((string) $value) === 'arrozbranco')) {
+                $aliases[] = 'arroz';
             }
 
-            return collect($available)
-                ->filter(fn (mixed $candidate): bool => in_array($token, $this->componentLeadingTokens($candidate), true))
-                ->count() === 1;
-        });
-    }
-
-    /** @return list<string> */
-    private function componentLeadingTokens(mixed $component): array
-    {
-        return collect([
-            data_get($component, 'slug'),
-            data_get($component, 'name'),
-            data_get($component, 'display_name'),
-        ])
-            ->map(function (mixed $value): string {
-                $normalized = Str::of((string) $value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', ' ')->squish()->toString();
-
-                return explode(' ', $normalized)[0] ?? '';
-            })
-            ->filter(fn (string $token): bool => strlen($token) >= 4)
-            ->unique()
-            ->values()
-            ->all();
+            return [
+                'id' => $id,
+                'slug' => (string) data_get($component, 'slug'),
+                'name' => (string) (data_get($component, 'display_name') ?: data_get($component, 'name')),
+                'display_name' => (string) data_get($component, 'display_name'),
+                'type' => $meat ? 'meat' : (string) data_get($component, 'component_type.value', data_get($component, 'component_type', 'component')),
+                'available_today' => $availableIds === [] || isset($availableIds[$id]),
+                'aliases' => collect($aliases)
+                    ->unique(fn (mixed $alias): string => is_array($alias)
+                        ? (string) ($alias['source'] ?? '').'|'.(string) ($alias['value'] ?? '')
+                        : 'catalog_alias|'.(string) $alias)
+                    ->values()
+                    ->all(),
+            ];
+        })->all();
     }
 }

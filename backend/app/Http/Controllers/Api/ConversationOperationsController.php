@@ -16,6 +16,7 @@ use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppStickerFavorite;
 use App\Services\Ai\ConversationCopilotService;
 use App\Services\Conversations\ConversationAlertService;
+use App\Services\Conversations\ConversationCopilotAnalysisAvailability;
 use App\Services\Conversations\ConversationPresenter;
 use App\Services\Conversations\ConversationWorkflowService;
 use App\Services\Operational\OperationalCrmPresenter;
@@ -23,6 +24,7 @@ use App\Services\Orders\OrderWorkflowService;
 use App\Services\WhatsApp\WhatsAppMediaFilename;
 use App\Services\WhatsApp\WhatsAppMediaStorageService;
 use App\Services\WhatsApp\WhatsAppService;
+use Carbon\CarbonImmutable;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -42,10 +44,13 @@ class ConversationOperationsController extends Controller
 
         abort_unless((int) $conversation->company_id === (int) $company->id, 404);
 
-        return response()->json(['data' => $copilot->analyze($conversation)]);
+        $analysis = $copilot->analyze($conversation);
+        $conversation->forceFill(['last_ai_suggestion_at' => now()])->save();
+
+        return response()->json(['data' => $analysis]);
     }
 
-    public function index(Request $request, ConversationPresenter $presenter): JsonResponse
+    public function index(Request $request, ConversationPresenter $presenter, ConversationCopilotAnalysisAvailability $copilotAnalysisAvailability): JsonResponse
     {
         $company = $this->resolveCompany($request);
 
@@ -57,9 +62,12 @@ class ConversationOperationsController extends Controller
 
         $search = trim((string) ($validated['search'] ?? ''));
         $mode = (string) ($validated['mode'] ?? 'all');
+        $since = isset($validated['since'])
+            ? CarbonImmutable::parse((string) $validated['since'])->utc()
+            : null;
 
-        $conversations = Conversation::query()
-            ->with($this->conversationRelations())
+        $conversations = $copilotAnalysisAvailability->withAvailability(Conversation::query()
+            ->with($this->conversationRelations()))
             ->where('company_id', $company->id)
             ->when(! config('chatbotcrm.whatsapp.demo_data_enabled'), function ($query): void {
                 $query->whereDoesntHave('customer', function ($customers): void {
@@ -68,11 +76,14 @@ class ConversationOperationsController extends Controller
                         ->orWhere('email', 'like', Customer::DASHBOARD_DEMO_EMAIL_PREFIX.'%@example.test');
                 });
             })
-            ->when(isset($validated['since']), function ($query) use ($validated): void {
-                $query->where(function ($nested) use ($validated): void {
-                    $nested->where('updated_at', '>', $validated['since'])
-                        ->orWhereHas('messages', fn ($messages) => $messages->where('updated_at', '>', $validated['since']))
-                        ->orWhereHas('alerts', fn ($alerts) => $alerts->where('updated_at', '>', $validated['since']));
+            ->when($since !== null, function ($query) use ($since, $copilotAnalysisAvailability): void {
+                $query->where(function ($nested) use ($since, $copilotAnalysisAvailability): void {
+                    $nested->where('updated_at', '>', $since)
+                        ->orWhereHas('messages', fn ($messages) => $messages->where('updated_at', '>', $since))
+                        ->orWhereHas('alerts', fn ($alerts) => $alerts->where('updated_at', '>', $since))
+                        ->orWhereHas('automationEvents', fn ($events) => $events
+                            ->whereIn('event_type', $copilotAnalysisAvailability->eventTypes())
+                            ->where('updated_at', '>', $since));
                 });
             })
             ->when($search !== '', function ($query) use ($search): void {
@@ -99,7 +110,7 @@ class ConversationOperationsController extends Controller
                 Conversation::AUTOMATION_MODE_AUTOMATIC,
             ]))
             ->when($mode === 'manual', fn ($query) => $query->where('automation_mode', Conversation::AUTOMATION_MODE_MANUAL))
-            ->when($mode === 'attention', fn ($query) => $query->where('human_review_required', true))
+            ->when($mode === 'attention', fn ($query) => $query->whereHas('alerts', fn ($alerts) => $alerts->currentActionable()))
             ->when($mode === 'unread', fn ($query) => $query->where('unread_count', '>', 0))
             ->when($mode === 'alerts', fn ($query) => $query->whereHas('alerts', fn ($alerts) => $alerts->currentActionable()))
             ->orderByRaw('CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END')

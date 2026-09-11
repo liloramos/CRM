@@ -9,8 +9,10 @@ use App\Models\DeliverySetting;
 use App\Models\Order;
 use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\WhatsApp\WhatsAppService;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 class DeliveryWorkflowService
 {
@@ -33,7 +35,9 @@ class DeliveryWorkflowService
         Order::PICKUP_STATUS_PICKED_UP,
     ];
 
-    public function __construct(private readonly OrderWorkflowService $orders) {}
+    public function __construct(
+        private readonly OrderWorkflowService $orders,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $attributes
@@ -157,6 +161,28 @@ class DeliveryWorkflowService
                 throw new DomainException("Unsupported delivery status [{$deliveryStatus}].");
             }
 
+            if ($deliveryStatus === Order::DELIVERY_STATUS_OUT_FOR_DELIVERY) {
+                if ($order->status === Order::STATUS_OUT_FOR_DELIVERY
+                    && $order->delivery_status === Order::DELIVERY_STATUS_OUT_FOR_DELIVERY) {
+                    return $order;
+                }
+
+                if ($order->status !== Order::STATUS_READY_FOR_PICKUP) {
+                    throw new DomainException('O pedido precisa estar pronto antes de sair para entrega.');
+                }
+            }
+
+            if ($deliveryStatus === Order::DELIVERY_STATUS_DELIVERED) {
+                if ($order->status === Order::STATUS_FINISHED
+                    && $order->delivery_status === Order::DELIVERY_STATUS_DELIVERED) {
+                    return $order;
+                }
+
+                if ($order->status !== Order::STATUS_OUT_FOR_DELIVERY) {
+                    throw new DomainException('O pedido precisa estar em entrega para ser concluido.');
+                }
+            }
+
             $order->forceFill([
                 'delivery_status' => $deliveryStatus,
                 'fulfillment_status' => $this->fulfillmentStatusForDelivery($deliveryStatus),
@@ -234,6 +260,49 @@ class DeliveryWorkflowService
         }
 
         return $this->updateDeliveryStatus($order, Order::DELIVERY_STATUS_DELIVERED, $user, 'Entrega confirmada manualmente.');
+    }
+
+    /**
+     * Sends an optional operational notification after the delivery state was
+     * committed. The client reference is deliberately stable: retries reuse
+     * the canonical outbound record instead of creating a second message.
+     *
+     * @return array{sent: bool, warning: string|null}
+     */
+    public function notifyCustomer(Order $order, string $notification, WhatsAppService $whatsapp, ?User $user = null): array
+    {
+        $recipient = trim((string) ($order->delivery_recipient_phone ?? $order->customer_phone_snapshot));
+
+        if ($recipient === '') {
+            return ['sent' => false, 'warning' => 'Status registrado, mas não há telefone para avisar o cliente.'];
+        }
+
+        $message = match ($notification) {
+            'out_for_delivery' => "Seu pedido saiu para entrega! 🛵☀️\nDaqui a pouquinho ele chega até você 😊",
+            'delivered' => "Pedido entregue! 😊☀️\nMuito obrigado pela preferência. Esperamos que aproveite sua refeição! 💛\nSol Restaurante",
+            default => throw new DomainException('Aviso operacional não suportado.'),
+        };
+
+        try {
+            $delivery = $whatsapp->sendTextMessage(
+                $order->company()->firstOrFail(),
+                $recipient,
+                $message,
+                [
+                    'sender_type' => 'human',
+                    'sent_by_user_id' => $user?->id,
+                    'message_source' => 'delivery_workflow',
+                    'action_type' => "delivery_{$notification}",
+                    'client_reference' => "delivery-order-{$order->id}-{$notification}",
+                ],
+            );
+        } catch (Throwable) {
+            return ['sent' => false, 'warning' => 'Status registrado, mas não foi possível enviar o aviso ao cliente.'];
+        }
+
+        return $delivery->status === 'failed'
+            ? ['sent' => false, 'warning' => 'Status registrado, mas não foi possível enviar o aviso ao cliente.']
+            : ['sent' => true, 'warning' => null];
     }
 
     public function markPickedUp(Order $order, ?User $user = null): Order
@@ -373,7 +442,7 @@ class DeliveryWorkflowService
      * @param  array<string, mixed>|null  $fallback
      * @return array<string, mixed>|null
      */
-    private function addressSnapshot(?CustomerAddress $address, ?array $fallback): ?array
+    public function addressSnapshot(?CustomerAddress $address, ?array $fallback = null): ?array
     {
         if ($address === null) {
             return $fallback;

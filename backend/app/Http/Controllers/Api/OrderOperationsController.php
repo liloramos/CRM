@@ -9,6 +9,7 @@ use App\Models\DailyMenuOptionOverride;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\PrintJob;
 use App\Models\Product;
 use App\Models\ProductOption;
 use App\Services\Delivery\DeliveryWorkflowService;
@@ -18,6 +19,7 @@ use App\Services\Orders\OrderItemSelectionValidator;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\Payments\PaymentWorkflowService;
 use App\Services\Printing\PrintWorkflowService;
+use App\Services\WhatsApp\WhatsAppService;
 use Carbon\CarbonImmutable;
 use DomainException;
 use Illuminate\Http\JsonResponse;
@@ -72,6 +74,7 @@ class OrderOperationsController extends Controller
             'general_notes' => ['nullable', 'string', 'max:1000'],
             'kitchen_notes' => ['nullable', 'string', 'max:1000'],
             'pickup_person_name' => ['nullable', 'string', 'max:120'],
+            'seller_user_id' => ['nullable', 'integer'],
         ]);
 
         $customer = null;
@@ -109,17 +112,21 @@ class OrderOperationsController extends Controller
         $validated['customer_name_snapshot'] = $validated['customer_name_snapshot'] !== '' ? $validated['customer_name_snapshot'] : null;
         $validated['customer_phone_snapshot'] = $validated['customer_phone_snapshot'] !== '' ? $validated['customer_phone_snapshot'] : null;
 
-        $order = $orders->createDraft($company, [
-            ...$validated,
-            'created_by_user_id' => $request->user()?->id,
-            'origin_channel' => $validated['origin_channel'] ?? Order::CHANNEL_MANUAL,
-            'entry_mode' => Order::CHANNEL_MANUAL,
-            'fulfillment_type' => $validated['fulfillment_type'] ?? Order::FULFILLMENT_PICKUP,
-            'is_manual' => true,
-            'human_review_required' => true,
-            'customer_confirmation_required' => true,
-            'status_notes' => 'Rascunho criado pela interface operacional.',
-        ]);
+        try {
+            $order = $orders->createDraft($company, [
+                ...$validated,
+                'created_by_user_id' => $request->user()?->id,
+                'origin_channel' => $validated['origin_channel'] ?? Order::CHANNEL_MANUAL,
+                'entry_mode' => Order::CHANNEL_MANUAL,
+                'fulfillment_type' => $validated['fulfillment_type'] ?? Order::FULFILLMENT_PICKUP,
+                'is_manual' => true,
+                'human_review_required' => true,
+                'customer_confirmation_required' => true,
+                'status_notes' => 'Rascunho criado pela interface operacional.',
+            ]);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
 
         return response()->json([
             'data' => $presenter->order($order->load($this->orderRelations())),
@@ -396,6 +403,35 @@ class OrderOperationsController extends Controller
         ]);
     }
 
+    public function voidSpecificPayment(
+        Request $request,
+        Order $order,
+        Payment $payment,
+        PaymentWorkflowService $payments,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        if ((int) $payment->company_id !== (int) $company->id || (int) $payment->order_id !== (int) $order->id) {
+            abort(404);
+        }
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ]);
+
+        try {
+            $payments->voidPayment($order, $payment, $request->user(), $validated['reason']);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
+        ]);
+    }
+
     public function confirmPayment(
         Request $request,
         Order $order,
@@ -589,10 +625,43 @@ class OrderOperationsController extends Controller
         ]);
     }
 
-    public function advanceFulfillment(Request $request, Order $order, string $action, DeliveryWorkflowService $delivery, OperationalCrmPresenter $presenter): JsonResponse
+    public function updateSeller(
+        Request $request,
+        Order $order,
+        OrderWorkflowService $orders,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        $validated = $request->validate([
+            'seller_user_id' => ['present', 'nullable', 'integer'],
+        ]);
+
+        try {
+            $updated = $orders->assignSeller(
+                $company,
+                $order,
+                $validated['seller_user_id'] !== null ? (int) $validated['seller_user_id'] : null,
+                $request->user(),
+            );
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($updated->load($this->orderRelations())),
+        ]);
+    }
+
+    public function advanceFulfillment(Request $request, Order $order, string $action, DeliveryWorkflowService $delivery, WhatsAppService $whatsapp, OperationalCrmPresenter $presenter): JsonResponse
     {
         $company = $this->resolveCompany($request);
         $this->assertOrderBelongsToCompany($order, $company);
+
+        $validated = $request->validate([
+            'send_customer_notification' => ['sometimes', 'boolean'],
+        ]);
 
         try {
             $updated = match ($action) {
@@ -606,7 +675,21 @@ class OrderOperationsController extends Controller
             return response()->json(['message' => $exception->getMessage()], 422);
         }
 
-        return response()->json(['data' => $presenter->order($updated->refresh()->load($this->orderRelations()))]);
+        $warning = null;
+        if (($validated['send_customer_notification'] ?? false) && in_array($action, ['start-delivery', 'delivered'], true)) {
+            $result = $delivery->notifyCustomer(
+                $updated,
+                $action === 'start-delivery' ? 'out_for_delivery' : 'delivered',
+                $whatsapp,
+                $request->user(),
+            );
+            $warning = $result['warning'];
+        }
+
+        return response()->json([
+            'data' => $presenter->order($updated->refresh()->load($this->orderRelations())),
+            'warning' => $warning,
+        ]);
     }
 
     public function previewTicket(
@@ -637,6 +720,75 @@ class OrderOperationsController extends Controller
                     'generatedAt' => $printJob->previewed_at?->toIso8601String(),
                 ],
             ],
+        ]);
+    }
+
+    public function startTicketPrint(
+        Request $request,
+        Order $order,
+        PrintWorkflowService $printing,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        try {
+            $printJob = $order->latestPrintJob()->first();
+            if ($printJob === null || ! in_array($printJob->status, [
+                PrintJob::STATUS_PREVIEWED,
+                PrintJob::STATUS_QUEUED,
+                PrintJob::STATUS_PRINTING,
+                PrintJob::STATUS_REPRINT_REQUESTED,
+            ], true)) {
+                $printJob = $printing->generateTicket($order, $request->user());
+            }
+            $printJob = $printing->markPrinting($printJob, $request->user());
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => [
+                'order' => $presenter->order($order->refresh()->load($this->orderRelations())),
+                'preview' => [
+                    'id' => (string) $printJob->id,
+                    'status' => $printJob->status,
+                    'html' => $printJob->html_content,
+                    'previewUrl' => $printJob->preview_url,
+                    'generatedAt' => $printJob->previewed_at?->toIso8601String(),
+                ],
+            ],
+        ]);
+    }
+
+    public function confirmTicketPrint(
+        Request $request,
+        Order $order,
+        PrintWorkflowService $printing,
+        OperationalCrmPresenter $presenter,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+
+        $printJob = $order->latestPrintJob()->first();
+        if ($printJob === null) {
+            return response()->json([
+                'message' => 'Inicie a impressão da comanda antes de confirmá-la.',
+            ], 422);
+        }
+
+        try {
+            $printing->markPrinted($printJob, $request->user());
+        } catch (DomainException $exception) {
+            return response()->json([
+                'message' => $exception->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'data' => $presenter->order($order->refresh()->load($this->orderRelations())),
         ]);
     }
 
@@ -720,8 +872,9 @@ class OrderOperationsController extends Controller
     {
         return [
             'payerCustomer',
+            'seller',
             'items.options',
-            'statusHistories' => fn ($query) => $query->latest()->limit(8),
+            'statusHistories' => fn ($query) => $query->with('user')->latest()->limit(8),
             'latestPrintJob',
             'payments',
         ];

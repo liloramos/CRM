@@ -8,7 +8,12 @@ use Carbon\CarbonInterface;
 
 final class ConversationCopilotPipeline
 {
-    public function __construct(private readonly ConversationCopilotProviderInterface $provider, private readonly ConversationCopilotNormalizer $normalizer, private readonly CopilotOrderDraftValidator $validator) {}
+    public function __construct(
+        private readonly ConversationCopilotProviderInterface $provider,
+        private readonly ConversationCopilotNormalizer $normalizer,
+        private readonly CopilotSemanticInterpretationAdapter $semanticInterpretation,
+        private readonly CopilotOrderDraftValidator $validator,
+    ) {}
 
     /** @param array<string,mixed> $context @return array{raw:array<string,mixed>,normalized:array<string,mixed>,safe:array<string,mixed>} */
     public function analyze(Company $company, array $context, ?CarbonInterface $date = null): array
@@ -19,9 +24,31 @@ final class ConversationCopilotPipeline
 
             return ['raw' => $raw, 'normalized' => $safe, 'safe' => $safe];
         }
-        $normalized = $this->normalizer->normalize($raw, $this->provider->name(), ['usage' => $raw['usage'] ?? [], 'timestamp' => now()->toIso8601String()]);
+        $normalized = $this->normalizer->normalize($raw, $this->provider->name(), [
+            'usage' => $raw['usage'] ?? [],
+            'timestamp' => now()->toIso8601String(),
+            'provider_interpretation_called' => true,
+        ]);
+        $adapted = $this->semanticInterpretation->adapt($company, $normalized, $context);
+        $validationContext = $context;
+        if (data_get($adapted->metadata, 'semantic_delta_validated') === true
+            || data_get($adapted->metadata, 'semantic_pending_slot_rejected') === true) {
+            $validationContext['latest_intent'] = $adapted->intent;
+        }
 
-        return ['raw' => $raw, 'normalized' => $normalized->toArray(), 'safe' => $this->validator->validate($company, $normalized, $date, $context)->toArray()];
+        return ['raw' => $raw, 'normalized' => $adapted->toArray(), 'safe' => $this->validator->validate($company, $adapted, $date, $validationContext)->toArray()];
+    }
+
+    /** @param array<string,mixed> $analysis @param array<string,mixed> $context @return array<string,mixed> */
+    public function validateDeterministic(Company $company, array $analysis, array $context, ?CarbonInterface $date = null): array
+    {
+        $normalized = $this->normalizer->normalize(
+            $analysis,
+            'deterministic',
+            is_array($analysis['metadata'] ?? null) ? $analysis['metadata'] : [],
+        );
+
+        return $this->validator->validate($company, $normalized, $date, $context)->toArray();
     }
 
     /** @param array<string,mixed> $context @return array<string,mixed> */

@@ -23,7 +23,7 @@ export function AuthPreviewPage({ mode }: AuthPreviewPageProps) {
           <h2>{isSignup ? 'Criar acesso operacional' : 'Entrar no CRM'}</h2>
           <label>
             Nome
-            <input placeholder={isSignup ? 'Usuario administrativo' : 'usuario@exemplo.local'} />
+            <input placeholder={isSignup ? 'Usuário administrativo' : 'usuario@exemplo.local'} />
           </label>
           {isSignup ? (
             <label>

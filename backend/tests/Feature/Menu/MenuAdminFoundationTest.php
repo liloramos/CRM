@@ -116,6 +116,7 @@ class MenuAdminFoundationTest extends TestCase
             ->assertJsonPath('data.slug', 'n8-tradicional')
             ->assertJsonPath('data.configuration_pending', false)
             ->assertJsonPath('data.meat_configuration.beef_only.final_price_cents', 2000)
+            ->assertJsonPath('data.meat_configuration.traditional.additional_meat_price_cents', 400)
             ->assertJsonPath('data.additions.0.code', 'extra_beef')
             ->assertJsonPath('data.additions.0.price_cents', 700);
     }
@@ -129,6 +130,10 @@ class MenuAdminFoundationTest extends TestCase
         $payload = [
             ...$this->productPayload($product),
             'beef_rules' => [
+                'standard_meat' => [
+                    'enabled' => true,
+                    'price_cents' => 450,
+                ],
                 'beef_only' => [
                     'enabled' => true,
                     'final_price_cents' => 2050,
@@ -146,6 +151,7 @@ class MenuAdminFoundationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('data.slug', 'n8-tradicional')
             ->assertJsonPath('data.configuration_pending', false)
+            ->assertJsonPath('data.meat_configuration.traditional.additional_meat_price_cents', 450)
             ->assertJsonPath('data.meat_configuration.beef_only.final_price_cents', 2050)
             ->assertJsonPath('data.additions.0.price_cents', 750);
 
@@ -155,6 +161,7 @@ class MenuAdminFoundationTest extends TestCase
         $this->assertSame(2050, $beefOnly->final_price_cents);
         $this->assertSame(450, $beefOnly->price_delta_cents);
         $this->assertSame(750, $extraBeef->price_delta_cents);
+        $this->assertSame(450, data_get($product->fresh()->composition_rules, 'standard_meat_additional_price_cents'));
         $this->assertSame(1, $extraBeef->group->max_quantity);
         $this->assertSame(2, ProductOptionGroup::query()
             ->where('product_id', $product->id)
@@ -237,7 +244,7 @@ class MenuAdminFoundationTest extends TestCase
         ];
         $saturdayOnly = [ProductServiceDay::Saturday->value];
 
-        foreach (['n5-casa', 'n8-casa', 'n8-tradicional', 'n9-tradicional'] as $slug) {
+        foreach (['n5-casa', 'n8-casa', 'n8-tradicional', 'n9-tradicional', 'self-service', 'comida-por-kg-comum', 'comida-por-kg-somente-carne'] as $slug) {
             $this->assertSame($mondayToSaturday, $this->productServiceDays($slug));
         }
 
@@ -260,7 +267,7 @@ class MenuAdminFoundationTest extends TestCase
         $company = $this->company();
 
         $this->assertSame([], $this->productServiceDays('feijoada'));
-        $this->assertSame(178, ProductServiceDayModel::query()->where('company_id', $company->id)->count());
+        $this->assertSame(196, ProductServiceDayModel::query()->where('company_id', $company->id)->count());
         $this->assertSame(0, ProductServiceDayModel::query()->where('company_id', $company->id)->where('service_day', ProductServiceDay::Sunday->value)->count());
         $this->assertSame(0, ProductServiceDayModel::query()->where('company_id', $company->id)->where('is_active', false)->count());
         $this->assertSame(

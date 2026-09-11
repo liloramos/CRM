@@ -9,12 +9,16 @@ use App\Models\DeliverySetting;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\User;
+use App\Models\WhatsAppMessageDelivery;
 use App\Services\Delivery\DeliveryWorkflowService;
 use App\Services\Orders\OrderWorkflowService;
+use App\Services\WhatsApp\WhatsAppService;
 use Carbon\CarbonImmutable;
 use Database\Seeders\CompanySeeder;
 use Database\Seeders\MenuSeeder;
+use Database\Seeders\WhatsAppSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Config;
 use Tests\TestCase;
 
 class DeliveryWorkflowTest extends TestCase
@@ -92,6 +96,15 @@ class DeliveryWorkflowTest extends TestCase
             'maps_metadata' => ['external_api_called' => false],
         ]);
 
+        $orders = app(OrderWorkflowService::class);
+        $orders->transitionTo($order->refresh(), Order::STATUS_READY_TO_PRINT, $user, 'ticket_ready');
+        $order->forceFill([
+            'print_required' => false,
+            'print_status' => Order::PRINT_STATUS_WAIVED,
+        ])->save();
+        $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, $user, 'preparation_started');
+        $delivery->markReady($order->refresh(), $user);
+
         $outForDelivery = $delivery->updateDeliveryStatus(
             $order->refresh(),
             Order::DELIVERY_STATUS_OUT_FOR_DELIVERY,
@@ -117,6 +130,47 @@ class DeliveryWorkflowTest extends TestCase
         $this->assertSame(Order::DELIVERY_STATUS_DELIVERED, $finished->delivery_status);
         $this->assertSame(Order::FULFILLMENT_STATUS_DELIVERED, $finished->fulfillment_status);
         $this->assertSame($customer->id, $finished->payer_customer_id);
+    }
+
+    public function test_dispatch_and_delivery_are_idempotent_and_customer_notices_are_optional(): void
+    {
+        [$company, $customer, $order, $address] = $this->createDeliveryOrder();
+        $this->seed(WhatsAppSeeder::class);
+        Config::set('chatbotcrm.whatsapp.provider', 'fake');
+        $customer->forceFill(['phone' => '5511999999999'])->save();
+        $order->forceFill(['customer_phone_snapshot' => '5511999999999'])->save();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $delivery = app(DeliveryWorkflowService::class);
+        $orders = app(OrderWorkflowService::class);
+
+        $delivery->quoteDelivery($order, ['customer_address_id' => $address->id, 'distance_km' => 1]);
+        $orders->transitionTo($order->refresh(), Order::STATUS_READY_TO_PRINT, $user, 'test_ready_to_print');
+        $order->forceFill([
+            'print_required' => false,
+            'print_status' => Order::PRINT_STATUS_WAIVED,
+        ])->save();
+        $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, $user, 'test_preparation');
+        $ready = $delivery->markReady($order->refresh(), $user);
+        $out = $delivery->startDelivery($ready, $user);
+
+        $this->assertSame(Order::STATUS_OUT_FOR_DELIVERY, $out->status);
+        $this->assertSame(0, WhatsAppMessageDelivery::query()->count());
+
+        $first = $delivery->notifyCustomer($out, 'out_for_delivery', app(WhatsAppService::class), $user);
+        $second = $delivery->notifyCustomer($out, 'out_for_delivery', app(WhatsAppService::class), $user);
+
+        $this->assertTrue($first['sent']);
+        $this->assertTrue($second['sent']);
+        $this->assertSame(1, WhatsAppMessageDelivery::query()->count());
+        $this->assertSame($user->id, $out->statusHistories()->latest()->firstOrFail()->user_id);
+
+        $finished = $delivery->markDelivered($out, $user);
+        $this->assertSame(Order::STATUS_FINISHED, $finished->status);
+        $this->assertSame(1, WhatsAppMessageDelivery::query()->count());
+
+        $thankYou = $delivery->notifyCustomer($finished, 'delivered', app(WhatsAppService::class), $user);
+        $this->assertTrue($thankYou['sent']);
+        $this->assertSame(2, WhatsAppMessageDelivery::query()->count());
     }
 
     /**

@@ -6,14 +6,17 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\MenuComponent;
 use App\Models\Order;
+use App\Models\Payment;
 use App\Models\PrintJob;
 use App\Models\PrintJobEvent;
 use App\Models\Product;
 use App\Models\ProductGroupComponent;
 use App\Models\ProductOption;
 use App\Models\ProductOptionGroup;
+use App\Models\ReceiptTemplate;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\CounterSales\CounterSaleWorkflowService;
 use App\Services\Orders\OrderWorkflowService;
 use App\Services\Printing\PrintWorkflowService;
 use Carbon\CarbonImmutable;
@@ -43,12 +46,18 @@ class PrintWorkflowTest extends TestCase
         $this->assertSame(Order::PRINT_STATUS_PREVIEWED, $order->print_status);
         $this->assertSame(Order::STATUS_READY_TO_PRINT, $order->status);
         $this->assertNotNull($order->ticket_generated_at);
-        $this->assertStringContainsString('COMANDA DE PEDIDO', $job->html_content);
+        $this->assertStringContainsString('Pedido Nº', $job->html_content);
         $this->assertStringContainsString('Cliente Pagador Sanitizado', $job->html_content);
-        $this->assertStringContainsString('Pessoa Autorizada', $job->html_content);
         $this->assertStringContainsString('Pouco arroz, sem fritura.', $job->html_content);
-        $this->assertStringContainsString('Credito usado', $job->html_content);
-        $this->assertStringContainsString('Falta', $job->html_content);
+        $this->assertStringContainsString('Adicionais', $job->html_content);
+        $this->assertMatchesRegularExpression('/src="data:image\\/png;base64,[A-Za-z0-9+\\/=]+"/', $job->html_content);
+        $this->assertStringContainsString('Sistema desenvolvido por Murilo', $job->html_content);
+        $this->assertStringContainsString('(62) 9 9619-1921', $job->html_content);
+        $this->assertStringNotContainsString('composition_snapshot', $job->html_content);
+        $this->assertStringNotContainsString('structured_options', $job->html_content);
+        $this->assertStringNotContainsString('component_link_id', $job->html_content);
+        $this->assertStringNotContainsString('browser_html', $job->html_content);
+        $this->assertStringNotContainsString('ANOTAÇÕES DA CHAPA', $job->html_content);
         $this->assertDatabaseHas('print_job_events', [
             'order_id' => $order->id,
             'print_job_id' => $job->id,
@@ -71,11 +80,11 @@ class PrintWorkflowTest extends TestCase
         $html = $response->getContent();
 
         $this->assertStringContainsString('text/html', (string) $response->headers->get('Content-Type'));
-        $this->assertStringContainsString('COMANDA DE PEDIDO', $html);
+        $this->assertStringContainsString('Pedido Nº', $html);
         $this->assertStringContainsString('size: 80mm auto;', $html);
-        $this->assertStringContainsString('width: 76mm;', $html);
-        $this->assertStringContainsString('break-inside: avoid;', $html);
-        $this->assertStringContainsString("get('autoprint') === '1'", $html);
+        $this->assertStringContainsString('width:76mm;', $html);
+        $this->assertStringContainsString('break-inside:avoid', $html);
+        $this->assertStringContainsString("get('autoprint')==='1'", $html);
         $this->assertStringContainsString('window.print()', $html);
         $this->assertDatabaseHas('print_jobs', [
             'order_id' => $order->id,
@@ -103,7 +112,7 @@ class PrintWorkflowTest extends TestCase
 
         $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
 
-        $this->assertStringContainsString('Pagador: Cliente Avulso da Rua', $html);
+        $this->assertStringContainsString('Nome: Cliente Avulso da Rua', $html);
         $this->assertStringContainsString('Telefone: (62) 91111-2222', $html);
         $this->assertStringNotContainsString('Para: Nao informado', $html);
         $this->assertStringNotContainsString('Para:', $html);
@@ -128,8 +137,8 @@ class PrintWorkflowTest extends TestCase
 
         $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
 
-        $this->assertStringContainsString('Pagador: Cliente Principal', $html);
-        $this->assertStringContainsString('Para: Larissa', $html);
+        $this->assertStringContainsString('Nome: Cliente Principal', $html);
+        $this->assertStringContainsString('Obs.: Para: Larissa', $html);
     }
 
     public function test_ticket_prints_n8_and_n9_beef_modes_with_only_selected_options(): void
@@ -193,17 +202,17 @@ class PrintWorkflowTest extends TestCase
 
         $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
 
-        $this->assertStringContainsString('1x N8 Livre', $html);
-        $this->assertStringContainsString('1x Somente bife', $html);
+        $this->assertStringContainsString('1&nbsp; N8 Livre', $html);
+        $this->assertStringContainsString('Somente bife', $html);
         $this->assertStringContainsString('R$ 20,00', $html);
-        $this->assertStringContainsString('1x Porco', $html);
-        $this->assertStringContainsString('1x Frango ao molho', $html);
-        $this->assertStringContainsString('1x Bife adicional', $html);
+        $this->assertStringContainsString('Porco', $html);
+        $this->assertStringContainsString('Frango ao molho', $html);
+        $this->assertStringContainsString('Bife adicional', $html);
         $this->assertStringContainsString('R$ 23,00', $html);
-        $this->assertStringContainsString('1x N9 Livre', $html);
-        $this->assertStringContainsString('R$ 22,00', $html);
-        $this->assertStringContainsString('R$ 25,00', $html);
-        $this->assertStringContainsString('1x Sem carne', $html);
+        $this->assertStringContainsString('1&nbsp; N9 Livre', $html);
+        $this->assertStringContainsString('R$ 23,00', $html);
+        $this->assertStringContainsString('R$ 26,00', $html);
+        $this->assertStringContainsString('Sem carne', $html);
         $this->assertStringNotContainsString('Almondega', $html);
         $this->assertStringNotContainsString('Para: Nao informado', $html);
     }
@@ -235,8 +244,276 @@ class PrintWorkflowTest extends TestCase
 
         $html = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $user)->html_content;
 
-        $this->assertStringContainsString('RETIRAR:', $html);
+        $this->assertStringContainsString('Sem:', $html);
         $this->assertStringContainsString('Sem Salada', $html);
+    }
+
+    public function test_self_service_ticket_keeps_optional_components_without_delivery_data(): void
+    {
+        $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'self-service')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, [
+            'fulfillment_type' => Order::FULFILLMENT_COUNTER,
+            'origin_channel' => Order::CHANNEL_COUNTER,
+        ]);
+        app(OrderWorkflowService::class)->addItem($order, $product, [
+            'selected_components' => ['Arroz', 'Feijão', 'Porco', 'Salada'],
+        ]);
+
+        $html = app(PrintWorkflowService::class)->generateTicket($order->refresh())->html_content;
+
+        $this->assertStringContainsString('Self Service', $html);
+        $this->assertStringContainsString('Balcão / Restaurante', $html);
+        $this->assertStringContainsString('Arroz', $html);
+        $this->assertStringNotContainsString('ENDEREÇO DE ENTREGA', $html);
+        $this->assertStringNotContainsString('Taxa de entrega', $html);
+    }
+
+    public function test_counter_self_service_receipts_are_non_fiscal_and_keep_beef_separate(): void
+    {
+        [$company, $user] = $this->counterSaleContext();
+        $selfService = Product::query()->where('company_id', $company->id)->where('slug', 'self-service')->firstOrFail();
+        $sales = app(CounterSaleWorkflowService::class);
+        $printing = app(PrintWorkflowService::class);
+
+        $plainOrder = $sales->complete($company, $user, [[
+            'product_id' => $selfService->id,
+            'quantity' => 1,
+        ]], Payment::METHOD_PIX);
+        $beefOrder = $sales->complete($company, $user, [[
+            'product_id' => $selfService->id,
+            'quantity' => 1,
+            'additions' => [['code' => 'extra_beef', 'quantity' => 1]],
+        ]], Payment::METHOD_PIX);
+        $ordersBeforePrinting = Order::query()->count();
+        $paymentsBeforePrinting = Payment::query()->count();
+
+        $plainHtml = $printing->generateTicket($plainOrder, $user, [
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+        ])->html_content;
+        $beefJob = $printing->generateTicket($beefOrder, $user, [
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+        ]);
+        $beefHtml = $beefJob->html_content;
+
+        $this->assertStringContainsString('COMPROVANTE NÃO FISCAL', $plainHtml);
+        $this->assertStringContainsString('Este documento não é um documento fiscal.', $plainHtml);
+        $this->assertStringContainsString('Self Service', $plainHtml);
+        $this->assertStringContainsString('1 x R$ 19,00', $plainHtml);
+        $this->assertStringContainsString('Pagamento: Pix', $plainHtml);
+        $this->assertStringContainsString('R$ 19,00', $plainHtml);
+        $this->assertStringNotContainsString('ENDEREÇO DE ENTREGA', $plainHtml);
+        $this->assertStringNotContainsString('Taxa de entrega', $plainHtml);
+        $this->assertStringContainsString('Adicional:', $beefHtml);
+        $this->assertStringContainsString('Bife adicional', $beefHtml);
+        $this->assertStringContainsString('R$ 7,00', $beefHtml);
+        $this->assertStringContainsString('Total do item', $beefHtml);
+        $this->assertStringContainsString('R$ 26,00', $beefHtml);
+        $this->assertStringContainsString('COMPROVANTE NÃO FISCAL', $beefJob->text_content);
+        $this->assertStringContainsString('Bife adicional R$ 7,00', $beefJob->text_content);
+        $this->assertStringContainsString('Este documento não é um documento fiscal.', $beefJob->text_content);
+        $this->assertStringNotContainsString('ANOTAÇÕES DA CHAPA', $beefHtml);
+        $this->assertSame(ReceiptTemplate::TARGET_CASHIER, $beefJob->target_audience);
+        $this->assertSame($ordersBeforePrinting, Order::query()->count());
+        $this->assertSame($paymentsBeforePrinting, Payment::query()->count());
+        $this->assertSame(2600, $beefOrder->refresh()->total_cents);
+        $this->assertSame(2600, $beefOrder->amount_paid_cents);
+    }
+
+    public function test_weight_counter_drafts_print_an_operational_sheet_without_payment_or_finalization(): void
+    {
+        [$company, $user] = $this->counterSaleContext();
+        $sales = app(CounterSaleWorkflowService::class);
+        $printing = app(PrintWorkflowService::class);
+        $ordersBeforePrinting = Order::query()->count();
+
+        foreach ([
+            'comida-por-kg-comum' => 'R$ 55,00/kg',
+            'comida-por-kg-somente-carne' => 'R$ 70,00/kg',
+        ] as $slug => $rate) {
+            $product = Product::query()->where('company_id', $company->id)->where('slug', $slug)->firstOrFail();
+            $order = $sales->openDraft($company, $user, ['product_id' => $product->id]);
+            $itemsBeforePrinting = $order->items()->count();
+
+            $job = $printing->generateTicket($order, $user, [
+                'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+            ]);
+
+            $this->assertStringContainsString('COMANDA DE BALCÃO', $job->html_content);
+            $this->assertStringContainsString((string) $order->code, $job->html_content);
+            $this->assertStringContainsString($rate, $job->html_content);
+            $this->assertStringContainsString('Peso: __________________________ g', $job->html_content);
+            $this->assertStringContainsString('ANOTAÇÕES DA CHAPA', $job->html_content);
+            $this->assertStringContainsString('Peso: ______________ g', $job->text_content);
+            $this->assertStringNotContainsString('COMPROVANTE NÃO FISCAL', $job->html_content);
+            $this->assertStringNotContainsString('Pagamento:', $job->text_content);
+            $this->assertStringNotContainsString('TOTAL:', $job->text_content);
+            $this->assertSame(Order::STATUS_DRAFT, $order->refresh()->status);
+            $this->assertSame($itemsBeforePrinting, $order->items()->count());
+            $this->assertSame(0, $order->payments()->count());
+        }
+
+        $this->assertSame($ordersBeforePrinting + 2, Order::query()->count());
+        $this->assertSame(2, PrintJob::query()->where('company_id', $company->id)->count());
+    }
+
+    public function test_self_service_draft_sheet_has_manual_beef_and_notes_without_weight_or_financial_receipt(): void
+    {
+        [$company, $user] = $this->counterSaleContext();
+        $selfService = Product::query()->where('company_id', $company->id)->where('slug', 'self-service')->firstOrFail();
+        $order = app(CounterSaleWorkflowService::class)->openDraft($company, $user, [
+            'product_id' => $selfService->id,
+            'selected_components' => ['Arroz', 'Feijão'],
+            'additions' => [['code' => 'extra_beef', 'quantity' => 1]],
+        ], 'Separar talheres.');
+
+        $job = app(PrintWorkflowService::class)->generateTicket($order, $user, [
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+        ]);
+
+        $this->assertStringContainsString('COMANDA DE BALCÃO', $job->html_content);
+        $this->assertStringContainsString('Self Service', $job->html_content);
+        $this->assertStringContainsString('R$ 19,00', $job->html_content);
+        $this->assertStringContainsString('Arroz, Feijão', $job->html_content);
+        $this->assertStringContainsString('Separar talheres.', $job->html_content);
+        $this->assertStringContainsString('ANOTAÇÕES DA CHAPA', $job->html_content);
+        $this->assertStringContainsString('Bife adicional:', $job->text_content);
+        $this->assertStringContainsString('[X] Sim', $job->text_content);
+        $this->assertStringContainsString('Observações:', $job->text_content);
+        $this->assertStringNotContainsString('Peso:', $job->text_content);
+        $this->assertStringNotContainsString('COMPROVANTE NÃO FISCAL', $job->text_content);
+        $this->assertStringNotContainsString('Pagamento:', $job->text_content);
+        $this->assertStringNotContainsString('TOTAL:', $job->text_content);
+        $this->assertSame(Order::STATUS_DRAFT, $order->refresh()->status);
+        $this->assertSame(0, $order->payments()->count());
+    }
+
+    public function test_counter_draft_beef_boxes_only_mark_an_explicit_extra_beef_in_html(): void
+    {
+        [$company, $user] = $this->counterSaleContext();
+        $sales = app(CounterSaleWorkflowService::class);
+        $printing = app(PrintWorkflowService::class);
+
+        foreach ([
+            ['self-service', false],
+            ['self-service', true],
+            ['comida-por-kg-comum', false],
+            ['comida-por-kg-comum', true],
+        ] as [$slug, $hasExtraBeef]) {
+            $product = Product::query()->where('company_id', $company->id)->where('slug', $slug)->firstOrFail();
+            $order = $sales->openDraft($company, $user, [
+                'product_id' => $product->id,
+                'additions' => $hasExtraBeef ? [['code' => 'extra_beef', 'quantity' => 1]] : [],
+            ]);
+
+            $job = $printing->generateTicket($order, $user, [
+                'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+            ]);
+
+            $this->assertStringContainsString(
+                '<span><i class="manual-box">'.($hasExtraBeef ? 'X' : '').'</i>Sim</span>',
+                $job->html_content,
+            );
+            $this->assertStringContainsString('<span><i class="manual-box"></i>Não</span>', $job->html_content);
+            $this->assertStringContainsString(
+                $hasExtraBeef ? '[X] Sim  [ ] Não' : '[ ] Sim  [ ] Não',
+                $job->text_content,
+            );
+        }
+    }
+
+    public function test_counter_weight_receipt_uses_historical_weight_rate_and_canonical_totals(): void
+    {
+        [$company, $user] = $this->counterSaleContext();
+        $standard = Product::query()->where('company_id', $company->id)->where('slug', 'comida-por-kg-comum')->firstOrFail();
+        $meatOnly = Product::query()->where('company_id', $company->id)->where('slug', 'comida-por-kg-somente-carne')->firstOrFail();
+        $sales = app(CounterSaleWorkflowService::class);
+        $printing = app(PrintWorkflowService::class);
+
+        $standardOrder = $sales->complete($company, $user, [[
+            'product_id' => $standard->id,
+            'quantity' => 1,
+            'weight_grams' => 540,
+            'additions' => [['code' => 'extra_beef', 'quantity' => 1]],
+        ]], Payment::METHOD_CASH);
+        $meatOrder = $sales->complete($company, $user, [[
+            'product_id' => $meatOnly->id,
+            'quantity' => 1,
+            'weight_grams' => 450,
+        ]], Payment::METHOD_DEBIT_CARD);
+
+        $standard->update(['base_price_cents' => 6000]);
+        $ordersBeforePrinting = Order::query()->count();
+        $paymentsBeforePrinting = Payment::query()->count();
+        $firstHtml = $printing->generateTicket($standardOrder, $user, [
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+        ])->html_content;
+        $reprintHtml = $printing->generateTicket($standardOrder->refresh(), $user, [
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+        ])->html_content;
+        $meatHtml = $printing->generateTicket($meatOrder, $user, [
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+        ])->html_content;
+
+        foreach ([$firstHtml, $reprintHtml] as $html) {
+            $this->assertStringContainsString('0,540 kg', $html);
+            $this->assertStringContainsString('R$ 55,00/kg', $html);
+            $this->assertStringNotContainsString('R$ 60,00/kg', $html);
+            $this->assertStringContainsString('R$ 29,70', $html);
+            $this->assertStringContainsString('Bife adicional', $html);
+            $this->assertStringContainsString('R$ 7,00', $html);
+            $this->assertStringContainsString('R$ 36,70', $html);
+            $this->assertStringContainsString('Pagamento: Dinheiro', $html);
+        }
+
+        $this->assertStringContainsString('0,450 kg', $meatHtml);
+        $this->assertStringContainsString('R$ 70,00/kg', $meatHtml);
+        $this->assertStringContainsString('R$ 31,50', $meatHtml);
+        $this->assertStringContainsString('Pagamento: Cartão de débito', $meatHtml);
+        $this->assertSame($ordersBeforePrinting, Order::query()->count());
+        $this->assertSame($paymentsBeforePrinting, Payment::query()->count());
+        $this->assertSame(3670, $standardOrder->refresh()->total_cents);
+        $this->assertSame(3670, $standardOrder->amount_paid_cents);
+        $this->assertSame(3150, $meatOrder->refresh()->total_cents);
+    }
+
+    public function test_counter_receipt_generation_failure_keeps_sale_and_payment_completed(): void
+    {
+        [$company, $user] = $this->counterSaleContext(withPrintingPermission: true);
+        $selfService = Product::query()->where('company_id', $company->id)->where('slug', 'self-service')->firstOrFail();
+        $order = app(CounterSaleWorkflowService::class)->complete($company, $user, [[
+            'product_id' => $selfService->id,
+            'quantity' => 1,
+        ]], Payment::METHOD_PIX);
+
+        $company->receiptTemplates()->create([
+            'code' => 'broken-cashier-receipt',
+            'name' => 'Comprovante indisponível para teste',
+            'template_type' => ReceiptTemplate::TYPE_ORDER_TICKET,
+            'target_audience' => ReceiptTemplate::TARGET_CASHIER,
+            'view_name' => 'printing.view-that-does-not-exist',
+            'width_chars' => 32,
+            'includes_financials' => true,
+            'is_default' => true,
+            'settings' => [],
+        ]);
+
+        $this->actingAs($user)
+            ->get("/orders/{$order->id}/ticket/preview?target_audience=cashier")
+            ->assertInternalServerError()
+            ->assertSee('A venda continua concluída. Tente novamente ou solicite apoio técnico.');
+
+        $this->assertSame(Order::STATUS_FINISHED, $order->refresh()->status);
+        $this->assertSame(Order::PRINT_STATUS_WAIVED, $order->print_status);
+        $this->assertSame(1900, $order->total_cents);
+        $this->assertSame(1900, $order->amount_paid_cents);
+        $this->assertDatabaseHas('payments', [
+            'order_id' => $order->id,
+            'status' => Payment::STATUS_CONFIRMED,
+            'confirmed_amount_cents' => 1900,
+        ]);
+        $this->assertDatabaseMissing('print_jobs', ['order_id' => $order->id]);
     }
 
     public function test_ticket_preview_route_keeps_company_isolation(): void
@@ -275,8 +552,9 @@ class PrintWorkflowTest extends TestCase
             $this->assertStringContainsString('ticket is printed', $exception->getMessage());
         }
 
+        $printing->markPrinting($job);
         $printing->markPrinted($job);
-        $preparedOrder = $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, reason: 'prep_after_ticket');
+        $preparedOrder = $order->refresh();
 
         $this->assertSame(Order::STATUS_IN_PREPARATION, $preparedOrder->status);
         $this->assertSame(Order::PRINT_STATUS_PRINTED, $preparedOrder->print_status);
@@ -314,13 +592,11 @@ class PrintWorkflowTest extends TestCase
         [$company, $order] = $this->createOperationalOrder();
         $user = User::factory()->create(['company_id' => $company->id]);
         $printing = app(PrintWorkflowService::class);
-        $orders = app(OrderWorkflowService::class);
 
         $manualOrder = $printing->markManualPrinted($order, $user, 'Comanda confirmada manualmente no atendimento.');
-        $preparedOrder = $orders->transitionTo($manualOrder, Order::STATUS_IN_PREPARATION, $user, 'prep_after_manual_print');
 
-        $this->assertSame(Order::STATUS_IN_PREPARATION, $preparedOrder->status);
-        $this->assertSame(Order::PRINT_STATUS_MANUAL_CONFIRMED, $preparedOrder->print_status);
+        $this->assertSame(Order::STATUS_IN_PREPARATION, $manualOrder->status);
+        $this->assertSame(Order::PRINT_STATUS_MANUAL_CONFIRMED, $manualOrder->print_status);
         $this->assertDatabaseHas('print_job_events', [
             'order_id' => $order->id,
             'event_type' => PrintJobEvent::EVENT_MANUAL_CONFIRMED,
@@ -369,6 +645,24 @@ class PrintWorkflowTest extends TestCase
         ]);
 
         return [$company, $order->refresh()];
+    }
+
+    /** @return array{0: Company, 1: User} */
+    private function counterSaleContext(bool $withPrintingPermission = false): array
+    {
+        $seeders = [PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class];
+        if ($withPrintingPermission) {
+            $seeders[] = RoleAndPermissionSeeder::class;
+        }
+        $this->seed($seeders);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        if ($withPrintingPermission) {
+            $user->assignRole(Role::ATENDENTE);
+        }
+
+        return [$company, $user];
     }
 
     private function menuComponentId(Company $company, string $slug): int

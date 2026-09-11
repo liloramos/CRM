@@ -12,6 +12,7 @@ import {
   CodeXml,
   CreditCard,
   Banknote,
+  CirclePlus,
   DollarSign,
   Eye,
   EyeOff,
@@ -37,6 +38,9 @@ import {
   User,
   Users,
   Utensils,
+  QrCode,
+  Wallet,
+  WalletCards,
   Volume2,
   VolumeX,
   X,
@@ -85,6 +89,10 @@ export type IconName =
   | 'smile'
   | 'sticker'
   | 'cash'
+  | 'plus-circle'
+  | 'qr-code'
+  | 'wallet'
+  | 'wallet-cards'
 
 type IconProps = {
   name: IconName | string
@@ -134,6 +142,10 @@ const iconComponents: Record<string, LucideIcon> = {
   smile: Smile,
   sticker: Sticker,
   cash: Banknote,
+  'plus-circle': CirclePlus,
+  'qr-code': QrCode,
+  wallet: Wallet,
+  'wallet-cards': WalletCards,
 }
 
 export function Icon({ name, size = 20, className = '' }: IconProps) {

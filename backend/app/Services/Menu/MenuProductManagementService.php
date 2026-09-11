@@ -18,7 +18,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
+use Throwable;
 
 class MenuProductManagementService
 {
@@ -39,14 +41,18 @@ class MenuProductManagementService
         abort_unless((int) $product->company_id === (int) $company->id, Response::HTTP_NOT_FOUND);
 
         DB::transaction(function () use ($company, $product, $attributes, $serviceDays): void {
-            if (isset($attributes['category_slug'])) {
-                if (! $this->isCounterProduct($product)) {
-                    throw ValidationException::withMessages([
-                        'category_slug' => ['A categoria so pode ser alterada para produtos de balcao.'],
-                    ]);
-                }
+            if (isset($attributes['category_id'])) {
+                $category = $this->category($company, (int) $attributes['category_id']);
+                $product->category_id = $category->id;
 
-                $product->category_id = $this->counterCategory($company, $attributes['category_slug'])->id;
+                if ((bool) data_get($product->metadata, 'catalog_admin_product', false)) {
+                    $product->product_type = $this->productTypeFor($category);
+                }
+            }
+
+            $metadata = (array) $product->metadata;
+            if ((bool) $attributes['is_active']) {
+                unset($metadata['catalog_archived_at'], $metadata['catalog_archived_reason'], $metadata['catalog_archived_by_user_id']);
             }
 
             $product->fill([
@@ -57,6 +63,7 @@ class MenuProductManagementService
                 'is_available_by_default' => $attributes['is_available_by_default'],
                 'display_order' => $attributes['display_order'],
                 'currency' => 'BRL',
+                'metadata' => $metadata,
             ]);
             $product->save();
 
@@ -75,7 +82,7 @@ class MenuProductManagementService
      * @param  array<int, string>  $serviceDays
      * @return array<string, mixed>
      */
-    public function createCounterProduct(
+    public function createProduct(
         Company $company,
         array $attributes,
         array $serviceDays,
@@ -93,7 +100,8 @@ class MenuProductManagementService
         }
 
         $product = DB::transaction(function () use ($attributes, $company, $name, $serviceDays, $slug): Product {
-            $category = $this->counterCategory($company, (string) $attributes['category_slug']);
+            $category = $this->category($company, (int) $attributes['category_id']);
+            $isCounterProduct = (bool) $attributes['is_counter_product'];
             $nextOrder = ((int) Product::query()
                 ->where('company_id', $company->id)
                 ->where('category_id', $category->id)
@@ -104,14 +112,16 @@ class MenuProductManagementService
                 'category_id' => $category->id,
                 'name' => $name,
                 'slug' => $slug,
-                'product_type' => Product::TYPE_COUNTER,
+                'product_type' => $isCounterProduct ? Product::TYPE_COUNTER : $this->productTypeFor($category),
                 'description' => $attributes['description'] ?? null,
                 'base_price_cents' => $attributes['price_cents'],
                 'currency' => 'BRL',
                 'is_active' => $attributes['is_active'],
                 'is_available_by_default' => $attributes['is_available_by_default'],
                 'allows_item_notes' => true,
-                'metadata' => ['counter_sale' => true],
+                'metadata' => $isCounterProduct
+                    ? ['counter_sale' => true]
+                    : ['catalog_admin_product' => true],
                 'display_order' => $attributes['display_order'] ?? $nextOrder,
             ]);
 
@@ -121,6 +131,50 @@ class MenuProductManagementService
         });
 
         return $this->configuration->configuration($product->refresh(), $company, $date);
+    }
+
+    /**
+     * @return array{outcome: string, message: string, product: array<string, mixed>|null}
+     */
+    public function deleteProduct(
+        Company $company,
+        Product $product,
+        CarbonInterface $date,
+        ?int $actorUserId = null,
+    ): array {
+        abort_unless((int) $product->company_id === (int) $company->id, Response::HTTP_NOT_FOUND);
+
+        if ($this->requiresHistoricalPreservation($product)) {
+            DB::transaction(function () use ($actorUserId, $product): void {
+                $metadata = (array) $product->metadata;
+                $metadata['catalog_archived_at'] = now()->toIso8601String();
+                $metadata['catalog_archived_reason'] = 'referenced_product';
+                $metadata['catalog_archived_by_user_id'] = $actorUserId;
+
+                $product->forceFill([
+                    'is_active' => false,
+                    'is_available_by_default' => false,
+                    'metadata' => $metadata,
+                ])->save();
+            });
+
+            return [
+                'outcome' => 'archived',
+                'message' => 'O produto possui historico ou vinculos e foi arquivado com seguranca.',
+                'product' => $this->configuration->configuration($product->refresh(), $company, $date),
+            ];
+        }
+
+        $imagePath = data_get($product->metadata, 'catalog_image_path');
+
+        DB::transaction(fn () => $product->delete());
+        $this->deleteStoredImage($product, $imagePath);
+
+        return [
+            'outcome' => 'deleted',
+            'message' => 'Produto excluido.',
+            'product' => null,
+        ];
     }
 
     /**
@@ -134,12 +188,25 @@ class MenuProductManagementService
         $directory = "menu-products/{$company->id}/{$product->id}";
         $path = $image->storePubliclyAs($directory, Str::uuid().'.'.$extension, 'public');
 
-        DB::transaction(function () use ($path, $product): void {
-            $metadata = (array) $product->metadata;
-            $this->deleteStoredImage($product, $metadata['catalog_image_path'] ?? null);
-            $metadata['catalog_image_path'] = $path;
-            $product->forceFill(['metadata' => $metadata])->save();
-        });
+        if (! is_string($path)) {
+            throw new RuntimeException('Nao foi possivel armazenar a imagem do produto.');
+        }
+
+        $previousPath = data_get($product->metadata, 'catalog_image_path');
+
+        try {
+            DB::transaction(function () use ($path, $product): void {
+                $metadata = (array) $product->metadata;
+                $metadata['catalog_image_path'] = $path;
+                $product->forceFill(['metadata' => $metadata])->save();
+            });
+        } catch (Throwable $exception) {
+            $this->deleteStoredImage($product, $path);
+
+            throw $exception;
+        }
+
+        $this->deleteStoredImage($product, $previousPath);
 
         return $this->configuration->configuration($product->refresh(), $company, $date);
     }
@@ -151,12 +218,15 @@ class MenuProductManagementService
     {
         abort_unless((int) $product->company_id === (int) $company->id, Response::HTTP_NOT_FOUND);
 
+        $previousPath = data_get($product->metadata, 'catalog_image_path');
+
         DB::transaction(function () use ($product): void {
             $metadata = (array) $product->metadata;
-            $this->deleteStoredImage($product, $metadata['catalog_image_path'] ?? null);
             unset($metadata['catalog_image_path']);
             $product->forceFill(['metadata' => $metadata])->save();
         });
+
+        $this->deleteStoredImage($product, $previousPath);
 
         return $this->configuration->configuration($product->refresh(), $company, $date);
     }
@@ -254,12 +324,16 @@ class MenuProductManagementService
         $basePriceCents = (int) ($product->base_price_cents ?? 0);
         $beefOnly = $rules['beef_only'] ?? [];
         $extraBeef = $rules['extra_beef'] ?? [];
+        $hasStandardMeatRule = array_key_exists('standard_meat', $rules);
+        $standardMeat = $rules['standard_meat'] ?? [];
 
         $beefOnlyEnabled = (bool) ($beefOnly['enabled'] ?? false);
         $extraBeefEnabled = (bool) ($extraBeef['enabled'] ?? false);
         $beefOnlyFinalPriceCents = $beefOnly['final_price_cents'] ?? null;
         $extraBeefPriceCents = $extraBeef['price_cents'] ?? null;
         $extraBeefMaxQuantity = $extraBeef['max_quantity'] ?? null;
+        $standardMeatEnabled = (bool) ($standardMeat['enabled'] ?? false);
+        $standardMeatPriceCents = $standardMeat['price_cents'] ?? null;
 
         if ($beefOnlyEnabled && ! is_int($beefOnlyFinalPriceCents)) {
             throw ValidationException::withMessages([
@@ -283,6 +357,21 @@ class MenuProductManagementService
             throw ValidationException::withMessages([
                 'beef_rules.extra_beef.max_quantity' => ['Informe a quantidade maxima do bife adicional.'],
             ]);
+        }
+
+        if ($standardMeatEnabled && ! is_int($standardMeatPriceCents)) {
+            throw ValidationException::withMessages([
+                'beef_rules.standard_meat.price_cents' => ['Informe o preco da carne padrao adicional.'],
+            ]);
+        }
+
+        if ($hasStandardMeatRule) {
+            $product->forceFill([
+                'composition_rules' => [
+                    ...($product->composition_rules ?? []),
+                    'standard_meat_additional_price_cents' => $standardMeatEnabled ? (int) $standardMeatPriceCents : null,
+                ],
+            ])->save();
         }
 
         $beef = MenuComponent::query()
@@ -380,24 +469,41 @@ class MenuProductManagementService
         );
     }
 
-    private function isCounterProduct(Product $product): bool
+    private function category(Company $company, int $categoryId): ProductCategory
     {
-        return $product->product_type === Product::TYPE_COUNTER
-            || (bool) data_get($product->metadata, 'counter_sale', false);
-    }
+        $category = ProductCategory::query()
+            ->where('company_id', $company->id)
+            ->whereKey($categoryId)
+            ->first();
 
-    private function counterCategory(Company $company, string $slug): ProductCategory
-    {
-        $definition = ProductCategory::counterCategoryDefinitions()[$slug] ?? null;
-
-        if ($definition === null) {
-            throw ValidationException::withMessages(['category_slug' => ['Selecione uma categoria valida para o produto de balcao.']]);
+        if (! $category instanceof ProductCategory) {
+            throw ValidationException::withMessages([
+                'category_id' => ['Selecione uma categoria valida para esta empresa.'],
+            ]);
         }
 
-        return ProductCategory::query()->firstOrCreate(
-            ['company_id' => $company->id, 'slug' => $slug],
-            $definition,
-        );
+        return $category;
+    }
+
+    private function productTypeFor(ProductCategory $category): string
+    {
+        return match ($category->category_type) {
+            ProductCategory::TYPE_MARMITAS => Product::TYPE_MARMITA,
+            ProductCategory::TYPE_BEBIDAS => Product::TYPE_BEVERAGE,
+            ProductCategory::TYPE_SUCOS => Product::TYPE_JUICE,
+            ProductCategory::TYPE_COMBOS => Product::TYPE_COMBO,
+            ProductCategory::TYPE_FEIJOADAS => Product::TYPE_FEIJOADA,
+            ProductCategory::TYPE_ADICIONAIS => Product::TYPE_ADDON,
+            ProductCategory::TYPE_ACAI => Product::TYPE_ACAI,
+            default => Product::TYPE_PRODUCT,
+        };
+    }
+
+    private function requiresHistoricalPreservation(Product $product): bool
+    {
+        return $product->orderItems()->exists()
+            || $product->includedInComboItems()->exists()
+            || $product->selectableProductLinks()->exists();
     }
 
     private function deleteStoredImage(Product $product, mixed $path): void

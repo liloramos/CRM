@@ -17,9 +17,13 @@ import type {
   AdminMenuProductsResponse,
   AdminWeeklyMenuItem,
   AdminWeeklyMenuResponse,
+  AccountSecurity,
+  AiAutomationSandboxResult,
+  AiAutomationSettings,
   AuthUser,
   BackendOrderStatus,
   ComponentAvailabilityMutationResponse,
+  CounterSaleDraft,
   CounterSaleProduct,
   CounterSaleDetail,
   CounterSaleHistory,
@@ -36,22 +40,31 @@ import type {
   DailyMenuComponent,
   DailyMenuSectionKey,
   DailyStructuredMenu,
+  DeliveryAddress,
   DeliveryCoordinates,
   DeliveryDistanceBand,
   DeliveryMapTask,
   DeliverySettings,
   EffectiveAvailabilityStatus,
+  FinancialOverview,
   MenuOption,
   MenuComponentTypeKey,
   OperationalSnapshot,
+  OperationalReport,
+  PaymentSettings,
   PrintPreviewResult,
   Product,
   ProductServiceDayKey,
   ResolvedProductConfiguration,
   SnapshotSource,
   StructuredMenuCatalogResponse,
+  StructuredMenuCategorySummary,
+  SystemAssistantResponse,
+  SupportTicket,
+  SupportTicketCenter,
   StructuredMenuProduct,
   WeeklyMenuServiceDayKey,
+  WhatsAppIntegration,
 } from '../types/crm'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
@@ -89,6 +102,7 @@ type DraftOrderPayload = {
   general_notes?: string
   kitchen_notes?: string
   pickup_person_name?: string
+  seller_user_id?: string | null
 }
 
 export type AddItemPayload = {
@@ -206,7 +220,7 @@ export type UpdateMenuProductPayload = {
   is_active: boolean
   is_available_by_default: boolean
   display_order: number
-  category_slug?: CounterProductCategorySlug
+  category_id?: number
   service_days: ProductServiceDayKey[]
   beef_rules?: {
     beef_only: {
@@ -296,17 +310,29 @@ export class ApiError extends Error {
   }
 }
 
-export type CounterProductCategorySlug = 'doces' | 'geladinhos' | 'bebidas' | 'sucos' | 'outros'
-
-export type CreateCounterProductPayload = {
+export type CreateMenuProductPayload = {
   date?: string
   name: string
   description: string | null
   price_cents: number
   is_active: boolean
   is_available_by_default: boolean
-  category_slug: CounterProductCategorySlug
+  category_id: number
+  is_counter_product: boolean
   service_days: ProductServiceDayKey[]
+}
+
+export type SaveMenuCategoryPayload = {
+  name: string
+  description: string | null
+  display_order: number
+  is_active: boolean
+}
+
+export type DeleteMenuProductResult = {
+  outcome: 'deleted' | 'archived'
+  message: string
+  product: StructuredMenuProduct | null
 }
 
 export function describeApiError(error: unknown, fallback: string): string {
@@ -349,6 +375,7 @@ export function getMockOperationalSnapshot(): OperationalSnapshot {
       destructive_cleanup_environment: 'mock',
     },
     orders: ordersMock,
+    sellerCandidates: [],
     conversations: conversationsMock,
     customers: customersMock,
     products: productsMock.map((product) => ({
@@ -407,7 +434,7 @@ export async function getOperationalSnapshot(): Promise<SnapshotResponse> {
       return {
         snapshot: getMockOperationalSnapshot(),
         source: 'mock',
-        fallbackReason: error instanceof Error ? error.message : 'API indisponivel',
+        fallbackReason: error instanceof Error ? error.message : 'API indisponível',
       }
     }
 
@@ -428,6 +455,7 @@ function normalizeOperationalSnapshot(snapshot: OperationalSnapshot | null | und
       destructive_cleanup_environment: snapshot.capabilities?.destructive_cleanup_environment ?? 'unknown',
     },
     orders: Array.isArray(snapshot.orders) ? snapshot.orders : [],
+    sellerCandidates: Array.isArray(snapshot.sellerCandidates) ? snapshot.sellerCandidates : [],
     conversations: Array.isArray(snapshot.conversations) ? snapshot.conversations : [],
     customers: Array.isArray(snapshot.customers) ? snapshot.customers : [],
     products: Array.isArray(snapshot.products) ? snapshot.products : [],
@@ -454,8 +482,39 @@ export type CompleteCounterSalePayload = {
   items: Array<{
     product_id: number
     quantity: number
+    weight_grams?: number
+    selected_components?: string[]
+    additions?: Array<{
+      code: 'extra_beef'
+      quantity: 1
+    }>
   }>
   payment_method: 'pix' | 'cash' | 'debit_card' | 'credit_card'
+  seller_user_id?: number | null
+} & CounterSaleCustomerPayload
+
+export type CounterSaleCustomerPayload = {
+  customer_id?: number | null
+  customer_name?: string | null
+  customer_phone?: string | null
+  save_customer?: boolean
+}
+
+export type CounterSaleDraftPayload = CounterSaleCustomerPayload & {
+  product_id: number
+  selected_components?: string[]
+  additions?: Array<{ code: 'extra_beef'; quantity: 1 }>
+  notes?: string
+  seller_user_id?: number | null
+}
+
+export type FinalizeCounterSaleDraftPayload = CounterSaleCustomerPayload & {
+  weight_grams?: number
+  selected_components?: string[]
+  additions?: Array<{ code: 'extra_beef'; quantity: 1 }>
+  notes?: string
+  payment_method: 'pix' | 'cash' | 'debit_card' | 'credit_card'
+  seller_user_id?: number | null
 }
 
 export async function getCounterSaleProducts(): Promise<CounterSaleProduct[]> {
@@ -555,6 +614,145 @@ export async function createCustomer(payload: CreateCustomerPayload): Promise<Cu
   return response.data
 }
 
+export async function getCounterSaleDrafts(): Promise<CounterSaleDraft[]> {
+  const response = await requestJson<ApiEnvelope<CounterSaleDraft[]>>('/api/app/counter-sales/drafts')
+
+  return response.data
+}
+
+export async function createCounterSaleDraft(payload: CounterSaleDraftPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>('/api/app/counter-sales/drafts', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+}
+
+export async function finalizeCounterSaleDraft(orderId: string, payload: FinalizeCounterSaleDraftPayload) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/counter-sales/${orderId}/finalize`, {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+}
+
+export async function updateCounterSaleDraftCustomer(orderId: string, customer: CounterSaleCustomerPayload): Promise<CounterSaleDraft> {
+  const response = await requestJson<ApiEnvelope<CounterSaleDraft>>(`/api/app/counter-sales/${orderId}/customer`, {
+    body: JSON.stringify(customer),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export type AccountProfile = { name: string; email: string; phone: string | null; jobTitle: string | null; avatarUrl: string | null; companyName: string | null; roles: string[]; permissions: string[] }
+export type AccountCompany = { name: string; displayName: string | null; legalName: string | null; responsibleName: string | null; contactEmail: string | null; contactPhone: string | null; timezone: string | null; addressLine: string | null; addressNumber: string | null; addressComplement: string | null; district: string | null; city: string | null; state: string | null; postalCode: string | null; logoUrl: string | null }
+export async function getAccountProfile(): Promise<AccountProfile> { return (await requestJson<ApiEnvelope<AccountProfile>>('/api/app/account/profile')).data }
+export async function saveAccountProfile(data: Record<string, string>): Promise<AccountProfile> {
+  return (await requestJson<ApiEnvelope<AccountProfile>>('/api/app/account/profile', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      job_title: data.jobTitle,
+      current_password: data.current_password || undefined,
+      password: data.password || undefined,
+      password_confirmation: data.password_confirmation || undefined,
+    }),
+  })).data
+}
+export async function uploadAccountAvatar(file: File): Promise<AccountProfile> { const body = new FormData(); body.append('avatar', file); return (await requestJson<ApiEnvelope<AccountProfile>>('/api/app/account/profile/avatar', { method: 'POST', body })).data }
+export async function removeAccountAvatar(): Promise<AccountProfile> { return (await requestJson<ApiEnvelope<AccountProfile>>('/api/app/account/profile/avatar', { method: 'DELETE' })).data }
+export async function getAccountCompany(): Promise<AccountCompany> { return (await requestJson<ApiEnvelope<AccountCompany>>('/api/app/account/company')).data }
+export type GeneralSettings = {
+  timezone: string
+  operating_hours: Array<{ weekday: number; is_open: boolean; opens_at: string | null; closes_at: string | null; notes: string | null }>
+  operating_exceptions: Array<{ date: string; is_open: boolean; opens_at: string | null; closes_at: string | null; notes: string | null }>
+}
+export async function getGeneralSettings(): Promise<GeneralSettings> { return (await requestJson<ApiEnvelope<GeneralSettings>>('/api/app/settings/general')).data }
+export async function saveGeneralSettings(data: GeneralSettings): Promise<GeneralSettings> { return (await requestJson<ApiEnvelope<GeneralSettings>>('/api/app/settings/general', { method: 'PATCH', body: JSON.stringify(data) })).data }
+export type PrintSettings = { printer: { id: number; name: string; paper_width_mm: number; print_mode: string; status: string } | null; templates: Array<{ id: number; name: string; is_default: boolean; width_chars: number; includes_financials: boolean }>; latest_job: { id: number; order_code: string | null; status: string; requested_at: string | null } | null; recent_failures_count: number }
+export async function getPrintSettings(): Promise<PrintSettings> { return (await requestJson<ApiEnvelope<PrintSettings>>('/api/app/settings/printing')).data }
+export async function savePrintSettings(data: { printer_name: string; paper_width_mm: number; receipt_template_id: number | null }): Promise<PrintSettings> { return (await requestJson<ApiEnvelope<PrintSettings>>('/api/app/settings/printing', { method: 'PATCH', body: JSON.stringify(data) })).data }
+export async function getPaymentSettings(): Promise<PaymentSettings> { return (await requestJson<ApiEnvelope<PaymentSettings>>('/api/app/settings/payments')).data }
+export async function savePaymentSettings(data: PaymentSettings): Promise<PaymentSettings> { return (await requestJson<ApiEnvelope<PaymentSettings>>('/api/app/settings/payments', { method: 'PATCH', body: JSON.stringify({ methods: Object.fromEntries(data.methods.map((method) => [method.code, method.enabled])), pix: data.pix }) })).data }
+export async function getAccountSecurity(): Promise<AccountSecurity> { return (await requestJson<ApiEnvelope<AccountSecurity>>('/api/app/account/security')).data }
+export async function getWhatsAppIntegration(): Promise<WhatsAppIntegration> { return (await requestJson<ApiEnvelope<WhatsAppIntegration>>('/api/app/integrations/whatsapp')).data }
+export async function checkWhatsAppIntegration(): Promise<{ status: 'validated' | 'failed'; message: string; checked_at: string }> { return (await requestJson<ApiEnvelope<{ status: 'validated' | 'failed'; message: string; checked_at: string }>>('/api/app/integrations/whatsapp/check', { method: 'POST' })).data }
+export async function getAiAutomationSettings(): Promise<AiAutomationSettings> { return (await requestJson<ApiEnvelope<AiAutomationSettings>>('/api/app/automation/ai')).data }
+export async function saveAiAutomationRollout(rollout: AiAutomationSettings['rollout']): Promise<AiAutomationSettings> { return (await requestJson<ApiEnvelope<AiAutomationSettings>>('/api/app/automation/ai', { method: 'PATCH', body: JSON.stringify({ rollout }) })).data }
+export async function saveAiAutomationGuidance(instructions: string[]): Promise<AiAutomationSettings> { return (await requestJson<ApiEnvelope<AiAutomationSettings>>('/api/app/automation/ai/guidance', { method: 'PATCH', body: JSON.stringify({ instructions }) })).data }
+export async function runAiAutomationSandbox(message: string): Promise<AiAutomationSandboxResult> { return (await requestJson<ApiEnvelope<AiAutomationSandboxResult>>('/api/app/automation/ai/sandbox', { method: 'POST', body: JSON.stringify({ message }) })).data }
+export async function askSystemAssistant(message: string, currentRoute?: string, recentHistory: Array<{ role: 'user' | 'assistant'; text: string }> = []): Promise<SystemAssistantResponse> { return (await requestJson<ApiEnvelope<SystemAssistantResponse>>('/api/app/assistant', { method: 'POST', body: JSON.stringify({ message, current_route: currentRoute, recent_history: recentHistory }) })).data }
+export async function getSupportTickets(): Promise<SupportTicketCenter> { return (await requestJson<ApiEnvelope<SupportTicketCenter>>('/api/app/support/tickets')).data }
+export async function createSupportTicket(data: { category: SupportTicket['category']; subject: string; description: string; priority: SupportTicket['priority']; current_route?: string }): Promise<SupportTicket> { return (await requestJson<ApiEnvelope<SupportTicket>>('/api/app/support/tickets', { method: 'POST', body: JSON.stringify(data) })).data }
+export async function confirmSecurityPassword(password: string): Promise<void> { await requestJson('/user/confirm-password', { method: 'POST', body: JSON.stringify({ password }) }) }
+export async function enableTwoFactor(): Promise<void> { await requestJson('/user/two-factor-authentication', { method: 'POST' }) }
+export async function disableTwoFactor(): Promise<void> { await requestJson('/user/two-factor-authentication', { method: 'DELETE' }) }
+export async function getTwoFactorQrCode(): Promise<{ svg: string }> { return requestJson<{ svg: string }>('/user/two-factor-qr-code') }
+export async function confirmTwoFactor(code: string): Promise<void> { await requestJson('/user/confirmed-two-factor-authentication', { method: 'POST', body: JSON.stringify({ code }) }) }
+export async function getTwoFactorRecoveryCodes(): Promise<string[]> { return requestJson<string[]>('/user/two-factor-recovery-codes') }
+export async function regenerateTwoFactorRecoveryCodes(): Promise<string[]> { return requestJson<string[]>('/user/two-factor-recovery-codes', { method: 'POST' }) }
+export type ManagedUser = { id: string; name: string; email: string; phone: string | null; jobTitle: string | null; avatarUrl: string | null; canBeSeller: boolean; isActive: boolean; roles: string[]; permissions: string[]; companyName: string | null; canEdit: boolean; canEditAccess: boolean }
+export type UserManagementData = {
+  users: ManagedUser[]
+  available_roles: Array<{ name: string; label: string; permissions: string[]; protected: boolean }>
+  available_permissions: Array<{ name: string; label: string }>
+}
+export type ManagedUserPayload = {
+  name: string
+  email: string
+  phone: string
+  job_title: string
+  role: string
+  permissions: string[]
+  can_be_seller: boolean
+  is_active: boolean
+  password?: string
+  password_confirmation?: string
+}
+export async function getManagedUsers(): Promise<UserManagementData> { return (await requestJson<ApiEnvelope<UserManagementData>>('/api/app/settings/users')).data }
+export async function createManagedUser(data: ManagedUserPayload): Promise<ManagedUser> { return (await requestJson<ApiEnvelope<ManagedUser>>('/api/app/settings/users', { method: 'POST', body: JSON.stringify(data) })).data }
+export async function updateManagedUser(id: string, data: ManagedUserPayload): Promise<ManagedUser> { return (await requestJson<ApiEnvelope<ManagedUser>>(`/api/app/settings/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) })).data }
+export async function uploadManagedUserAvatar(id: string, file: File): Promise<ManagedUser> { const body = new FormData(); body.append('avatar', file); return (await requestJson<ApiEnvelope<ManagedUser>>(`/api/app/settings/users/${id}/avatar`, { method: 'POST', body })).data }
+export async function removeManagedUserAvatar(id: string): Promise<ManagedUser> { return (await requestJson<ApiEnvelope<ManagedUser>>(`/api/app/settings/users/${id}/avatar`, { method: 'DELETE' })).data }
+export async function saveAccountCompany(data: Record<string, string>): Promise<AccountCompany> { return (await requestJson<ApiEnvelope<AccountCompany>>('/api/app/account/company', { method: 'PATCH', body: JSON.stringify(data) })).data }
+export async function uploadAccountCompanyLogo(file: File): Promise<AccountCompany> { const body = new FormData(); body.append('logo', file); return (await requestJson<ApiEnvelope<AccountCompany>>('/api/app/account/company/logo', { method: 'POST', body })).data }
+
+export async function deleteCustomer(customerId: string): Promise<void> {
+  await requestJson<ApiEnvelope<{ deleted: boolean; customer_id: string }>>(`/api/app/customers/${customerId}`, {
+    method: 'DELETE',
+  })
+}
+
+export type FinancialOverviewFilters = {
+  from?: string
+  to?: string
+  method?: string
+  status?: string
+  search?: string
+}
+
+export async function getFinancialOverview(filters: FinancialOverviewFilters = {}): Promise<FinancialOverview> {
+  const params = new URLSearchParams()
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value) params.set(key, value)
+  })
+  const query = params.toString()
+  const response = await requestJson<ApiEnvelope<FinancialOverview>>(`/api/app/financial-overview${query ? `?${query}` : ''}`)
+
+  return response.data
+}
+
+export async function getOperationalReport(from?: string, to?: string): Promise<OperationalReport> {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  const query = params.toString()
+  const response = await requestJson<ApiEnvelope<OperationalReport>>(`/api/app/reports/operational${query ? `?${query}` : ''}`)
+
+  return response.data
+}
+
 export async function cancelOrder(orderId: string, payload: CancelOrderPayload) {
   return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/cancel`, {
     body: JSON.stringify(payload),
@@ -587,11 +785,42 @@ export async function generateTicketPreview(orderId: string) {
   })
 }
 
-export function getOrderTicketPreviewUrl(orderId: string, autoprint = false): string {
-  const path = `/orders/${encodeURIComponent(orderId.trim())}/ticket/preview`
-  const query = autoprint ? '?autoprint=1' : ''
+export async function startOrderPrint(orderId: string) {
+  return requestJson<
+    ApiEnvelope<{
+      order: OperationalSnapshot['orders'][number]
+      preview: PrintPreviewResult
+    }>
+  >(`/api/app/orders/${orderId}/print/start`, {
+    method: 'POST',
+  })
+}
 
-  return `${API_BASE_URL}${path}${query}`
+export async function confirmOrderPrint(orderId: string) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/print/confirm`, {
+    method: 'POST',
+  })
+}
+
+export function getOrderTicketPreviewUrl(
+  orderId: string,
+  autoprint = false,
+  targetAudience: 'kitchen' | 'cashier' | 'delivery' = 'kitchen',
+  printJobId?: string,
+): string {
+  const path = `/orders/${encodeURIComponent(orderId.trim())}/ticket/preview`
+  const params = new URLSearchParams({ target_audience: targetAudience })
+  if (autoprint) params.set('autoprint', '1')
+  if (printJobId) params.set('print_job_id', printJobId)
+
+  return `${API_BASE_URL}${path}?${params.toString()}`
+}
+
+export async function updateOrderSeller(orderId: string, sellerUserId: string | null) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/seller`, {
+    body: JSON.stringify({ seller_user_id: sellerUserId }),
+    method: 'PATCH',
+  })
 }
 
 export async function setConversationAutomationMode(conversationId: string, payload: AutomationModePayload) {
@@ -669,8 +898,12 @@ export async function analyzeConversationCopilot(conversationId: string) {
   return requestJson<ApiEnvelope<CopilotAnalysis>>(`/api/app/conversations/${conversationId}/copilot/analyze`, { method: 'POST' })
 }
 
-export async function voidOrderPayment(orderId: string, reason: string) {
-  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/payments/void`, {
+export async function voidOrderPayment(orderId: string, reason: string, paymentId?: string) {
+  const path = paymentId
+    ? `/api/app/orders/${orderId}/payments/${paymentId}/void`
+    : `/api/app/orders/${orderId}/payments/void`
+
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(path, {
     body: JSON.stringify({ reason }),
     method: 'POST',
   })
@@ -678,8 +911,9 @@ export async function voidOrderPayment(orderId: string, reason: string) {
 
 export type FulfillmentAction = 'ready' | 'start-delivery' | 'delivered' | 'picked-up'
 
-export async function advanceOrderFulfillment(orderId: string, action: FulfillmentAction) {
-  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]>>(`/api/app/orders/${orderId}/fulfillment/${action}`, {
+export async function advanceOrderFulfillment(orderId: string, action: FulfillmentAction, sendCustomerNotification = false) {
+  return requestJson<ApiEnvelope<OperationalSnapshot['orders'][number]> & { warning?: string | null }>(`/api/app/orders/${orderId}/fulfillment/${action}`, {
+    body: JSON.stringify({ send_customer_notification: sendCustomerNotification }),
     method: 'POST',
   })
 }
@@ -732,6 +966,17 @@ export async function geocodeDeliveryAddress(orderId: string, address: string) {
     body: JSON.stringify({ address }),
     method: 'POST',
   })
+}
+
+export type UpdateDeliveryAddressPayload = Pick<DeliveryAddress, 'postal_code' | 'street' | 'number' | 'complement' | 'neighborhood' | 'city' | 'state' | 'reference'>
+
+export async function updateDeliveryAddress(orderId: string, payload: UpdateDeliveryAddressPayload): Promise<{ task: DeliveryMapTask; warning: string | null }> {
+  const response = await requestJson<ApiEnvelope<DeliveryMapTask> & { warning?: string | null }>(`/api/app/orders/${orderId}/delivery/address`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return { task: response.data, warning: response.warning ?? null }
 }
 
 export async function overrideDeliveryFee(orderId: string, finalFeeCents: number, reason?: string) {
@@ -1235,13 +1480,48 @@ async function getStructuredOperationalProducts(): Promise<Product[]> {
     .filter((product) => product.available)
 }
 
-export async function createCounterProduct(payload: CreateCounterProductPayload): Promise<StructuredMenuProduct> {
+export async function createMenuProduct(payload: CreateMenuProductPayload): Promise<StructuredMenuProduct> {
   const response = await requestJson<ApiEnvelope<StructuredMenuProduct>>('/api/app/menu/products', {
     body: JSON.stringify(payload),
     method: 'POST',
   })
 
   return response.data
+}
+
+export async function deleteMenuProduct(productId: number | string): Promise<DeleteMenuProductResult> {
+  const response = await requestJson<ApiEnvelope<DeleteMenuProductResult>>(`/api/app/menu/products/${productId}`, {
+    method: 'DELETE',
+  })
+
+  return response.data
+}
+
+export async function createMenuCategory(payload: SaveMenuCategoryPayload): Promise<StructuredMenuCategorySummary> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuCategorySummary>>('/api/app/menu/categories', {
+    body: JSON.stringify(payload),
+    method: 'POST',
+  })
+
+  return response.data
+}
+
+export async function updateMenuCategory(
+  categoryId: number | string,
+  payload: SaveMenuCategoryPayload,
+): Promise<StructuredMenuCategorySummary> {
+  const response = await requestJson<ApiEnvelope<StructuredMenuCategorySummary>>(`/api/app/menu/categories/${categoryId}`, {
+    body: JSON.stringify(payload),
+    method: 'PATCH',
+  })
+
+  return response.data
+}
+
+export async function deleteMenuCategory(categoryId: number | string): Promise<void> {
+  await requestJson<ApiEnvelope<{ outcome: 'deleted'; message: string }>>(`/api/app/menu/categories/${categoryId}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function uploadMenuProductImage(productId: number | string, image: File): Promise<StructuredMenuProduct> {

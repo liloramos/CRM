@@ -16,6 +16,7 @@ import type {
   PrintPreviewResult,
   Product,
   ResolvedProductConfiguration,
+  SellerSummary,
   StructuredMeatConfiguration,
   StructuredComponentOption,
   DailyMenuComponent,
@@ -66,6 +67,7 @@ type OperationalModalContentProps = {
   newOrderCustomerResults: CustomerSummary[]
   newOrderFulfillmentType: FulfillmentApiType
   newOrderNotes: string
+  newOrderSellerId: string
   newOrderWalkInPhone: string
   onAutomationModeChange: (mode: AutomationModeSelection) => void
   onBeneficiaryNameChange: (value: string) => void
@@ -85,6 +87,7 @@ type OperationalModalContentProps = {
   onNewOrderCustomerQueryChange: (value: string) => void
   onNewOrderFulfillmentTypeChange: (value: FulfillmentApiType) => void
   onNewOrderNotesChange: (value: string) => void
+  onNewOrderSellerIdChange: (value: string) => void
   onNewOrderWalkInPhoneChange: (value: string) => void
   onPaymentAmountChange: (value: string) => void
   onPaymentMethodChange: (value: PaymentMethodSelection) => void
@@ -106,6 +109,7 @@ type OperationalModalContentProps = {
   selectedConversation?: Conversation
   selectedNewOrderCustomer: CustomerSummary | null
   selectedOrder?: Order
+  sellerCandidates: SellerSummary[]
   selectedOptionIds: string[]
   selectedProductId: string
   statusNotes: string
@@ -140,6 +144,7 @@ export function OperationalModalContent({
   newOrderCustomerResults,
   newOrderFulfillmentType,
   newOrderNotes,
+  newOrderSellerId,
   newOrderWalkInPhone,
   onAutomationModeChange,
   onBeneficiaryNameChange,
@@ -159,6 +164,7 @@ export function OperationalModalContent({
   onNewOrderCustomerQueryChange,
   onNewOrderFulfillmentTypeChange,
   onNewOrderNotesChange,
+  onNewOrderSellerIdChange,
   onNewOrderWalkInPhoneChange,
   onPaymentAmountChange,
   onPaymentMethodChange,
@@ -180,6 +186,7 @@ export function OperationalModalContent({
   selectedConversation,
   selectedNewOrderCustomer,
   selectedOrder,
+  sellerCandidates,
   selectedOptionIds,
   selectedProductId,
   statusNotes,
@@ -246,7 +253,7 @@ export function OperationalModalContent({
         {!newCustomerMode && !selectedNewOrderCustomer && newOrderCustomerQuery.trim() ? (
           <div className="walk-in-customer-panel">
             <Badge tone="neutral">Cliente avulso</Badge>
-            <p>O pedido sera criado com o nome digitado, sem cadastrar cliente automaticamente.</p>
+            <p>O pedido será criado com o nome digitado, sem cadastrar cliente automaticamente.</p>
             <label>
               Telefone opcional
               <input
@@ -268,8 +275,17 @@ export function OperationalModalContent({
           ]}
           value={newOrderFulfillmentType}
         />
+        <SelectField
+          label="Responsável / Atendente"
+          onChange={onNewOrderSellerIdChange}
+          options={[
+            { value: '', label: 'Não atribuído' },
+            ...sellerCandidates.map((seller) => ({ value: seller.id, label: seller.name })),
+          ]}
+          value={newOrderSellerId}
+        />
         <label>
-          Observacao do pedido
+          Observação do pedido
           <textarea
             onChange={(event) => onNewOrderNotesChange(event.target.value)}
             placeholder="Ex.: cliente retira no balcao, conferir troco."
@@ -437,7 +453,8 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          Pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong>. Total em aberto:{' '}
+          Pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong>, cliente{' '}
+          <strong>{selectedOrder?.customer.name ?? 'não informado'}</strong>. Total em aberto:{' '}
           <strong>{formatCurrency(selectedOrder?.amountDue ?? 0)}</strong>.
         </p>
         <SelectField
@@ -463,7 +480,7 @@ export function OperationalModalContent({
           />
         </label>
         <label>
-          Observacao
+          Observação
           <textarea
             onChange={(event) => onPaymentNotesChange(event.target.value)}
             placeholder="Ex.: pagamento conferido no caixa."
@@ -500,7 +517,7 @@ export function OperationalModalContent({
               />
             </label>
             <label>
-              Observacao
+              Observação
               <textarea
                 onChange={(event) => onStatusNotesChange(event.target.value)}
                 placeholder="Detalhe operacional opcional."
@@ -546,7 +563,7 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          O pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> sera cancelado sem apagar itens ou historico.
+          O pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> será cancelado sem apagar itens ou histórico.
         </p>
         <label>
           Motivo do cancelamento
@@ -558,7 +575,7 @@ export function OperationalModalContent({
           />
         </label>
         <label>
-          Observacao
+          Observação
           <textarea
             onChange={(event) => onCancelNotesChange(event.target.value)}
             placeholder="Detalhe operacional opcional."
@@ -597,11 +614,11 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          O pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> e seu historico relacionado elegivel serao excluidos permanentemente.
+          O pedido <strong>{selectedOrder?.code ?? 'selecionado'}</strong> e seu histórico relacionado elegível serão excluídos permanentemente.
         </p>
         <div className="attention-box">
-          <Badge tone="danger">Exclusao administrativa definitiva</Badge>
-          <p>Somente pedidos cancelados e financeiramente zerados podem ser excluidos. Confirmacoes, revisoes, creditos e movimentacoes financeiras bloqueiam a acao.</p>
+          <Badge tone="danger">Exclusão administrativa definitiva</Badge>
+          <p>Somente pedidos cancelados e financeiramente zerados podem ser excluídos. Confirmações, revisões, créditos e movimentações financeiras bloqueiam a ação.</p>
         </div>
         <BlockedDeletionList blocked={blockedOrderDeletions} />
         <label>
@@ -621,7 +638,7 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          {bulkDeleteCount} pedido(s) selecionado(s) serao excluidos permanentemente somente se todos estiverem cancelados e financeiramente zerados.
+          {bulkDeleteCount} pedido(s) selecionado(s) serão excluídos permanentemente somente se todos estiverem cancelados e financeiramente zerados.
         </p>
         <div className="attention-box">
           <Badge tone="danger">Exclusão em lote</Badge>
@@ -645,11 +662,11 @@ export function OperationalModalContent({
     return (
       <div className="modal-fields">
         <p>
-          {bulkDeleteCount} pedido(s) selecionado(s) serao enviados para a limpeza ampla de registros de teste.
+          {bulkDeleteCount} pedido(s) selecionado(s) serão enviados para a limpeza ampla de registros de teste.
         </p>
         <div className="attention-box">
           <Badge tone="danger">Ferramenta de desenvolvimento</Badge>
-          <p>Esta ferramenta so fica disponivel em ambiente seguro, com ALLOW_DESTRUCTIVE_TEST_CLEANUP habilitado. Clientes sao preservados.</p>
+          <p>Esta ferramenta só fica disponível em ambiente seguro, com ALLOW_DESTRUCTIVE_TEST_CLEANUP habilitado. Clientes são preservados.</p>
         </div>
         <label>
           Digite EXCLUIR para confirmar
@@ -680,7 +697,7 @@ export function OperationalModalContent({
       <div className="mode-options">
         <div className="mode-options__intro">
           <strong>Conversa selecionada: {selectedConversation.customer.name}</strong>
-          <p>A alteracao vale para esta conversa. Situacoes ambiguas, pagamento, credito e entrega seguem com confirmacao humana.</p>
+          <p>A alteração vale para esta conversa. Situações ambíguas, pagamento, crédito e entrega seguem com confirmação humana.</p>
         </div>
 
         <label className={automationMode === 'assisted' ? 'mode-card is-selected' : 'mode-card'}>
@@ -696,7 +713,7 @@ export function OperationalModalContent({
           </span>
           <span className="mode-card__copy">
             <strong>IA assistida</strong>
-            <small>Sugere respostas e perguntas de confirmacao, sem confirmar decisoes sensiveis sozinha.</small>
+            <small>Sugere respostas e perguntas de confirmação, sem confirmar decisões sensíveis sozinha.</small>
           </span>
         </label>
         <label className={automationMode === 'manual' ? 'mode-card is-selected' : 'mode-card'}>
@@ -723,10 +740,10 @@ export function OperationalModalContent({
   if (modal === 'print-error') {
     return (
       <div className="modal-fields">
-        <p>Opcoes previstas: tentar novamente, reimprimir, copiar comanda ou marcar impresso manualmente.</p>
+        <p>Opções previstas: tentar novamente, reimprimir, copiar comanda ou marcar impresso manualmente.</p>
         <label>
           Motivo operacional
-          <textarea placeholder="Descreva a falha de impressao de forma objetiva." />
+          <textarea placeholder="Descreva a falha de impressão de forma objetiva." />
         </label>
       </div>
     )
@@ -751,7 +768,7 @@ export function OperationalModalContent({
         <textarea placeholder="Registre um motivo operacional seguro." />
       </label>
       <label>
-        Proxima acao
+        Próxima ação
         <input placeholder="Ex.: conferir com cliente antes de finalizar" />
       </label>
     </div>
@@ -1084,12 +1101,12 @@ function BeefChoicePicker({
                   <span className="option-choice__box" aria-hidden="true" />
                   <span className="option-choice__content">
                     <strong>{item.component.display_name || item.component.name}</strong>
-                    <small>{supportingName ?? (item.available ? 'Disponivel hoje' : 'Indisponivel hoje')}</small>
+                    <small>{supportingName ?? (item.available ? 'Disponível hoje' : 'Indisponível hoje')}</small>
                   </span>
                 </label>
               )
             }) : (
-              <p className="muted-text">Nenhuma carne disponivel no cardapio desta data.</p>
+              <p className="muted-text">Nenhuma carne disponível no cardápio desta data.</p>
             )}
           </div>
           {canUseExtraBeef ? (
@@ -1393,7 +1410,7 @@ function LegacyOptionPicker({
   return (
     <div className="option-picker">
       <div>
-        <strong>Opcoes legadas</strong>
+        <strong>Opções legadas</strong>
         <p>Este produto ainda usa o cadastro legado de opcoes.</p>
       </div>
       {groups.map((group) => (
@@ -1615,11 +1632,11 @@ function toggleStructuredSelection(current: string[], token: string, groupTokens
 
 function structuredOptionHint(option: StructuredComponentOption): string {
   if (!option.link_active || option.requires_confirmation) {
-    return 'Configuracao pendente'
+    return 'Configuração pendente'
   }
 
   if (!option.available) {
-    return option.availability.reason ?? 'Indisponivel hoje'
+    return option.availability.reason ?? 'Indisponível hoje'
   }
 
   if (option.final_price_cents !== null) {
@@ -1635,11 +1652,11 @@ function structuredOptionHint(option: StructuredComponentOption): string {
 
 function structuredProductOptionHint(option: StructuredProductOption): string {
   if (!option.link_active || option.requires_confirmation) {
-    return 'Configuracao pendente'
+    return 'Configuração pendente'
   }
 
   if (!option.available) {
-    return option.availability.reason ?? 'Indisponivel hoje'
+    return option.availability.reason ?? 'Indisponível hoje'
   }
 
   if (option.final_price_cents !== null) {

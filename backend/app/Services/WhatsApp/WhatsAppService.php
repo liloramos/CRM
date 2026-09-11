@@ -78,6 +78,12 @@ class WhatsAppService
         return $status;
     }
 
+    /** @return array<string, mixed> */
+    public function diagnoseConnectivity(): array
+    {
+        return $this->provider->diagnoseConnectivity();
+    }
+
     public function verifyWebhook(?string $mode, ?string $token, ?string $challenge): ?string
     {
         $verifiedChallenge = $this->provider->verifyWebhook($mode, $token, $challenge);

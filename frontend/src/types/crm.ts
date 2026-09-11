@@ -14,7 +14,16 @@ export type RouteKey =
   | 'configuracoes'
   | 'whatsapp'
   | 'ia'
+  | 'assistente'
+  | 'suporte'
   | 'perfil'
+  | 'empresa'
+  | 'configuracoes-gerais'
+  | 'configuracoes-usuarios'
+  | 'configuracoes-marca'
+  | 'configuracoes-impressao'
+  | 'configuracoes-pagamentos'
+  | 'configuracoes-seguranca'
 
 export type BadgeTone =
   | 'brand'
@@ -44,6 +53,7 @@ export type PaymentStatus = 'pendente' | 'parcial' | 'pago' | 'credito' | 'revis
 export type FulfillmentType = 'retirada' | 'entrega' | 'balcao'
 export type AutomationMode = 'ia' | 'manual' | 'atencao'
 export type PrintStatus = 'aguardando' | 'imprimindo' | 'impresso' | 'reimpressao' | 'erro'
+export type PrintJobStatus = 'previewed' | 'queued' | 'printing' | 'printed' | 'failed' | 'reprint_requested' | 'printer_unavailable' | 'manual_confirmed' | 'waived'
 export type PaymentMethod = 'pix' | 'dinheiro' | 'cartao' | 'credito_cliente' | 'misto' | 'a_confirmar'
 export type FulfillmentApiType = 'pickup' | 'delivery' | 'counter'
 
@@ -143,12 +153,18 @@ export type Order = {
   conversationId?: string | null
   resolvedConversationId?: string | null
   backendStatus?: BackendOrderStatus
+  seller?: SellerSummary | null
+  sellerName?: string | null
   customer: CustomerSummary
   status: OrderStatus
   paymentStatus: PaymentStatus
   paymentMethod?: PaymentMethod
   fulfillmentType: FulfillmentType
   printStatus: PrintStatus
+  latestPrintJobId?: string | null
+  latestPrintJobStatus?: PrintJobStatus | null
+  printConfirmationPending?: boolean
+  hasConfirmedPrint?: boolean
   channel: 'WhatsApp' | 'Manual' | 'Balcao'
   createdLabel: string
   availableTransitions: Array<{
@@ -169,6 +185,7 @@ export type Order = {
     id: string
     title: string
     description: string
+    actorName?: string | null
     timeLabel: string
   }>
 }
@@ -271,6 +288,11 @@ export type ConversationAlert = {
   isActionable?: boolean
 }
 
+export type SellerSummary = {
+  id: string
+  name: string
+}
+
 export type OperationalNotification = {
   id: string
   kind: 'message' | 'alert'
@@ -321,6 +343,7 @@ export type Conversation = {
   automationStatus?: string
   automationVersion?: number
   automationRollout?: 'disabled' | 'shadow' | 'act_safe'
+  hasCopilotAnalysis?: boolean
   unread: number
   statusLabel: string
   operationalStatus?: ConversationOperationalStatus
@@ -447,11 +470,15 @@ export type StructuredMenuProductSummary = {
   slug: string
   name: string
   product_type: string
+  menu_rule_code: string | null
+  pricing_mode: 'unit' | 'weight' | string
+  weight_unit: string | null
   base_price_cents: number | null
   currency: string
   is_active: boolean
   is_available_by_default: boolean
-  administrative_status: 'active' | 'inactive' | 'legacy'
+  administrative_status: 'active' | 'inactive' | 'archived' | 'legacy'
+  is_archived: boolean
   is_legacy: boolean
   legacy_reason: string | null
   display_order: number
@@ -539,6 +566,7 @@ export type StructuredMeatConfiguration = {
       same_component_only: boolean
     }
     allow_no_meat: boolean
+    additional_meat_price_cents: number | null
   }
   beef_only: {
     enabled: boolean
@@ -578,7 +606,45 @@ export type StructuredMenuProduct = StructuredMenuProductSummary & {
   combo_items: StructuredComboItem[]
 }
 
-export type CounterSaleProduct = StructuredMenuProductSummary
+export type CounterSaleAddition = {
+  code: 'extra_beef' | string
+  name: string
+  price_cents: number
+  max_quantity: number
+}
+
+export type CounterSaleProduct = StructuredMenuProductSummary & {
+  additions: CounterSaleAddition[]
+}
+
+export type CounterSaleCustomer = Pick<CustomerSummary, 'id' | 'name' | 'phone' | 'phoneLabel'>
+
+export type CounterSaleCustomerSnapshot = {
+  name: string
+  phone: string | null
+}
+
+export type CounterSaleDraft = {
+  id: string
+  code: string
+  productId: number | null
+  productName: string
+  menuRuleCode: 'self_service_counter' | 'counter_weight_standard' | 'counter_weight_meat_only'
+  openedAtLabel: string
+  timeLabel: string
+  status: 'draft'
+  statusLabel: string
+  weightPending: boolean
+  weightGrams: number | null
+  pricePerKgCents: number | null
+  selectedComponents: string[]
+  hasExtraBeef: boolean
+  notes: string | null
+  seller: SellerSummary | null
+  sellerName: string | null
+  customer: CounterSaleCustomer | null
+  customerSnapshot: CounterSaleCustomerSnapshot | null
+}
 
 export type CounterSaleHistoryFilters = {
   dateFrom?: string
@@ -599,6 +665,10 @@ export type CounterSaleRecord = {
   status: 'completed' | 'cancelled'
   statusLabel: string
   isCancellable: boolean
+  seller: SellerSummary | null
+  sellerName: string | null
+  customer: CounterSaleCustomer | null
+  customerSnapshot: CounterSaleCustomerSnapshot | null
 }
 
 export type CounterSaleSummary = {
@@ -644,6 +714,8 @@ export type CounterSaleDetail = CounterSaleRecord & {
     productName: string
     productImageUrl: string | null
     quantity: number
+    weightGrams: number | null
+    pricePerKgCents: number | null
     unitPriceCents: number
     subtotalCents: number
   }>
@@ -806,12 +878,26 @@ export type DeliveryCoordinates = {
   longitude: number
 }
 
+export type DeliveryAddress = {
+  postal_code?: string | null
+  street?: string | null
+  number?: string | null
+  complement?: string | null
+  neighborhood?: string | null
+  city?: string | null
+  state?: string | null
+  reference?: string | null
+  latitude?: number | null
+  longitude?: number | null
+}
+
 export type DeliveryMapTask = {
   id: string
   order_code: string
   status: string
+  order_status: BackendOrderStatus
   recipient: string | null
-  address: Record<string, unknown> | null
+  address: DeliveryAddress | null
   origin: DeliveryCoordinates | null
   destination: DeliveryCoordinates | null
   distance_meters: number | null
@@ -846,8 +932,11 @@ export type FinanceEntry = {
   id: string
   orderId: string
   paymentId: string | null
+  conversationId: string | null
   label: string
   orderCode: string
+  customerName: string
+  customerPhone: string | null
   status: PaymentStatus
   amount: number
   receivedAmount: number
@@ -861,6 +950,19 @@ export type FinanceEntry = {
   method: string
   paymentMethod: PaymentMethod
   createdLabel: string
+  createdAt: string | null
+  canConfirmPayment: boolean
+  canReviewProof: boolean
+  items: Array<{ id: string; name: string; quantity: number; totalPrice: number }>
+  proof: {
+    id: string
+    status: 'received' | 'accepted' | 'rejected' | string
+    amount: number | null
+    receivedAt: string | null
+    fileName: string | null
+    mimeType: string | null
+    mediaUrl: string | null
+  } | null
   description: string
 }
 
@@ -898,6 +1000,81 @@ export type DailyFinancialSummary = {
   averageTicket: number
 }
 
+export type FinancialMovement = {
+  id: string
+  occurredAt: string | null
+  origin: string
+  orderId: string | null
+  orderCode: string | null
+  customerName: string
+  type: 'payment' | 'void'
+  method: string
+  status: string
+  amount: number
+  totalAmount?: number
+  operatorName: string | null
+  notes: string | null
+  canVoid: boolean
+  paymentCount?: number
+  details?: {
+    items: number
+    deliveryFee: number
+    adjustments: number
+    creditUsed: number
+    total: number
+    received: number
+    payments: Array<{ id: string; method: string; status: string; amount: number; occurredAt: string | null; operatorName: string | null; canVoid: boolean }>
+  }
+}
+
+export type FinancialOverview = {
+  period: { from: string; to: string; timezone: string }
+  summary: {
+    confirmedRevenue: number
+    receivedAmount: number
+    pendingAmount: number
+    creditBalance: number
+    voidedAmount: number
+    voidedCount: number
+    averageTicket: number | null
+    paidOrders: number
+    movementCount: number
+  }
+  movements: FinancialMovement[]
+  methods: Array<{ method: string; count: number; amount: number }>
+}
+
+export type OperationalReport = {
+  period: { from: string; to: string; timezone: string }
+  metrics: {
+    averageResponseSeconds: number | null
+    responseSampleCount: number
+    ordersCreated: number
+    ordersCompleted: number
+    ordersCancelled: number
+    ordersPaid: number
+    averageTicket: number | null
+    confirmedRevenue: number
+    paymentsConfirmed: number
+    paymentsPending: number
+    pixAwaitingReview: number
+    printJobsGenerated: number
+    printJobsPrinted: number
+    printFailures: number
+    conversationsStarted: number
+    conversationsAutomated: number
+    humanReviewEvents: number
+  }
+  sufficiency: Record<'responseTime' | 'orders' | 'payments' | 'printing' | 'conversations', boolean>
+  charts: {
+    revenueByDay: Array<{ date: string; value: number }>
+    ordersByStatus: Array<{ label: string; value: number }>
+    paymentsByMethod: Array<{ label: string; value: number }>
+    ordersByDay: Array<{ date: string; value: number }>
+  }
+  formulas: Record<string, string>
+}
+
 export type IntegrationStatus = {
   id: string
   title: string
@@ -909,6 +1086,9 @@ export type AuthUser = {
   id: string
   name: string
   email: string
+  phone: string | null
+  jobTitle: string | null
+  avatarUrl: string | null
   company: CompanySummary | null
   roles: string[]
   permissions: string[]
@@ -922,6 +1102,7 @@ export type OperationalSnapshot = {
     destructive_cleanup_environment: string
   }
   orders: Order[]
+  sellerCandidates: SellerSummary[]
   conversations: Conversation[]
   customers: CustomerSummary[]
   products: Product[]
@@ -951,6 +1132,91 @@ export type PrintPreviewResult = {
   previewUrl?: string | null
   generatedAt?: string | null
 }
+
+export type PaymentSettingMethod = {
+  code: 'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other'
+  label: string
+  description: string
+  enabled: boolean
+}
+
+export type PaymentSettings = {
+  methods: PaymentSettingMethod[]
+  pix: { public_key: string | null }
+}
+
+export type AccountSecurity = {
+  account: { name: string; email: string; roles: string[] }
+  two_factor: { available: boolean; enabled: boolean; confirmation_required: boolean }
+  session: { active: boolean }
+}
+
+export type WhatsAppIntegration = {
+  provider: string
+  configured: boolean
+  connection_status: 'local' | 'not_configured' | 'configured' | 'connected' | 'error'
+  phone_number_masked: string | null
+  phone_number_id_masked: string | null
+  waba_id_masked: string | null
+  api_version: string | null
+  token_configured: boolean
+  webhook: { url: string | null; status: 'local' | 'pending' | 'verified'; last_received_at: string | null }
+  last_inbound: { conversation_id: number | null; status: string; occurred_at: string | null } | null
+  last_outbound: { conversation_id: number | null; status: string; occurred_at: string | null } | null
+  recent_errors: Array<{ kind: string; occurred_at: string | null }>
+  processing: { pending_webhook_events: number; failed_webhook_events: number }
+}
+
+export type AiAutomationSettings = {
+  provider: string
+  model: string | null
+  api_key_configured: boolean
+  rollout: 'disabled' | 'shadow' | 'act_safe'
+  automation_enabled: boolean
+  allow_auto_send: boolean
+  guidance: {
+    version: number
+    instructions: string[]
+    updated_at: string | null
+    updated_by_user_id: number | null
+  }
+  last_execution_at: string | null
+  last_failure: string | null
+  handoffs: Array<{ reason: string; occurred_at: string | null }>
+}
+
+export type AiAutomationSandboxResult = {
+  reply: string
+  reply_messages: string[]
+  classification: string
+  requires_human_review: boolean
+  action: string
+  reason: string
+  rollout: AiAutomationSettings['rollout']
+}
+
+export type SystemAssistantAction = {
+  type: 'explain_feature' | 'navigate_to_page' | 'open_order' | 'open_customer' | 'show_pending_payments' | 'show_deliveries' | 'open_menu' | 'open_company_settings' | 'open_finance' | 'open_reports'
+  target: RouteKey
+  label: string
+  parameters: { order_id?: string; customer_id?: string }
+}
+
+export type SystemAssistantResponse = { answer: string; action: SystemAssistantAction | null }
+
+export type SupportTicket = {
+  id: string
+  code: string
+  category: 'order' | 'payment' | 'printing' | 'whatsapp' | 'ai' | 'delivery' | 'menu' | 'access' | 'customer' | 'reports' | 'other'
+  subject: string
+  priority: 'low' | 'normal' | 'high'
+  status: 'open' | 'in_review' | 'resolved'
+  created_at: string | null
+  email_delivery_status: 'not_configured' | 'sent' | 'failed'
+  contact: { email_configured: boolean; whatsapp_number: string | null; whatsapp_url: string | null }
+}
+
+export type SupportTicketCenter = { tickets: SupportTicket[]; contact: { email_configured: boolean; whatsapp_number: string | null } }
 
 export type AppModal =
   | 'new-order'

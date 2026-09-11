@@ -197,6 +197,7 @@ class OrderItemSelectionValidator
                     ...$this->withoutSaladRows($withoutSalad),
                 ],
                 'unit_price_cents' => (int) $quote['total_cents'],
+                'selection_quote' => $quote,
                 'selected_components' => $selectedComponents,
                 'removed_ingredients' => $removedIngredients,
             ];
@@ -206,6 +207,7 @@ class OrderItemSelectionValidator
             return [
                 'options' => [...$validated, ...$dailyBuffetRows, $this->withoutMeatRow(), ...$this->withoutSaladRows($withoutSalad)],
                 'unit_price_cents' => (int) $quote['total_cents'],
+                'selection_quote' => $quote,
                 'selected_components' => $selectedComponents,
                 'removed_ingredients' => $removedIngredients,
             ];
@@ -228,6 +230,7 @@ class OrderItemSelectionValidator
                 ...$this->withoutSaladRows($withoutSalad),
             ],
             'unit_price_cents' => (int) $quote['total_cents'],
+            'selection_quote' => $quote,
             'selected_components' => $selectedComponents,
             'removed_ingredients' => $removedIngredients,
         ];

@@ -4,7 +4,6 @@ namespace App\Http\Requests\Menu;
 
 use App\Enums\ProductServiceDay;
 use App\Http\Requests\Menu\Concerns\ParsesMenuDate;
-use App\Models\ProductCategory;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -30,7 +29,8 @@ class StoreMenuProductRequest extends FormRequest
             'price_cents' => ['required', 'integer', 'min:0'],
             'is_active' => ['required', 'boolean'],
             'is_available_by_default' => ['required', 'boolean'],
-            'category_slug' => ['required', 'string', Rule::in(array_keys(ProductCategory::counterCategoryDefinitions()))],
+            'category_id' => ['required', 'integer', 'min:1'],
+            'is_counter_product' => ['required', 'boolean'],
             'display_order' => ['nullable', 'integer', 'min:0', 'max:65535'],
             'service_days' => ['required', 'array'],
             'service_days.*' => ['required', Rule::in(array_column(ProductServiceDay::cases(), 'value'))],

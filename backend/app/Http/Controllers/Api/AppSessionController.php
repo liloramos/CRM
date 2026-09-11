@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\UserIdentityPresenter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -11,6 +12,8 @@ use Illuminate\Validation\ValidationException;
 
 class AppSessionController extends Controller
 {
+    public function __construct(private readonly UserIdentityPresenter $identityPresenter) {}
+
     public function csrf(Request $request): JsonResponse
     {
         return response()->json([
@@ -20,7 +23,7 @@ class AppSessionController extends Controller
 
     public function show(Request $request): JsonResponse
     {
-        if (! $request->user()) {
+        if (! $request->user() || ! $request->user()->is_active) {
             return response()->json([
                 'authenticated' => false,
                 'user' => null,
@@ -44,7 +47,7 @@ class AppSessionController extends Controller
         $remember = (bool) ($credentials['remember'] ?? false);
         unset($credentials['remember']);
 
-        if (! Auth::attempt($credentials, $remember)) {
+        if (! Auth::attempt([...$credentials, 'is_active' => true], $remember)) {
             throw ValidationException::withMessages([
                 'email' => ['Credenciais inválidas para este ambiente.'],
             ]);
@@ -81,8 +84,7 @@ class AppSessionController extends Controller
 
         return [
             'id' => (string) $user->id,
-            'name' => $user->name,
-            'email' => $user->email,
+            ...$this->identityPresenter->present($user),
             'company' => $user->company ? [
                 'id' => (string) $user->company->id,
                 'name' => $user->company->name,

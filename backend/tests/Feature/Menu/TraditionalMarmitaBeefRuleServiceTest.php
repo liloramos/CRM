@@ -63,9 +63,39 @@ class TraditionalMarmitaBeefRuleServiceTest extends TestCase
             'extra_beef_quantity' => 1,
         ]);
 
-        $this->assertSame(1800, $traditional['total_cents']);
-        $this->assertSame(2200, $beefOnly['total_cents']);
-        $this->assertSame(2500, $withExtraBeef['total_cents']);
+        $this->assertSame(1900, $traditional['total_cents']);
+        $this->assertSame(2300, $beefOnly['total_cents']);
+        $this->assertSame(2600, $withExtraBeef['total_cents']);
+    }
+
+    public function test_churrasco_with_a_second_standard_meat_has_the_configured_additional_price(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $quote = app(TraditionalMarmitaBeefRuleService::class)->quote($this->product('n9-tradicional'), [
+            'meat_mode' => 'traditional',
+            'traditional_meat_component_ids' => [$this->menuComponent('churrasco')->id, $this->menuComponent('porco')->id],
+        ]);
+
+        $this->assertSame(2300, $quote['total_cents']);
+        $this->assertSame(400, $quote['standard_meat_additional_total_cents']);
+    }
+
+    public function test_third_standard_meat_uses_the_configured_additional_meat_price(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $quote = app(TraditionalMarmitaBeefRuleService::class)->quote($this->product('n9-tradicional'), [
+            'meat_mode' => 'traditional',
+            'traditional_meat_component_ids' => [
+                $this->menuComponent('feijoada')->id,
+                $this->menuComponent('porco')->id,
+                $this->menuComponent('frango-ao-molho')->id,
+            ],
+        ]);
+
+        $this->assertSame(2300, $quote['total_cents']);
+        $this->assertSame(400, $quote['standard_meat_additional_total_cents']);
     }
 
     public function test_beef_only_rejects_traditional_meats_and_extra_beef(): void

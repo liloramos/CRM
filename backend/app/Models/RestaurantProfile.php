@@ -11,6 +11,7 @@ class RestaurantProfile extends Model
         'company_id',
         'display_name',
         'legal_name',
+        'responsible_name',
         'document',
         'contact_email',
         'contact_phone',
@@ -24,6 +25,7 @@ class RestaurantProfile extends Model
         'state',
         'postal_code',
         'country_code',
+        'logo_path',
     ];
 
     public function company(): BelongsTo

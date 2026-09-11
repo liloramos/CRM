@@ -46,7 +46,7 @@ class ConversationWorkflowService
             if ($mode === Conversation::AUTOMATION_MODE_MANUAL) {
                 $this->alerts->resolveActiveForConversation(
                     $conversation,
-                    [ConversationAlert::TYPE_HUMAN_REQUESTED],
+                    ConversationAlert::HUMAN_HANDOFF_TYPES,
                     $user,
                 );
             }

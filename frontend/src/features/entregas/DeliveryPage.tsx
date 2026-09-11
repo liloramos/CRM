@@ -4,13 +4,17 @@ import { PageHeader } from '../../components/layout/PageHeader'
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
 import { Icon } from '../../components/ui/Icon'
+import { Modal } from '../../components/ui/Modal'
 import {
   getDeliverySettings,
   getDeliveryTasks,
+  advanceOrderFulfillment,
   overrideDeliveryFee,
   recalculateDeliveryRoute,
   setDeliveryCoordinates,
+  updateDeliveryAddress,
   updateDeliverySettings,
+  type UpdateDeliveryAddressPayload,
 } from '../../services/crm.service'
 import {
   loadGoogleMaps,
@@ -29,13 +33,21 @@ import './DeliveryPage.css'
 
 const mapsBrowserKey = import.meta.env.VITE_DELIVERY_GOOGLE_BROWSER_API_KEY as string | undefined
 
-export function DeliveryPage() {
+export function DeliveryPage({
+  canManageDelivery,
+  onOrderChanged,
+}: {
+  canManageDelivery: boolean
+  onOrderChanged: () => Promise<void>
+}) {
   const [tasks, setTasks] = useState<DeliveryMapTask[]>([])
   const [settings, setSettings] = useState<DeliverySettings | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [pendingAction, setPendingAction] = useState<'start-delivery' | 'delivered' | null>(null)
+  const [sendCustomerNotification, setSendCustomerNotification] = useState(false)
   const selected = useMemo(() => tasks.find((task) => task.id === selectedId) ?? tasks[0] ?? null, [selectedId, tasks])
 
   async function refresh() {
@@ -75,6 +87,25 @@ export function DeliveryPage() {
     try { await overrideDeliveryFee(selected.id, cents, reason); await refresh(); setMessage('Taxa de entrega ajustada.') }
     catch (error) { setMessage(error instanceof Error ? error.message : 'Não foi possível ajustar a taxa.') }
     finally { setSaving(false) }
+  }
+
+  function openFulfillmentAction(action: 'start-delivery' | 'delivered') {
+    setPendingAction(action)
+    setSendCustomerNotification(action === 'start-delivery')
+  }
+
+  async function confirmFulfillmentAction() {
+    if (!selected || !pendingAction) return
+    const action = pendingAction
+    setSaving(true)
+    try {
+      const response = await advanceOrderFulfillment(selected.id, action, sendCustomerNotification)
+      await Promise.all([refresh(), onOrderChanged()])
+      setPendingAction(null)
+      setMessage(response.warning ?? (action === 'start-delivery' ? 'Saída para entrega registrada.' : 'Entrega registrada como concluída.'))
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Não foi possível atualizar o status da entrega.')
+    } finally { setSaving(false) }
   }
 
   async function useSearchedDestination(destination: GoogleLatLng): Promise<boolean> {
@@ -120,11 +151,91 @@ export function DeliveryPage() {
       </aside>
       <section className="delivery-detail-panel" aria-live="polite">
         <SectionTitle eyebrow="Entrega selecionada" title={selected?.order_code ?? 'Selecione uma entrega'} />
-        {selected ? <><dl className="delivery-details"><div><dt>Cliente</dt><dd>{selected.recipient ?? 'Não informado'}</dd></div><div><dt>Endereço</dt><dd>{addressLabel(selected.address)}</dd></div><div><dt>Rota</dt><dd>{distanceLabel(selected.distance_meters)}{selected.duration_seconds ? ` · ${durationLabel(selected.duration_seconds)}` : ''}</dd></div><div><dt>Taxa calculada</dt><dd>{selected.calculated_fee_cents === null ? 'Aguardando cálculo' : money(selected.calculated_fee_cents)}</dd></div><div><dt>Taxa final</dt><dd>{money(selected.final_fee_cents)}</dd></div></dl><div className="delivery-actions"><Button disabled={saving || !selected.destination} icon="refresh" onClick={() => void recalculateSelected()}>Recalcular rota</Button><Button disabled={saving || selected.quote_id === null} icon="edit" variant="secondary" onClick={() => void adjustSelectedFee()}>Ajustar taxa</Button><ExternalRouteLinks task={selected} /></div></> : <div className="delivery-detail-panel__empty"><strong>Escolha uma entrega na fila</strong><span>Os dados da rota, da taxa e do cliente aparecerão aqui para conferência.</span></div>}
+        {selected ? <><dl className="delivery-details"><div><dt>Cliente</dt><dd>{selected.recipient ?? 'Não informado'}</dd></div><div><dt>Endereço</dt><dd>{addressLabel(selected.address)}</dd></div><div><dt>Rota</dt><dd>{distanceLabel(selected.distance_meters)}{selected.duration_seconds ? ` · ${durationLabel(selected.duration_seconds)}` : ''}</dd></div><div><dt>Taxa calculada</dt><dd>{selected.calculated_fee_cents === null ? 'Aguardando cálculo' : money(selected.calculated_fee_cents)}</dd></div><div><dt>Taxa final</dt><dd>{money(selected.final_fee_cents)}</dd></div></dl><div className="delivery-actions"><Button disabled={saving || !selected.destination} icon="refresh" onClick={() => void recalculateSelected()}>Recalcular rota</Button><Button disabled={saving || selected.quote_id === null} icon="edit" variant="secondary" onClick={() => void adjustSelectedFee()}>Ajustar taxa</Button><ExternalRouteLinks task={selected} /></div><DeliveryAddressEditor canManage={canManageDelivery} key={selected.id} onSaved={async (feedback) => { await refresh(); setMessage(feedback) }} task={selected} /></> : <div className="delivery-detail-panel__empty"><strong>Escolha uma entrega na fila</strong><span>Os dados da rota, da taxa e do cliente aparecerão aqui para conferência.</span></div>}
       </section>
+      {selected?.status === 'quoted' ? <div className="delivery-actions"><Button disabled icon="check" title="Confirme a montagem do pedido na tela Pedidos antes da saída.">Aguardando montagem</Button></div> : null}
+      {selected?.status === 'ready' ? <div className="delivery-actions"><Button disabled={saving || !canManageDelivery} icon="check" onClick={() => openFulfillmentAction('start-delivery')}>Saiu para entrega</Button></div> : null}
+      {selected?.status === 'out_for_delivery' ? <div className="delivery-actions"><Button disabled={saving || !canManageDelivery} icon="check" onClick={() => openFulfillmentAction('delivered')}>Marcar como entregue</Button></div> : null}
       {settings ? <DeliverySettingsForm settings={settings} onSaved={async () => { await refresh(); setMessage('Configuração de entrega atualizada.') }} /> : null}
     </div>
+      <Modal closeDisabled={saving} description={pendingAction === 'start-delivery' ? 'Confirme a saída operacional deste pedido.' : 'Confirme a conclusão operacional desta entrega.'} onClose={() => setPendingAction(null)} onPrimary={() => void confirmFulfillmentAction()} open={pendingAction !== null} primaryDisabled={saving} primaryLabel={pendingAction === 'start-delivery' ? 'Confirmar saída' : 'Confirmar entrega'} title={pendingAction === 'start-delivery' ? 'Saiu para entrega' : 'Pedido entregue'}>
+        <p><strong>{selected?.order_code}</strong><br />Cliente: {selected?.recipient ?? 'Não informado'}<br />Destino: {addressLabel(selected?.address ?? null)}</p>
+        <label className="delivery-notification-choice"><input checked={sendCustomerNotification} onChange={(event) => setSendCustomerNotification(event.target.checked)} type="checkbox" /> {pendingAction === 'start-delivery' ? 'Enviar aviso ao cliente pelo WhatsApp' : 'Enviar mensagem de agradecimento'}</label>
+      </Modal>
   </PageContainer>
+}
+
+function DeliveryAddressEditor({
+  canManage,
+  onSaved,
+  task,
+}: {
+  canManage: boolean
+  onSaved: (feedback: string) => Promise<void>
+  task: DeliveryMapTask
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [form, setForm] = useState<UpdateDeliveryAddressPayload>(() => addressForm(task))
+
+  function update(field: keyof UpdateDeliveryAddressPayload, value: string) {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await updateDeliveryAddress(task.id, form)
+      setEditing(false)
+      await onSaved(result.warning ?? 'Endereço salvo e rota recalculada com sucesso.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Não foi possível salvar o endereço desta entrega.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!canManage) {
+    return <p className="delivery-address-readonly">Endereço disponível somente para leitura neste perfil.</p>
+  }
+
+  if (!editing) {
+    return <div className="delivery-address-editor__closed"><span>Corrija os campos do endereço e recalcule a rota sem sair da entrega.</span><Button icon="edit" onClick={() => setEditing(true)} size="sm" variant="secondary">Adicionar ou editar endereço</Button></div>
+  }
+
+  return (
+    <form className="delivery-address-editor" onSubmit={(event) => void submit(event)}>
+      <div className="delivery-address-editor__heading"><div><strong>Endereço de entrega</strong><span>A correção fica salva antes da tentativa de geocodificação.</span></div><Button disabled={saving} onClick={() => setEditing(false)} size="sm" variant="ghost">Cancelar</Button></div>
+      <div className="delivery-address-editor__fields">
+        <label>CEP<input autoComplete="postal-code" onChange={(event) => update('postal_code', event.target.value)} value={form.postal_code ?? ''} /></label>
+        <label className="delivery-address-editor__street">Rua<input required onChange={(event) => update('street', event.target.value)} value={form.street ?? ''} /></label>
+        <label>Número<input required onChange={(event) => update('number', event.target.value)} value={form.number ?? ''} /></label>
+        <label>Complemento<input onChange={(event) => update('complement', event.target.value)} value={form.complement ?? ''} /></label>
+        <label>Bairro<input required onChange={(event) => update('neighborhood', event.target.value)} value={form.neighborhood ?? ''} /></label>
+        <label>Cidade<input required onChange={(event) => update('city', event.target.value)} value={form.city ?? ''} /></label>
+        <label>Estado<input maxLength={2} required onChange={(event) => update('state', event.target.value.toUpperCase())} value={form.state ?? ''} /></label>
+        <label className="delivery-address-editor__reference">Referência<input onChange={(event) => update('reference', event.target.value)} value={form.reference ?? ''} /></label>
+      </div>
+      {error ? <p className="delivery-form-error" role="alert">{error}</p> : null}
+      <div className="delivery-address-editor__footer"><Button disabled={saving} icon="check" type="submit">{saving ? 'Salvando e recalculando...' : 'Salvar endereço e recalcular'}</Button></div>
+    </form>
+  )
+}
+
+function addressForm(task: DeliveryMapTask): UpdateDeliveryAddressPayload {
+  return {
+    postal_code: task.address?.postal_code ?? '',
+    street: task.address?.street ?? '',
+    number: task.address?.number ?? '',
+    complement: task.address?.complement ?? '',
+    neighborhood: task.address?.neighborhood ?? '',
+    city: task.address?.city ?? '',
+    state: task.address?.state ?? '',
+    reference: task.address?.reference ?? '',
+  }
 }
 
 type SearchedPlace = {
@@ -514,7 +625,8 @@ function DeliverySettingsForm({ settings, onSaved }: { settings: DeliverySetting
   const [error, setError] = useState<string | null>(null)
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); const rateCents = moneyInputToCents(rate)
-    if (!Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude)) || (mode === 'per_km' && rateCents === null)) { setError('Informe origem e valores válidos para a entrega.'); return }
+    const invalidBand = bands.some((band) => !Number.isInteger(band.fee_cents) || band.fee_cents < 0)
+    if (!Number.isFinite(Number(latitude)) || !Number.isFinite(Number(longitude)) || (mode === 'per_km' && rateCents === null) || (mode === 'distance_bands' && invalidBand)) { setError('Informe origem e valores válidos para a entrega.'); return }
     setSaving(true)
     try { await updateDeliverySettings({ maps_provider: settings.maps_provider === 'none' ? 'fake' : settings.maps_provider as 'google' | 'fake', pricing_mode: mode, rate_per_km_cents: rateCents ?? undefined, origin: { address, latitude: Number(latitude), longitude: Number(longitude) }, distance_bands: mode === 'distance_bands' ? bands : [] }); setError(null); await onSaved() }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'Não foi possível salvar a configuração.') }
@@ -551,15 +663,50 @@ function DeliverySettingsForm({ settings, onSaved }: { settings: DeliverySetting
 }
 
 function DistanceBands({ bands, onChange }: { bands: DeliveryDistanceBand[]; onChange: (bands: DeliveryDistanceBand[]) => void }) {
-  function update(index: number, field: keyof DeliveryDistanceBand, value: string) { const next = [...bands]; next[index] = { ...next[index], [field]: field === 'up_to_meters' ? Math.round(Number(value.replace(',', '.')) * 1000) : moneyInputToCents(value) ?? 0 }; onChange(next) }
-  return <div className="delivery-bands"><strong>Faixas</strong>{bands.map((band, index) => <div className="delivery-band" key={`${band.up_to_meters}-${index}`}><label>Até (km)<input inputMode="decimal" onChange={(event) => update(index, 'up_to_meters', event.target.value)} value={(band.up_to_meters / 1000).toString().replace('.', ',')} /></label><label>Taxa<input inputMode="decimal" onChange={(event) => update(index, 'fee_cents', event.target.value)} value={centsToInput(band.fee_cents)} /></label><Button aria-label="Remover faixa" className="delivery-band__remove" onClick={() => onChange(bands.filter((_, row) => row !== index))} variant="ghost">Remover</Button></div>)}<Button icon="plus" onClick={() => onChange([...bands, { up_to_meters: 1000, fee_cents: 0 }])} size="sm" variant="secondary">Adicionar faixa</Button></div>
+  const [feeInputs, setFeeInputs] = useState(() => bands.map((band) => centsToInput(band.fee_cents)))
+
+  function updateDistance(index: number, value: string) {
+    const next = [...bands]
+    next[index] = { ...next[index], up_to_meters: Math.round(Number(value.replace(',', '.')) * 1000) }
+    onChange(next)
+  }
+
+  function updateFee(index: number, value: string) {
+    setFeeInputs((current) => current.map((input, row) => row === index ? value : input))
+    const next = [...bands]
+    next[index] = { ...next[index], fee_cents: moneyInputToCents(value) ?? -1 }
+    onChange(next)
+  }
+
+  function normalizeFee(index: number) {
+    const cents = moneyInputToCents(feeInputs[index] ?? '')
+    if (cents === null) return
+    setFeeInputs((current) => current.map((input, row) => row === index ? centsToInput(cents) : input))
+  }
+
+  function remove(index: number) {
+    setFeeInputs((current) => current.filter((_, row) => row !== index))
+    onChange(bands.filter((_, row) => row !== index))
+  }
+
+  function add() {
+    setFeeInputs((current) => [...current, '0,00'])
+    onChange([...bands, { up_to_meters: 1000, fee_cents: 0 }])
+  }
+
+  return <div className="delivery-bands"><strong>Faixas</strong>{bands.map((band, index) => <div className="delivery-band" key={index}><label>Até (km)<input inputMode="decimal" onChange={(event) => updateDistance(index, event.target.value)} value={(band.up_to_meters / 1000).toString().replace('.', ',')} /></label><label>Taxa<input inputMode="decimal" onBlur={() => normalizeFee(index)} onChange={(event) => updateFee(index, event.target.value)} placeholder="0,00" value={feeInputs[index] ?? ''} /></label><Button aria-label="Remover faixa" className="delivery-band__remove" onClick={() => remove(index)} variant="ghost">Remover</Button></div>)}<Button icon="plus" onClick={add} size="sm" variant="secondary">Adicionar faixa</Button></div>
 }
 
 function ExternalRouteLinks({ task }: { task: DeliveryMapTask }) { if (!task.destination) return null; const destination = `${task.destination.latitude},${task.destination.longitude}`; return <div className="delivery-external-links"><a href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`} rel="noreferrer" target="_blank">Abrir no Maps</a><a href={`https://waze.com/ul?ll=${encodeURIComponent(destination)}&navigate=yes`} rel="noreferrer" target="_blank">Abrir no Waze</a></div> }
 function money(cents: number) { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(cents / 100) }
 function centsToInput(cents: number) { return (cents / 100).toFixed(2).replace('.', ',') }
-function moneyInputToCents(value: string) { const parsed = Number(value.trim().replace(/\./g, '').replace(',', '.')); return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) : null }
+function moneyInputToCents(value: string) {
+  const normalized = value.trim().replace(/\s/g, '')
+  if (!/^\d+(?:[.,]\d{0,2})?$/.test(normalized)) return null
+  const parsed = Number(normalized.replace(',', '.'))
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed * 100) : null
+}
 function distanceLabel(meters: number | null) { return meters === null ? 'Aguardando rota' : `${(meters / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} km` }
 function durationLabel(seconds: number) { return `${Math.max(1, Math.round(seconds / 60))} min` }
-function statusLabel(status: string) { return ({ quoted: 'Aguardando preparo', out_for_delivery: 'Em entrega', address_pending: 'Endereço pendente' } as Record<string, string>)[status] ?? status }
-function addressLabel(address: Record<string, unknown> | null) { if (!address) return 'Endereço pendente'; return [address.street, address.number, address.neighborhood, address.city].filter(Boolean).join(', ') || 'Localização compartilhada' }
+function statusLabel(status: string) { return ({ quoted: 'Aguardando preparo', ready: 'Pronto para sair', out_for_delivery: 'Saiu para entrega', address_pending: 'Endereço pendente' } as Record<string, string>)[status] ?? status }
+function addressLabel(address: DeliveryMapTask['address']) { if (!address) return 'Endereço pendente'; return [address.street, address.number, address.neighborhood, address.city].filter(Boolean).join(', ') || 'Localização compartilhada' }

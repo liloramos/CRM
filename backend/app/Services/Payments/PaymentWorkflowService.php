@@ -2,6 +2,7 @@
 
 namespace App\Services\Payments;
 
+use App\Models\CompanySetting;
 use App\Models\Customer;
 use App\Models\CustomerCreditMovement;
 use App\Models\Order;
@@ -29,6 +30,7 @@ class PaymentWorkflowService
             $status = (string) ($attributes['status'] ?? $this->defaultStatusFor($method));
 
             $this->assertPaymentMethod($method);
+            $this->assertPaymentMethodIsEnabled($order, $method);
             $this->assertPaymentStatus($status);
 
             $amountCents = $this->positiveOrDefault(
@@ -222,6 +224,8 @@ class PaymentWorkflowService
                 ]);
             }
 
+            $this->assertPaymentMethodIsEnabled($order, $method);
+
             $amountCents = $this->positiveOrDefault(
                 $attributes['amount_cents'] ?? null,
                 $this->defaultAmountFor($order),
@@ -291,30 +295,25 @@ class PaymentWorkflowService
                 throw new DomainException('Nao existe pagamento confirmado para anular neste pedido.');
             }
 
-            $payment->forceFill([
-                'status' => Payment::STATUS_CANCELLED,
-                'voided_by_user_id' => $user->id,
-                'voided_at' => now(),
-                'void_reason' => $reason,
-            ])->save();
+            return $this->voidConfirmedPayment($order, $payment, $user, $reason);
+        });
+    }
 
-            $order = $this->recalculateOrderPaymentSummary($order);
+    public function voidPayment(Order $order, Payment $payment, User $user, string $reason): Payment
+    {
+        return DB::transaction(function () use ($order, $payment, $user, $reason): Payment {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $payment = Payment::query()->whereKey($payment->id)->lockForUpdate()->firstOrFail();
 
-            if (
-                $order->status !== Order::STATUS_AWAITING_PAYMENT
-                && ! in_array($order->status, [Order::STATUS_FINISHED, Order::STATUS_CANCELLED], true)
-            ) {
-                $this->orders->transitionTo(
-                    $order,
-                    Order::STATUS_AWAITING_PAYMENT,
-                    $user,
-                    'payment_confirmation_voided',
-                    $reason,
-                    ['payment_id' => $payment->id],
-                );
+            if ((int) $payment->order_id !== (int) $order->id) {
+                throw new DomainException('O pagamento nao pertence a este pedido.');
             }
 
-            return $payment->refresh();
+            if ($payment->status !== Payment::STATUS_CONFIRMED || $payment->voided_at !== null) {
+                throw new DomainException('Somente pagamentos confirmados podem ser anulados.');
+            }
+
+            return $this->voidConfirmedPayment($order, $payment, $user, $reason);
         });
     }
 
@@ -593,6 +592,34 @@ class PaymentWorkflowService
         );
     }
 
+    private function voidConfirmedPayment(Order $order, Payment $payment, User $user, string $reason): Payment
+    {
+        $payment->forceFill([
+            'status' => Payment::STATUS_CANCELLED,
+            'voided_by_user_id' => $user->id,
+            'voided_at' => now(),
+            'void_reason' => $reason,
+        ])->save();
+
+        $order = $this->recalculateOrderPaymentSummary($order);
+
+        if (
+            $order->status !== Order::STATUS_AWAITING_PAYMENT
+            && ! in_array($order->status, [Order::STATUS_FINISHED, Order::STATUS_CANCELLED], true)
+        ) {
+            $this->orders->transitionTo(
+                $order,
+                Order::STATUS_AWAITING_PAYMENT,
+                $user,
+                'payment_confirmation_voided',
+                $reason,
+                ['payment_id' => $payment->id],
+            );
+        }
+
+        return $payment->refresh();
+    }
+
     private function transitionOrderAfterSummary(Order $order, ?User $user, string $reason, array $metadata): void
     {
         $targetStatus = match ($order->payment_status) {
@@ -621,7 +648,11 @@ class PaymentWorkflowService
     ): void {
         $order = $order->refresh();
 
-        if ($order->status === $status || in_array($order->status, Order::LOCKED_STATUSES, true)) {
+        if (
+            $order->status === $status
+            || $order->status === Order::STATUS_READY_TO_PRINT
+            || in_array($order->status, Order::LOCKED_STATUSES, true)
+        ) {
             return;
         }
 
@@ -744,6 +775,18 @@ class PaymentWorkflowService
     {
         if (! in_array($method, Payment::METHODS, true)) {
             throw new DomainException("Unsupported payment method [{$method}].");
+        }
+    }
+
+    private function assertPaymentMethodIsEnabled(Order $order, string $method): void
+    {
+        $settings = CompanySetting::query()->where('company_id', $order->company_id)->first()?->settings;
+        $methods = is_array($settings) && is_array($settings['payments']['methods'] ?? null)
+            ? $settings['payments']['methods']
+            : [];
+
+        if (array_key_exists($method, $methods) && ! $methods[$method]) {
+            throw new DomainException('Esta forma de pagamento não está habilitada para novos pagamentos.');
         }
     }
 

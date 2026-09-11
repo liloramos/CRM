@@ -53,7 +53,6 @@ const OPERATIONAL_STATUS_LEGEND: Array<Pick<ConversationOperationalStatus, 'code
 ]
 
 type ConversationsPageProps = {
-  alerts: ConversationAlert[]
   conversations: Conversation[]
   error: string | null
   isActionBusy: boolean
@@ -82,7 +81,6 @@ type ConversationsPageProps = {
 }
 
 export function ConversationsPage({
-  alerts,
   conversations,
   error,
   isActionBusy,
@@ -365,6 +363,7 @@ export function ConversationsPage({
   }, [activeFilter, conversations, search])
 
   const activeAlerts = (selectedConversation?.alerts ?? []).filter(isOperationalAlert)
+  const activeAlertTotal = conversations.reduce((total, conversation) => total + openAlertCount(conversation), 0)
   const bannerAlert = selectBannerAlert(activeAlerts)
   const filteredActiveAlerts = activeAlerts.filter((alert) => (
     alertSeverityFilter === 'all' || alert.severity === alertSeverityFilter
@@ -384,7 +383,7 @@ export function ConversationsPage({
   const filterItems: Array<{ key: ConversationFilter; label: string; count: number }> = [
     { key: 'all', label: 'Todas', count: conversations.length },
     { key: 'unread', label: 'Não lidas', count: conversations.reduce((sum, item) => sum + item.unread, 0) },
-    { key: 'alerts', label: 'Alertas', count: conversations.filter(hasOpenAlerts).length },
+    { key: 'alerts', label: 'Alertas', count: activeAlertTotal },
     { key: 'manual', label: 'Manual', count: conversations.filter(isManualConversation).length },
     { key: 'automatic', label: 'Automático', count: conversations.filter(isAutomaticConversation).length },
   ]
@@ -1094,6 +1093,7 @@ export function ConversationsPage({
       || normalize(reply.body).includes(needle)
   })
   const visibleCopilotAnalysis = copilotAnalysisConversationId === selectedConversation?.id ? copilotAnalysis : null
+  const hasExistingCopilotAnalysis = visibleCopilotAnalysis !== null || selectedConversation?.hasCopilotAnalysis === true
   const isCopilotWaitingForInbound = visibleCopilotAnalysis?.metadata?.no_new_inbound_message === true
 
   async function handleAnalyzeCopilot() {
@@ -1175,7 +1175,7 @@ export function ConversationsPage({
               <div>
               <h2>Conversas</h2>
               </div>
-            {alerts.length > 0 ? <Badge tone="danger" size="sm">{`${alerts.length} alertas`}</Badge> : null}
+            {activeAlertTotal > 0 ? <Badge tone="danger" size="sm">{`${activeAlertTotal} alerta${activeAlertTotal > 1 ? 's' : ''}`}</Badge> : null}
           </div>
 
           <div className="conversation-search">
@@ -1847,9 +1847,11 @@ export function ConversationsPage({
                 <h3>Sugestão do Copiloto</h3>
                 {!visibleCopilotAnalysis ? (
                   <>
-                    <p>Analise a conversa para identificar intencao, pedido e informacoes pendentes.</p>
+                    <p>{hasExistingCopilotAnalysis
+                      ? 'A análise do Copiloto já está disponível para consulta.'
+                      : 'Analise a conversa para identificar intenção, pedido e informações pendentes.'}</p>
                     <Button disabled={isAnalyzingCopilot} onClick={() => void handleAnalyzeCopilot()} variant="secondary">
-                      {isAnalyzingCopilot ? 'Analisando...' : 'Analisar conversa'}
+                      {isAnalyzingCopilot ? 'Carregando...' : hasExistingCopilotAnalysis ? 'Ver detalhes' : 'Analisar conversa'}
                     </Button>
                   </>
                 ) : (

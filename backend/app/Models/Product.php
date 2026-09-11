@@ -9,6 +9,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
 {
+    public const TYPE_PRODUCT = 'product';
+
     public const TYPE_MARMITA = 'marmita';
 
     public const TYPE_BEVERAGE = 'beverage';
@@ -110,6 +112,11 @@ class Product extends Model
     public function orderItems(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function selectableProductLinks(): HasMany
+    {
+        return $this->hasMany(ProductGroupProduct::class, 'selectable_product_id');
     }
 
     public function scopeActive(Builder $query): Builder

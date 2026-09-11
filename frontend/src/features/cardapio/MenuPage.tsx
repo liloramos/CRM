@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { PageContainer } from '../../components/layout/PageContainer'
 import { PageHeader } from '../../components/layout/PageHeader'
 import { Badge } from '../../components/ui/Badge'
 import { Button } from '../../components/ui/Button'
 import { Card, SectionTitle } from '../../components/ui/Card'
+import { DatePickerField } from '../../components/ui/DatePickerField'
 import { Modal } from '../../components/ui/Modal'
 import { SelectField } from '../../components/ui/SelectField'
 import { EmptyState, ErrorState } from '../../components/ui/States'
 import {
   ApiError,
-  type CounterProductCategorySlug,
   clearComponentAvailability,
   clearDailyMenuAdjustment,
-  createCounterProduct,
+  createMenuCategory,
+  createMenuProduct,
   createMenuComponent,
+  deleteMenuCategory,
+  deleteMenuProduct,
   deleteWeeklyMenuItem,
   getAdminDailyMenuAdjustments,
   getAdminMenuComponents,
@@ -23,6 +26,7 @@ import {
   setComponentAvailability,
   removeMenuProductImage,
   updateMenuComponent,
+  updateMenuCategory,
   updateMenuProduct,
   updateProductComponentOption,
   uploadMenuProductImage,
@@ -48,6 +52,7 @@ import type {
   ProductServiceDayKey,
   StructuredComponentOption,
   StructuredMenuComponentSummary,
+  StructuredMenuCategory,
   StructuredMenuProduct,
   StructuredProductOption,
   StructuredProductOptionGroup,
@@ -63,7 +68,8 @@ type MenuPageProps = {
 type MenuAdminTab = 'today' | 'products' | 'weekly' | 'rules'
 
 type ModalState =
-  | { type: 'product'; product: StructuredMenuProduct | null }
+  | { type: 'product'; product: StructuredMenuProduct | null; isCounterShortcut: boolean }
+  | { type: 'category'; category: StructuredMenuCategory | null }
   | { type: 'component'; component: AdminMenuComponent | null }
   | { type: 'availability'; item: DailyMenuComponent; action: 'set' | 'clear' }
   | { type: 'daily-adjustment'; item: DailyMenuComponent | null; action: DailyMenuAdjustmentAction }
@@ -81,12 +87,14 @@ type ProductFormState = {
   is_active: boolean
   is_available_by_default: boolean
   display_order: string
-  category_slug: CounterProductCategorySlug
+  category_id: string
   service_days: ProductServiceDayKey[]
   beef_rules: BeefRulesFormState | null
 }
 
 type BeefRulesFormState = {
+  standard_meat_enabled: boolean
+  standard_meat_price: string
   beef_only_enabled: boolean
   beef_only_final_price: string
   extra_beef_enabled: boolean
@@ -139,7 +147,7 @@ type ComponentDaysFormState = {
 
 type ComponentAdminFilter = 'all' | MenuComponentTypeKey | 'active' | 'inactive' | 'without_days'
 
-type ProductAdminFilter = 'active' | 'inactive' | 'legacy' | 'all'
+type ProductAdminFilter = 'active' | 'inactive' | 'archived' | 'legacy' | 'all'
 
 type ProductCardMode = 'daily' | 'admin' | 'rules'
 
@@ -194,14 +202,6 @@ const componentTypeLabels: Record<MenuComponentTypeKey, string> = {
 
 const componentTypes: MenuComponentTypeKey[] = ['base', 'hot', 'salad', 'meat', 'extra', 'addon', 'juice_flavor']
 
-const counterProductCategoryOptions: Array<{ value: CounterProductCategorySlug; label: string }> = [
-  { value: 'doces', label: 'Doces' },
-  { value: 'geladinhos', label: 'Geladinhos' },
-  { value: 'bebidas', label: 'Bebidas' },
-  { value: 'sucos', label: 'Sucos' },
-  { value: 'outros', label: 'Outros' },
-]
-
 const tabLabels: Record<MenuAdminTab, string> = {
   today: 'Hoje',
   products: 'Produtos e preços',
@@ -228,6 +228,7 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
   const [isMutating, setIsMutating] = useState(false)
   const [modal, setModal] = useState<ModalState>(null)
   const [productForm, setProductForm] = useState<ProductFormState | null>(null)
+  const [categoryForm, setCategoryForm] = useState<CategoryFormState | null>(null)
   const [productImageFile, setProductImageFile] = useState<File | null>(null)
   const [productImagePreview, setProductImagePreview] = useState<string | null>(null)
   const [removeProductImage, setRemoveProductImage] = useState(false)
@@ -318,15 +319,15 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       is_active: product.is_active,
       is_available_by_default: product.is_available_by_default,
       display_order: String(product.display_order),
-      category_slug: counterCategorySlug(product.category?.slug),
+      category_id: product.category ? String(product.category.id) : '',
       service_days: [...product.service_days],
       beef_rules: beefRulesFormFromProduct(product),
     })
     resetProductImage(product.image_url)
-    setModal({ type: 'product', product })
+    setModal({ type: 'product', product, isCounterShortcut: product.is_counter_product })
   }
 
-  function openCreateCounterProductModal() {
+  function openCreateProductModal(isCounterShortcut: boolean) {
     setMutationError(null)
     setProductForm({
       name: '',
@@ -335,12 +336,23 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       is_active: true,
       is_available_by_default: true,
       display_order: '0',
-      category_slug: 'doces',
+      category_id: productCategories[0] ? String(productCategories[0].id) : '',
       service_days: serviceDayOrder.filter((day) => day !== 'sunday'),
       beef_rules: null,
     })
     resetProductImage(null)
-    setModal({ type: 'product', product: null })
+    setModal({ type: 'product', product: null, isCounterShortcut })
+  }
+
+  function openCategoryModal(category: StructuredMenuCategory | null) {
+    setMutationError(null)
+    setCategoryForm({
+      name: category?.name ?? '',
+      description: category?.description ?? '',
+      display_order: String(category?.display_order ?? 0),
+      is_active: category?.is_active ?? true,
+    })
+    setModal({ type: 'category', category })
   }
 
   function resetProductImage(imageUrl: string | null) {
@@ -446,17 +458,14 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     setModal({ type: 'component-days', component })
   }
 
-  function openComponentDailyAdjustment(component: AdminMenuComponent) {
-    openDailyAdjustmentModal(null, 'include', {
-      component_id: String(component.id),
-      search: componentDisplayName(component),
-      section: sectionForComponentType(component.component_type),
-    })
-  }
-
   async function handleModalPrimary() {
     if (modal?.type === 'product') {
-      await handleSaveProduct(modal.product)
+      await handleSaveProduct(modal.product, modal.isCounterShortcut)
+      return
+    }
+
+    if (modal?.type === 'category') {
+      await handleSaveCategory(modal.category)
       return
     }
 
@@ -499,9 +508,15 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
   }
 
   function beefRulesPayload(form: BeefRulesFormState) {
+    const standardMeatPrice = form.standard_meat_enabled ? parseCurrencyToCents(form.standard_meat_price) : null
     const beefOnlyFinalPrice = form.beef_only_enabled ? parseCurrencyToCents(form.beef_only_final_price) : null
     const extraBeefPrice = form.extra_beef_enabled ? parseCurrencyToCents(form.extra_beef_price) : null
     const extraBeefMaxQuantity = form.extra_beef_enabled ? parseInteger(form.extra_beef_max_quantity) : null
+
+    if (form.standard_meat_enabled && standardMeatPrice === null) {
+    setMutationError('Informe o preço da carne padrão adicional.')
+      return null
+    }
 
     if (form.beef_only_enabled && beefOnlyFinalPrice === null) {
       setMutationError('Informe o preço final do modo somente bife.')
@@ -519,6 +534,10 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }
 
     return {
+      standard_meat: {
+        enabled: form.standard_meat_enabled,
+        price_cents: standardMeatPrice,
+      },
       beef_only: {
         enabled: form.beef_only_enabled,
         final_price_cents: beefOnlyFinalPrice,
@@ -531,16 +550,22 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }
   }
 
-  async function handleSaveProduct(product: StructuredMenuProduct | null) {
+  async function handleSaveProduct(product: StructuredMenuProduct | null, isCounterShortcut: boolean) {
     if (!productForm) {
       return
     }
 
     const priceCents = parseCurrencyToCents(productForm.price)
     const displayOrder = parseInteger(productForm.display_order)
+    const categoryId = parseInteger(productForm.category_id)
 
     if (priceCents === null) {
       setMutationError('Informe um preço válido em reais.')
+      return
+    }
+
+    if (categoryId === null || categoryId < 1) {
+      setMutationError('Selecione uma categoria.')
       return
     }
 
@@ -571,16 +596,17 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       const savedProduct = product
         ? await updateMenuProduct(product.id, {
           ...payload,
-          ...(product.is_counter_product ? { category_slug: productForm.category_slug } : {}),
+          category_id: categoryId,
         })
-        : await createCounterProduct({
+        : await createMenuProduct({
           date: payload.date,
           name: payload.name,
           description: payload.description,
           price_cents: payload.price_cents,
           is_active: payload.is_active,
           is_available_by_default: payload.is_available_by_default,
-          category_slug: productForm.category_slug,
+          category_id: categoryId,
+          is_counter_product: isCounterShortcut,
           service_days: payload.service_days,
         })
 
@@ -589,7 +615,79 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
       } else if (product && removeProductImage && product.image_url) {
         await removeMenuProductImage(product.id)
       }
-    }, product ? 'Produto atualizado.' : 'Produto de balcão criado.')
+    }, product ? 'Produto atualizado.' : isCounterShortcut ? 'Produto de balcão criado.' : 'Produto criado.')
+  }
+
+  async function handleSaveCategory(category: StructuredMenuCategory | null) {
+    if (!categoryForm) {
+      return
+    }
+
+    const displayOrder = parseInteger(categoryForm.display_order)
+    if (displayOrder === null) {
+      setMutationError('Informe uma ordem válida.')
+      return
+    }
+
+    const payload = {
+      name: categoryForm.name.trim(),
+      description: categoryForm.description.trim() || null,
+      display_order: displayOrder,
+      is_active: categoryForm.is_active,
+    }
+
+    await runMutation(async () => {
+      if (category) {
+        await updateMenuCategory(category.id, payload)
+      } else {
+        await createMenuCategory(payload)
+      }
+    }, category ? 'Categoria atualizada.' : 'Categoria criada.')
+  }
+
+  async function handleToggleProduct(product: StructuredMenuProduct) {
+    if (!product.category) {
+      setSuccessMessage(null)
+      setMutationError('Este produto não possui uma categoria válida.')
+      return
+    }
+    const categoryId = product.category.id
+
+    await runMutation(async () => {
+      await updateMenuProduct(product.id, {
+        date: selectedDate,
+        name: product.name,
+        description: product.description,
+        price_cents: productPriceCents(product),
+        is_active: !product.is_active,
+        is_available_by_default: product.is_available_by_default,
+        display_order: product.display_order,
+        category_id: categoryId,
+        service_days: product.service_days,
+      })
+    }, product.is_active ? 'Produto inativado.' : 'Produto reativado.')
+  }
+
+  async function handleDeleteProduct(product: StructuredMenuProduct) {
+    if (!window.confirm(`Excluir ${product.name}? Se houver histórico, ele será arquivado com segurança.`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      const result = await deleteMenuProduct(product.id)
+
+      return result.message
+    }, 'Produto excluído.')
+  }
+
+  async function handleDeleteCategory(category: StructuredMenuCategory) {
+    if (!window.confirm(`Excluir a categoria ${category.name}?`)) {
+      return
+    }
+
+    await runMutation(async () => {
+      await deleteMenuCategory(category.id)
+    }, 'Categoria excluída.')
   }
 
   async function handleSaveComponent(component: AdminMenuComponent | null) {
@@ -792,15 +890,15 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
     }, 'Dias da semana atualizados.')
   }
 
-  async function runMutation(action: () => Promise<void>, success: string) {
+  async function runMutation(action: () => Promise<string | void>, success: string) {
     setIsMutating(true)
     setMutationError(null)
     setSuccessMessage(null)
 
     try {
-      await action()
+      const actionMessage = await action()
       setModal(null)
-      setSuccessMessage(success)
+      setSuccessMessage(actionMessage || success)
       await reloadWorkspace()
     } catch (error) {
       setMutationError(friendlyError(error, 'Não foi possível salvar a alteração.'))
@@ -894,9 +992,15 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
               canManageMenu={canManageMenu}
               categories={productCategories}
               isLoading={isAdminLoading && canManageMenu}
+              onCreateCategory={() => openCategoryModal(null)}
+              onCreateProduct={() => openCreateProductModal(false)}
               onEditProduct={openProductModal}
-              onCreateCounterProduct={openCreateCounterProductModal}
+              onCreateCounterProduct={() => openCreateProductModal(true)}
+              onDeleteCategory={handleDeleteCategory}
+              onDeleteProduct={handleDeleteProduct}
+              onEditCategory={openCategoryModal}
               onResolvePending={openPendingConfigurationModal}
+              onToggleProduct={handleToggleProduct}
             />
           ) : null}
 
@@ -906,15 +1010,9 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
               components={components}
               dayAdjustments={dayAdjustments}
               isLoading={isAdminLoading}
-              onAddComponentToday={openComponentDailyAdjustment}
-              onClearAdjustment={(adjustment) => setModal({ type: 'daily-adjustment-clear', adjustment })}
               onCreateComponent={() => openComponentModal(null)}
-              onDeleteItem={(item) => setModal({ type: 'weekly-delete', item })}
-              onDefineComponentDays={openComponentDaysModal}
               onEditComponent={openComponentModal}
               onEditItem={(item) => openWeeklyItemModal(item)}
-              onOpenComponentAvailability={(component, status) => openAvailabilityModal(dailyItemFromComponent(component), status)}
-              onNewItem={(section) => openWeeklyItemModal(null, { service_day: selectedWeeklyDay, section })}
               selectedDate={selectedDate}
               selectedDay={selectedWeeklyDay}
               setSelectedDay={setSelectedWeeklyDay}
@@ -922,7 +1020,13 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             />
           ) : null}
 
-          {activeTab === 'rules' ? <RulesTab onResolvePending={canManageMenu ? openPendingConfigurationModal : undefined} products={rulesProducts} /> : null}
+          {activeTab === 'rules' ? (
+            <RulesTab
+              onEditProduct={canManageMenu ? openProductModal : undefined}
+              onResolvePending={canManageMenu ? openPendingConfigurationModal : undefined}
+              products={rulesProducts}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -944,6 +1048,8 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
         >
           {renderModalContent({
             availabilityForm,
+            categories: productCategories,
+            categoryForm,
             componentForm,
             componentDaysForm,
             components,
@@ -952,10 +1058,20 @@ export function MenuPage({ onOpenModal, user }: MenuPageProps) {
             isMutating,
             modal,
             mutationError,
+            onOpenComponentAvailability: (component, status) => openAvailabilityModal(dailyItemFromComponent(component), status),
+            onOpenComponentDays: openComponentDaysModal,
+            onOpenComponentDateAdjustment: (component, action) => openDailyAdjustmentModal(
+              action === 'include' ? null : dailyItemFromComponent(component),
+              action,
+              action === 'include'
+                ? { component_id: String(component.id), section: sectionForComponentType(component.component_type), search: componentDisplayName(component) }
+                : undefined,
+            ),
             pendingConfigurationForm,
             productForm,
             productImagePreview,
             setAvailabilityForm,
+            setCategoryForm,
             setComponentDaysForm,
             setComponentForm,
             setDailyAdjustmentForm,
@@ -1086,8 +1202,8 @@ function DailyMenuSections({
             </Button>
           ) : null
         }
-        eyebrow="Operacao do dia"
-        title="Cardapio do dia"
+        eyebrow="Operação do dia"
+        title="Cardápio do dia"
       />
       <div className="daily-menu-grid">
         {sectionOrder.map((section) => (
@@ -1149,7 +1265,7 @@ function DailyMenuItem({
             Esgotado
           </Button>
           <Button onClick={() => onOpenAvailability(item, 'unavailable')} size="sm" variant="secondary">
-            Indisponivel
+                  Indisponível
           </Button>
           {item.availability.source !== 'component_default' ? (
             <Button onClick={() => onOpenAvailability(item, 'clear')} size="sm" variant="ghost">
@@ -1181,7 +1297,7 @@ function DailyAdjustmentsPanel({
         title="Alteracoes somente de hoje"
       />
       <p className="muted-text">
-        Estes ajustes valem apenas para a data indicada. Para mudar todas as semanas, use a aba Cardapio semanal.
+        Estes ajustes valem apenas para a data indicada. Para mudar todas as semanas, use a aba Cardápio semanal.
       </p>
       {adjustments.length > 0 ? (
         <div className="menu-admin-list">
@@ -1199,13 +1315,13 @@ function DailyAdjustmentsPanel({
                 <span>
                   Padrao semanal:{' '}
                   {adjustment.action === 'include'
-                    ? 'este item nao entra automaticamente nesta data'
+                    ? 'este item não entra automaticamente nesta data'
                     : 'este item voltara a aparecer quando o ajuste for limpo'}
                 </span>
-                <span>Alteracao de hoje: {adjustment.action === 'include' ? 'mostrar nesta data' : 'nao mostrar nesta data'}</span>
+                <span>Alteração de hoje: {adjustment.action === 'include' ? 'mostrar nesta data' : 'não mostrar nesta data'}</span>
                 {adjustment.notes ? <small>{adjustment.notes}</small> : null}
                 <small>
-                  Responsavel: {adjustment.marked_by?.name ?? 'Nao informado'}
+                  Responsável: {adjustment.marked_by?.name ?? 'Não informado'}
                   {adjustment.updated_at ? ` - ${formatDateTimeLabel(adjustment.updated_at)}` : ''}
                 </small>
               </div>
@@ -1216,7 +1332,7 @@ function DailyAdjustmentsPanel({
           ))}
         </div>
       ) : (
-        <p className="muted-text">Nenhuma alteracao especial foi feita para hoje. O cardapio padrao da semana esta sendo utilizado.</p>
+        <p className="muted-text">Nenhuma alteração especial foi feita para hoje. O cardápio padrão da semana está sendo utilizado.</p>
       )}
     </Card>
   )
@@ -1226,16 +1342,28 @@ function ProductsTab({
   canManageMenu,
   categories,
   isLoading,
+  onCreateCategory,
+  onCreateProduct,
   onCreateCounterProduct,
+  onDeleteCategory,
+  onDeleteProduct,
+  onEditCategory,
   onEditProduct,
   onResolvePending,
+  onToggleProduct,
 }: {
   canManageMenu: boolean
   categories: AdminMenuProductsResponse['categories']
   isLoading: boolean
+  onCreateCategory: () => void
+  onCreateProduct: () => void
   onCreateCounterProduct: () => void
+  onDeleteCategory: (category: StructuredMenuCategory) => void
+  onDeleteProduct: (product: StructuredMenuProduct) => void
+  onEditCategory: (category: StructuredMenuCategory) => void
   onEditProduct: (product: StructuredMenuProduct) => void
   onResolvePending: (product: StructuredMenuProduct) => void
+  onToggleProduct: (product: StructuredMenuProduct) => void
 }) {
   const [search, setSearch] = useState('')
   const [categorySlug, setCategorySlug] = useState('all')
@@ -1267,8 +1395,30 @@ function ProductsTab({
       {!canManageMenu ? (
         <Card>
           <p className="muted-text">
-            Sua permissao atual permite consulta operacional. Edicoes e produtos inativos ficam restritos a menu.manage.
+            Sua permissão atual permite consulta operacional. Edições e produtos inativos ficam restritos a menu.manage.
           </p>
+        </Card>
+      ) : null}
+      {canManageMenu ? (
+        <Card className="menu-products-toolbar">
+          <SectionTitle
+            action={(
+              <div className="menu-products-toolbar__actions">
+                <Button icon="plus" onClick={onCreateProduct} size="sm" variant="primary">
+                  Novo produto
+                </Button>
+                <Button onClick={onCreateCategory} size="sm" variant="secondary">
+                  Nova categoria
+                </Button>
+                <Button onClick={onCreateCounterProduct} size="sm" variant="secondary">
+                  Produto de balcão
+                </Button>
+              </div>
+            )}
+            eyebrow="Catálogo"
+            title="Produtos e preços"
+          />
+          <p className="muted-text">Cadastre produtos normais na categoria correta. Alterações passam a valer nas próximas leituras e vendas.</p>
         </Card>
       ) : null}
       <Card className="menu-admin-filters">
@@ -1291,6 +1441,7 @@ function ProductsTab({
           options={[
             { value: 'active', label: 'Ativos' },
             { value: 'inactive', label: 'Inativos' },
+            { value: 'archived', label: 'Arquivados' },
             { value: 'legacy', label: 'Legados' },
             { value: 'all', label: 'Todos' },
           ]}
@@ -1298,25 +1449,39 @@ function ProductsTab({
         />
       </Card>
       {canManageMenu ? (
-        <Card className="counter-products-intro">
-          <SectionTitle
-            action={(
-              <Button icon="plus" onClick={onCreateCounterProduct} size="sm" variant="primary">
-                Novo produto de balcão
-              </Button>
-            )}
-            eyebrow="Venda rápida"
-            title="Produtos de balcão"
-          />
-          <p className="muted-text">Cadastre doces, geladinhos e itens rápidos para ficarem disponíveis no catálogo operacional.</p>
+        <Card className="menu-category-summary">
+          <SectionTitle eyebrow="Organização" title={`Categorias (${categories.length})`} />
+          {categories.length > 0 ? (
+            <div className="menu-category-summary__list">
+              {categories.map((category) => (
+                <div className="menu-category-row" key={category.id}>
+                  <div className="menu-category-row__identity">
+                    <strong>{category.name}</strong>
+                    <span>{category.products.length} {category.products.length === 1 ? 'produto' : 'produtos'}</span>
+                    <Badge size="sm" tone={category.is_active === false ? 'danger' : 'success'}>
+                      {category.is_active === false ? 'Inativa' : 'Ativa'}
+                    </Badge>
+                  </div>
+                  <div className="menu-category-row__actions">
+                    <Button onClick={() => onEditCategory(category)} size="sm" variant="secondary">Editar</Button>
+                    <Button onClick={() => onDeleteCategory(category)} size="sm" variant="ghost">Excluir</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted-text">Nenhuma categoria cadastrada.</p>
+          )}
         </Card>
       ) : null}
       <ProductCatalog
         actionLabel={canManageMenu ? 'Catalogo administrativo' : 'Produtos visiveis'}
         emptyDescription="Nenhum produto corresponde aos filtros."
         mode="admin"
+        onDeleteProduct={canManageMenu ? onDeleteProduct : undefined}
         onEditProduct={canManageMenu ? onEditProduct : undefined}
         onResolvePending={canManageMenu ? onResolvePending : undefined}
+        onToggleProduct={canManageMenu ? onToggleProduct : undefined}
         productsByCategory={visibleCategories}
       />
     </div>
@@ -1327,15 +1492,19 @@ function ProductCatalog({
   actionLabel,
   emptyDescription,
   mode = 'daily',
+  onDeleteProduct,
   onEditProduct,
   onResolvePending,
+  onToggleProduct,
   productsByCategory,
 }: {
   actionLabel: string
   emptyDescription: string
   mode?: ProductCardMode
+  onDeleteProduct?: (product: StructuredMenuProduct) => void
   onEditProduct?: (product: StructuredMenuProduct) => void
   onResolvePending?: (product: StructuredMenuProduct) => void
+  onToggleProduct?: (product: StructuredMenuProduct) => void
   productsByCategory: AdminMenuProductsResponse['categories']
 }) {
   if (productsByCategory.length === 0) {
@@ -1357,8 +1526,10 @@ function ProductCatalog({
               <StructuredProductCard
                 key={product.id}
                 mode={mode}
+                onDelete={onDeleteProduct}
                 onEdit={onEditProduct}
                 onResolvePending={onResolvePending}
+                onToggle={onToggleProduct}
                 product={product}
               />
             ))}
@@ -1373,23 +1544,15 @@ function ComponentCatalog({
   adjustments,
   canManageMenu,
   components,
-  onAddToday,
-  onClearAdjustment,
   onCreateComponent,
-  onDefineDays,
   onEditComponent,
-  onOpenAvailability,
   selectedDate,
 }: {
   adjustments: AdminDailyMenuAdjustment[]
   canManageMenu: boolean
   components: AdminMenuComponent[]
-  onAddToday: (component: AdminMenuComponent) => void
-  onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
   onCreateComponent: () => void
-  onDefineDays: (component: AdminMenuComponent) => void
   onEditComponent: (component: AdminMenuComponent) => void
-  onOpenAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
   selectedDate: string
 }) {
   const [search, setSearch] = useState('')
@@ -1417,11 +1580,11 @@ function ComponentCatalog({
             Nova carne ou ingrediente
           </Button>
         ) : null}
-        eyebrow="Administracao"
+        eyebrow="Administração"
         title="Ingredientes e opcoes"
       />
       <p className="muted-text">
-        Localize carnes, saladas e acompanhamentos para editar, definir dias fixos ou usar apenas em uma alteracao da data.
+        Localize carnes, saladas e acompanhamentos para editar, definir dias fixos ou usar apenas em uma alteração da data.
       </p>
       <div className="menu-admin-filters">
         <label>
@@ -1458,11 +1621,7 @@ function ComponentCatalog({
               canManageMenu={canManageMenu}
               component={component}
               key={component.id}
-              onAddToday={onAddToday}
-              onClearAdjustment={onClearAdjustment}
-              onDefineDays={onDefineDays}
               onEditComponent={onEditComponent}
-              onOpenAvailability={onOpenAvailability}
               selectedDate={selectedDate}
             />
           ))}
@@ -1478,21 +1637,13 @@ function ComponentAdminCard({
   adjustment,
   canManageMenu,
   component,
-  onAddToday,
-  onClearAdjustment,
-  onDefineDays,
   onEditComponent,
-  onOpenAvailability,
   selectedDate,
 }: {
   adjustment: AdminDailyMenuAdjustment | null
   canManageMenu: boolean
   component: AdminMenuComponent
-  onAddToday: (component: AdminMenuComponent) => void
-  onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
-  onDefineDays: (component: AdminMenuComponent) => void
   onEditComponent: (component: AdminMenuComponent) => void
-  onOpenAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
   selectedDate: string
 }) {
   const hasFixedDays = component.weekly_menu_items.length > 0
@@ -1514,7 +1665,7 @@ function ComponentAdminCard({
         </div>
       </div>
       <div className="component-admin-card__meta">
-        <span>{hasFixedDays ? `Dias: ${formatWeeklyComponentDays(component)}` : 'Sem dia fixo - use em uma alteracao do dia.'}</span>
+        <span>{hasFixedDays ? `Dias: ${formatWeeklyComponentDays(component)}` : 'Sem dia fixo — use em uma alteração do dia.'}</span>
         <span>Produtos/grupos vinculados: {component.product_group_links_count}</span>
         <span>Data consultada: {formatDateLabel(selectedDate)}</span>
       </div>
@@ -1533,28 +1684,6 @@ function ComponentAdminCard({
           <Button onClick={() => onEditComponent(component)} size="sm" variant="secondary">
             Editar
           </Button>
-          <Button onClick={() => onDefineDays(component)} size="sm" variant="secondary">
-            Definir dias da semana
-          </Button>
-          <Button onClick={() => onAddToday(component)} size="sm" variant="primary">
-            Adicionar somente hoje
-          </Button>
-          <Button onClick={() => onOpenAvailability(component, 'sold_out')} size="sm" variant="ghost">
-            Esgotado hoje
-          </Button>
-          <Button onClick={() => onOpenAvailability(component, 'unavailable')} size="sm" variant="ghost">
-            Indisponivel hoje
-          </Button>
-          {component.availability.source !== 'component_default' ? (
-            <Button onClick={() => onOpenAvailability(component, 'clear')} size="sm" variant="ghost">
-              Restaurar disponibilidade
-            </Button>
-          ) : null}
-          {adjustment ? (
-            <Button onClick={() => onClearAdjustment(adjustment)} size="sm" variant="ghost">
-              Desfazer alteracao
-            </Button>
-          ) : null}
         </div>
       ) : null}
     </article>
@@ -1563,49 +1692,67 @@ function ComponentAdminCard({
 
 function StructuredProductCard({
   mode = 'daily',
+  onDelete,
   onEdit,
   onResolvePending,
+  onToggle,
   product,
 }: {
   mode?: ProductCardMode
+  onDelete?: (product: StructuredMenuProduct) => void
   onEdit?: (product: StructuredMenuProduct) => void
   onResolvePending?: (product: StructuredMenuProduct) => void
+  onToggle?: (product: StructuredMenuProduct) => void
   product: StructuredMenuProduct
 }) {
   const insights = productInsights(product)
   const price = formatCurrency(centsToCurrency(productPriceCents(product)))
   const isVisuallyUnavailable = mode === 'daily' && !product.availability.available
+  const cardClassName = [
+    'structured-product-card',
+    mode === 'admin' ? 'structured-product-card--admin' : '',
+    isVisuallyUnavailable ? 'is-unavailable' : '',
+  ].filter(Boolean).join(' ')
 
   return (
-    <article className={isVisuallyUnavailable ? 'structured-product-card is-unavailable' : 'structured-product-card'}>
-      <div className="structured-product-card__top">
-        {mode === 'admin' ? <ProductAdministrativeBadge product={product} /> : <AvailabilityBadge availability={product.availability} />}
-        <strong>{price}</strong>
+    <article className={cardClassName}>
+      <div className="structured-product-card__summary">
+        <ProductImage
+          alt={`Foto de ${product.name}`}
+          className="structured-product-card__image"
+          key={product.image_url ?? `product-${product.id}-without-image`}
+          src={product.image_url}
+        />
+        <div className="structured-product-card__content">
+          <div className="structured-product-card__title">
+            <h3>{product.name}</h3>
+          </div>
+          {product.description ? <p>{product.description}</p> : null}
+          {product.legacy_reason ? <p className="muted-text">{product.legacy_reason}</p> : null}
+          <div className="structured-product-card__badges">
+            {mode === 'admin' ? <ProductAdministrativeBadge product={product} /> : <AvailabilityBadge availability={product.availability} />}
+            {product.is_counter_product ? (
+              <Badge size="sm" tone="info">
+                Balcão
+              </Badge>
+            ) : null}
+            {product.is_legacy && mode !== 'admin' ? (
+              <Badge size="sm" tone="neutral">
+                Legado
+              </Badge>
+            ) : null}
+            {product.configuration_pending ? (
+              <Badge size="sm" tone="warning">
+                Configuração pendente
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+        <strong className="structured-product-card__price">{price}</strong>
       </div>
-      {product.image_url ? <img alt="" className="structured-product-card__image" src={product.image_url} /> : null}
-      <div className="structured-product-card__title">
-        <h3>{product.name}</h3>
-        {product.is_counter_product ? (
-          <Badge size="sm" tone="info">
-            Balcão
-          </Badge>
-        ) : null}
-        {product.is_legacy && mode !== 'admin' ? (
-          <Badge size="sm" tone="neutral">
-            Legado
-          </Badge>
-        ) : null}
-        {product.configuration_pending ? (
-          <Badge size="sm" tone="warning">
-            Configuracao pendente
-          </Badge>
-        ) : null}
-      </div>
-      {product.description ? <p>{product.description}</p> : null}
-      {product.legacy_reason ? <p className="muted-text">{product.legacy_reason}</p> : null}
       {mode === 'admin' ? (
         <div className="structured-product-admin-state">
-          <span>{product.is_available_by_default ? 'Disponivel por padrao' : 'Indisponivel por padrao'}</span>
+          <span>{product.is_available_by_default ? 'Disponível por padrão' : 'Indisponível por padrão'}</span>
           <span>Dias: {formatServiceDays(product.service_days)}</span>
         </div>
       ) : (
@@ -1619,7 +1766,7 @@ function StructuredProductCard({
       <div className="structured-product-card__actions">
         {onResolvePending && product.configuration_pending ? (
           <Button icon="alert" onClick={() => onResolvePending(product)} size="sm" variant="primary">
-            Resolver configuracao
+            Resolver configuração
           </Button>
         ) : null}
         {onEdit ? (
@@ -1627,8 +1774,36 @@ function StructuredProductCard({
             Editar
           </Button>
         ) : null}
+        {onToggle && !product.is_archived ? (
+          <Button onClick={() => onToggle(product)} size="sm" variant="secondary">
+            {product.is_active ? 'Inativar' : 'Ativar'}
+          </Button>
+        ) : null}
+        {onDelete ? (
+          <Button onClick={() => onDelete(product)} size="sm" variant="ghost">
+            Excluir
+          </Button>
+        ) : null}
       </div>
     </article>
+  )
+}
+
+function ProductImage({
+  alt,
+  className,
+  src,
+}: {
+  alt: string
+  className: string
+  src: string | null
+}) {
+  const [hasError, setHasError] = useState(false)
+
+  return (
+    <div className={`${className}${!src || hasError ? ` ${className}--fallback` : ''}`}>
+      {src && !hasError ? <img alt={alt} onError={() => setHasError(true)} src={src} /> : <span>Sem foto</span>}
+    </div>
   )
 }
 
@@ -1637,15 +1812,9 @@ function WeeklyTab({
   components,
   dayAdjustments,
   isLoading,
-  onAddComponentToday,
-  onClearAdjustment,
   onCreateComponent,
-  onDeleteItem,
-  onDefineComponentDays,
   onEditComponent,
   onEditItem,
-  onOpenComponentAvailability,
-  onNewItem,
   selectedDate,
   selectedDay,
   setSelectedDay,
@@ -1655,15 +1824,9 @@ function WeeklyTab({
   components: AdminMenuComponent[]
   dayAdjustments: AdminDailyMenuAdjustment[]
   isLoading: boolean
-  onAddComponentToday: (component: AdminMenuComponent) => void
-  onClearAdjustment: (adjustment: AdminDailyMenuAdjustment) => void
   onCreateComponent: () => void
-  onDeleteItem: (item: AdminWeeklyMenuItem) => void
-  onDefineComponentDays: (component: AdminMenuComponent) => void
   onEditComponent: (component: AdminMenuComponent) => void
   onEditItem: (item: AdminWeeklyMenuItem) => void
-  onOpenComponentAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
-  onNewItem: (section: DailyMenuSectionKey) => void
   selectedDate: string
   selectedDay: WeeklyMenuServiceDayKey
   setSelectedDay: (day: WeeklyMenuServiceDayKey) => void
@@ -1673,8 +1836,8 @@ function WeeklyTab({
     return (
       <Card>
         <EmptyState
-          description="A edicao do cardapio semanal exige a permissao menu.manage."
-          title="Cardapio semanal protegido"
+          description="A edição do cardápio semanal exige a permissão menu.manage."
+          title="Cardápio semanal protegido"
         />
       </Card>
     )
@@ -1687,7 +1850,7 @@ function WeeklyTab({
   if (!weeklyMenu) {
     return (
       <EmptyState
-        description="Nao foi possivel carregar os vinculos semanais administrativos."
+        description="Não foi possível carregar os vínculos semanais administrativos."
         title="Sem cardapio semanal administrativo"
       />
     )
@@ -1699,12 +1862,8 @@ function WeeklyTab({
         adjustments={dayAdjustments}
         canManageMenu={canManageMenu}
         components={components}
-        onAddToday={onAddComponentToday}
-        onClearAdjustment={onClearAdjustment}
         onCreateComponent={onCreateComponent}
-        onDefineDays={onDefineComponentDays}
         onEditComponent={onEditComponent}
-        onOpenAvailability={onOpenComponentAvailability}
         selectedDate={selectedDate}
       />
 
@@ -1729,15 +1888,15 @@ function WeeklyTab({
       </Card>
 
       <Card className="daily-menu-card">
-        <SectionTitle eyebrow={weeklyMenu.weekly_menu?.name ?? 'Semanal'} title={serviceDayLabels[selectedDay]} />
+        <SectionTitle eyebrow={weeklyMenu.weekly_menu?.name ?? 'Programação recorrente'} title={`${serviceDayLabels[selectedDay]} · Carnes`} />
+        <p className="muted-text">
+          A programação semanal recorrente é usada para as carnes. Acompanhamentos, saladas e disponibilidade são ajustados na data.
+        </p>
         <div className="weekly-menu-grid">
-          {sectionOrder.map((section) => (
+          {(['meat'] as DailyMenuSectionKey[]).map((section) => (
             <div className="daily-menu-section" key={section}>
               <div className="menu-admin-section-heading">
                 <h3>{sectionLabels[section]}</h3>
-                <Button onClick={() => onNewItem(section)} size="sm" variant="ghost">
-                  Adicionar
-                </Button>
               </div>
               <div className="daily-menu-list">
                 {weeklyMenu.days[selectedDay][section].length > 0 ? (
@@ -1760,13 +1919,7 @@ function WeeklyTab({
                       </div>
                       <div className="weekly-menu-item__actions menu-admin-item-actions">
                         <Button onClick={() => onEditItem(item)} size="sm" variant="secondary">
-                          Editar vinculo
-                        </Button>
-                        <Button onClick={() => onEditComponent(adminComponentFor(item, components))} size="sm" variant="ghost">
-                          Editar componente
-                        </Button>
-                        <Button onClick={() => onDeleteItem(item)} size="sm" variant="danger">
-                          Remover
+                          Editar
                         </Button>
                       </div>
                     </div>
@@ -1784,163 +1937,91 @@ function WeeklyTab({
 }
 
 function RulesTab({
+  onEditProduct,
   onResolvePending,
   products,
 }: {
+  onEditProduct?: (product: StructuredMenuProduct) => void
   onResolvePending?: (product: StructuredMenuProduct) => void
   products: StructuredMenuProduct[]
 }) {
-  const productsBySlug = new Map(products.map((product) => [product.slug, product]))
-  const ruleProducts = [
-    'n5-casa',
-    'n8-casa',
-    'suco',
-    'combo-n8-casa-baby',
-    'combo-n8-com-latinha',
-    'n8-tradicional',
-    'n9-tradicional',
+  const sections: Array<{ title: string; description: string; slugs: string[] }> = [
+    {
+      title: 'Produtos e preços',
+      description: 'Preços e disponibilidade padrão dos produtos vendáveis.',
+      slugs: ['n5-casa', 'n8-casa', 'n8-tradicional', 'n9-tradicional', 'self-service'],
+    },
+    {
+      title: 'Carnes e adicionais',
+      description: 'Variação somente bife, bife adicional e adicional de segunda carne com churrasco.',
+      slugs: ['n8-tradicional', 'n9-tradicional'],
+    },
+    {
+      title: 'Regras da marmita',
+      description: 'Capacidade, montagem pelo buffet do dia e limites de escolha estruturados.',
+      slugs: ['n5-casa', 'n8-casa', 'n8-tradicional', 'n9-tradicional', 'separadinha'],
+    },
+    {
+      title: 'Combos',
+      description: 'Itens, quantidades e preços definidos pelo catálogo estruturado.',
+      slugs: ['combo-n8-casa-baby', 'combo-n8-com-latinha'],
+    },
+    {
+      title: 'Canais',
+      description: 'Itens de balcao permanecem fora das ofertas do WhatsApp.',
+      slugs: ['self-service'],
+    },
   ]
-    .map((slug) => productsBySlug.get(slug))
-    .filter((product): product is StructuredMenuProduct => product !== undefined)
+  const productsBySlug = new Map(products.map((product) => [product.slug, product]))
 
   return (
     <div className="menu-admin-stack">
-      <Card>
-        <SectionTitle eyebrow="Visualizacao" title="Regras estruturadas" />
-        <p className="muted-text">Edicao avancada das regras sera disponibilizada em uma proxima etapa.</p>
-      </Card>
-      <div className="structured-product-grid">
-        {ruleProducts.map((product) => (
-          <StructuredProductCard key={product.id} onResolvePending={onResolvePending} product={product} />
-        ))}
-      </div>
+      {sections.map((section) => {
+        const sectionProducts = section.slugs
+          .map((slug) => productsBySlug.get(slug))
+          .filter((product): product is StructuredMenuProduct => product !== undefined)
+
+        return (
+          <Card className="menu-rules-section" key={section.title}>
+            <SectionTitle eyebrow="Configuração estruturada" title={section.title} />
+            <p className="muted-text">{section.description}</p>
+            {sectionProducts.length > 0 ? (
+              <div className="structured-product-grid">
+                {sectionProducts.map((product) => (
+                  <StructuredProductCard
+                    key={`${section.title}-${product.id}`}
+                    mode="rules"
+                    onEdit={onEditProduct}
+                    onResolvePending={onResolvePending}
+                    product={product}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="muted-text">Nenhuma regra cadastrada nesta secao.</p>
+            )}
+          </Card>
+        )
+      })}
     </div>
   )
 }
 
-function CalendarDatePicker({
-  onChange,
-  value,
-}: {
-  onChange: (value: string) => void
-  value: string
-}) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const selectedDate = parseDateString(value) ?? new Date()
-  const [isOpen, setIsOpen] = useState(false)
-  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(selectedDate))
+type CategoryFormState = {
+  name: string
+  description: string
+  display_order: string
+  is_active: boolean
+}
 
-  useEffect(() => {
-    if (!isOpen) {
-      return undefined
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setIsOpen(false)
-      }
-    }
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    document.addEventListener('mousedown', handlePointerDown)
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('mousedown', handlePointerDown)
-    }
-  }, [isOpen])
-
-  const days = monthCalendarDays(visibleMonth)
-  const monthLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(visibleMonth)
-  const today = todayDateString()
-
-  function toggleCalendar() {
-    setVisibleMonth(startOfMonth(parseDateString(value) ?? new Date()))
-    setIsOpen((current) => !current)
-  }
-
-  function selectDate(nextDate: string) {
-    onChange(nextDate)
-    setVisibleMonth(startOfMonth(parseDateString(nextDate) ?? new Date()))
-    setIsOpen(false)
-  }
-
-  return (
-    <div className="menu-datepicker" ref={containerRef}>
-      <span>Data</span>
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        className="menu-datepicker__trigger"
-        onClick={toggleCalendar}
-        type="button"
-      >
-        <strong>{formatDateLabel(value)}</strong>
-        <small>{value === today ? 'Hoje' : serviceDayNameForDate(value)}</small>
-      </button>
-      {isOpen ? (
-        <div aria-label="Selecionar data" className="menu-datepicker__popover" role="dialog">
-          <div className="menu-datepicker__header">
-            <button aria-label="Mes anterior" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, -1))} type="button">
-              {'<'}
-            </button>
-            <strong>{capitalize(monthLabel)}</strong>
-            <button aria-label="Proximo mes" onClick={() => setVisibleMonth(shiftMonth(visibleMonth, 1))} type="button">
-              {'>'}
-            </button>
-          </div>
-          <div className="menu-datepicker__weekdays" aria-hidden="true">
-            {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab', 'Dom'].map((day) => (
-              <span key={day}>{day}</span>
-            ))}
-          </div>
-          <div className="menu-datepicker__days" role="grid">
-            {days.map((day) => {
-              const dayValue = dateToString(day)
-              const isSelected = dayValue === value
-              const isToday = dayValue === today
-              const outsideMonth = day.getMonth() !== visibleMonth.getMonth()
-
-              return (
-                <button
-                  aria-current={isToday ? 'date' : undefined}
-                  aria-label={formatDateLabel(dayValue)}
-                  aria-selected={isSelected}
-                  className={[
-                    'menu-datepicker__day',
-                    isSelected ? 'is-selected' : '',
-                    isToday ? 'is-today' : '',
-                    outsideMonth ? 'is-outside' : '',
-                  ].filter(Boolean).join(' ')}
-                  key={dayValue}
-                  onClick={() => selectDate(dayValue)}
-                  role="gridcell"
-                  type="button"
-                >
-                  {day.getDate()}
-                </button>
-              )
-            })}
-          </div>
-          <div className="menu-datepicker__footer">
-            <Button onClick={() => selectDate(today)} size="sm" variant="secondary">
-              Hoje
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
+function CalendarDatePicker({ onChange, value }: { onChange: (value: string) => void; value: string }) {
+  return <DatePickerField label="Data" onChange={onChange} secondaryLabel={serviceDayNameForDate} value={value} />
 }
 
 function renderModalContent({
   availabilityForm,
+  categories,
+  categoryForm,
   componentDaysForm,
   componentForm,
   components,
@@ -1949,12 +2030,16 @@ function renderModalContent({
   isMutating,
   modal,
   mutationError,
+  onOpenComponentAvailability,
+  onOpenComponentDays,
+  onOpenComponentDateAdjustment,
   pendingConfigurationForm,
   onClearProductImage,
   onSelectProductImage,
   productForm,
   productImagePreview,
   setAvailabilityForm,
+  setCategoryForm,
   setComponentDaysForm,
   setComponentForm,
   setDailyAdjustmentForm,
@@ -1964,6 +2049,8 @@ function renderModalContent({
   weeklyItemForm,
 }: {
   availabilityForm: AvailabilityFormState
+  categories: StructuredMenuCategory[]
+  categoryForm: CategoryFormState | null
   componentDaysForm: ComponentDaysFormState
   componentForm: ComponentFormState | null
   components: AdminMenuComponent[]
@@ -1972,12 +2059,16 @@ function renderModalContent({
   isMutating: boolean
   modal: Exclude<ModalState, null>
   mutationError: string | null
+  onOpenComponentAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
+  onOpenComponentDays: (component: AdminMenuComponent) => void
+  onOpenComponentDateAdjustment: (component: AdminMenuComponent, action: DailyMenuAdjustmentAction) => void
   pendingConfigurationForm: PendingConfigurationFormState
   onClearProductImage: () => void
   onSelectProductImage: (file: File | null) => void
   productForm: ProductFormState | null
   productImagePreview: string | null
   setAvailabilityForm: (updater: (current: AvailabilityFormState) => AvailabilityFormState) => void
+  setCategoryForm: (updater: (current: CategoryFormState | null) => CategoryFormState | null) => void
   setComponentDaysForm: (updater: (current: ComponentDaysFormState) => ComponentDaysFormState) => void
   setComponentForm: (updater: (current: ComponentFormState | null) => ComponentFormState | null) => void
   setDailyAdjustmentForm: (updater: (current: DailyAdjustmentFormState) => DailyAdjustmentFormState) => void
@@ -1990,18 +2081,28 @@ function renderModalContent({
     <div className="modal-fields">
       {modal.type === 'product' && productForm ? (
         <ProductForm
+          categories={categories}
           form={productForm}
           imagePreview={productImagePreview}
-          isCounterProduct={modal.product?.is_counter_product ?? true}
           isMutating={isMutating}
-          isNew={modal.product === null}
           onClearImage={onClearProductImage}
           onSelectImage={onSelectProductImage}
           setForm={setProductForm}
         />
       ) : null}
+      {modal.type === 'category' && categoryForm ? (
+        <CategoryForm form={categoryForm} isMutating={isMutating} setForm={setCategoryForm} />
+      ) : null}
       {modal.type === 'component' && componentForm ? (
-        <ComponentForm form={componentForm} isMutating={isMutating} setForm={setComponentForm} />
+        <ComponentForm
+          component={modal.component}
+          form={componentForm}
+          isMutating={isMutating}
+          onOpenAvailability={onOpenComponentAvailability}
+          onOpenDateAdjustment={onOpenComponentDateAdjustment}
+          onOpenDays={onOpenComponentDays}
+          setForm={setComponentForm}
+        />
       ) : null}
       {modal.type === 'availability' ? (
         <AvailabilityForm
@@ -2041,7 +2142,7 @@ function renderModalContent({
       {modal.type === 'weekly-delete' ? (
         <p>
           Remover <strong>{componentDisplayName(modal.item.component)}</strong> de {serviceDayLabels[modal.item.service_day]} em{' '}
-          {sectionLabels[modal.item.section]}? O componente global sera preservado.
+          {sectionLabels[modal.item.section]}? O componente global será preservado.
         </p>
       ) : null}
       {modal.type === 'pending-configuration' ? (
@@ -2066,20 +2167,18 @@ function renderModalContent({
 }
 
 function ProductForm({
+  categories,
   form,
   imagePreview,
-  isCounterProduct,
   isMutating,
-  isNew,
   onClearImage,
   onSelectImage,
   setForm,
 }: {
+  categories: StructuredMenuCategory[]
   form: ProductFormState
   imagePreview: string | null
-  isCounterProduct: boolean
   isMutating: boolean
-  isNew: boolean
   onClearImage: () => void
   onSelectImage: (file: File | null) => void
   setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void
@@ -2108,41 +2207,43 @@ function ProductForm({
             onChange={(event) => updateProductForm(setForm, 'price', event.target.value)}
           />
         </label>
-        {isCounterProduct || isNew ? (
-          <SelectField
-            disabled={isMutating}
-            label="Categoria"
-            onChange={(value) => updateProductForm(setForm, 'category_slug', value as CounterProductCategorySlug)}
-            options={counterProductCategoryOptions}
-            value={form.category_slug}
-          />
-        ) : null}
+        <SelectField
+          disabled={isMutating}
+          label="Categoria"
+          onChange={(value) => updateProductForm(setForm, 'category_id', value)}
+          options={categories.map((category) => ({
+            value: String(category.id),
+            label: category.is_active === false ? `${category.name} (inativa)` : category.name,
+          }))}
+          value={form.category_id}
+        />
       </div>
-      {isCounterProduct || isNew ? (
-        <div className="product-image-field">
-          <div aria-label="Prévia da foto do produto" className="product-image-field__preview">
-            {imagePreview ? <img alt="Prévia do produto" src={imagePreview} /> : <span>Sem foto</span>}
-          </div>
-          <div className="product-image-field__actions">
-            <label className="button button--secondary button--sm">
-              <span>{imagePreview ? 'Trocar foto' : 'Adicionar foto'}</span>
-              <input
-                accept="image/jpeg,image/png,image/webp"
-                className="sr-only"
-                disabled={isMutating}
-                onChange={(event) => onSelectImage(event.target.files?.[0] ?? null)}
-                type="file"
-              />
-            </label>
-            {imagePreview ? (
-              <Button disabled={isMutating} onClick={onClearImage} size="sm" variant="ghost">
-                Remover foto
-              </Button>
-            ) : null}
-            <p className="muted-text">JPG, PNG ou WebP de até 5 MB.</p>
-          </div>
+      <div className="product-image-field">
+        <ProductImage
+          alt="Prévia da foto do produto"
+          className="product-image-field__preview"
+          key={imagePreview ?? 'product-form-without-image'}
+          src={imagePreview}
+        />
+        <div className="product-image-field__actions">
+          <label className="button button--secondary button--sm">
+            <span>{imagePreview ? 'Trocar foto' : 'Adicionar foto'}</span>
+            <input
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              disabled={isMutating}
+              onChange={(event) => onSelectImage(event.target.files?.[0] ?? null)}
+              type="file"
+            />
+          </label>
+          {imagePreview ? (
+            <Button disabled={isMutating} onClick={onClearImage} size="sm" variant="ghost">
+              Remover foto
+            </Button>
+          ) : null}
+          <p className="muted-text">JPG, PNG ou WebP de até 5 MB.</p>
         </div>
-      ) : null}
+      </div>
       <div className="menu-admin-check-grid">
         <CheckField
           checked={form.is_active}
@@ -2153,7 +2254,7 @@ function ProductForm({
         <CheckField
           checked={form.is_available_by_default}
           disabled={isMutating}
-          label="Disponivel por padrao"
+          label="Disponível por padrão"
           onChange={(checked) => updateProductForm(setForm, 'is_available_by_default', checked)}
         />
       </div>
@@ -2189,7 +2290,26 @@ function BeefRulesForm({
 }) {
   return (
     <fieldset className="menu-admin-fieldset menu-beef-rules-form">
-      <legend>Regras de bife</legend>
+      <legend>Carnes e adicionais</legend>
+      <div className="menu-beef-rule-card">
+        <CheckField
+          checked={form.standard_meat_enabled}
+          disabled={isMutating}
+          label="Carne padrão adicional"
+          onChange={(checked) => updateBeefRulesForm(setForm, 'standard_meat_enabled', checked)}
+        />
+        <p className="muted-text">Cobrada para cada carne padrao acima da franquia. O churrasco reutiliza esta tarifa na segunda carne.</p>
+        <label>
+          <span>Preco em reais</span>
+          <input
+            disabled={isMutating || !form.standard_meat_enabled}
+            inputMode="decimal"
+            placeholder="Ex.: 4,00"
+            value={form.standard_meat_price}
+            onChange={(event) => updateBeefRulesForm(setForm, 'standard_meat_price', event.target.value)}
+          />
+        </label>
+      </div>
       <div className="menu-beef-rule-card">
         <CheckField
           checked={form.beef_only_enabled}
@@ -2260,7 +2380,7 @@ function PendingConfigurationForm({
   if (!pendingOption) {
     return (
       <p className="muted-text">
-        Nao ha configuracao pendente neste produto. Atualize os dados do cardapio e tente novamente se o aviso continuar aparecendo.
+        Não há configuração pendente neste produto. Atualize os dados do cardápio e tente novamente se o aviso continuar aparecendo.
       </p>
     )
   }
@@ -2273,8 +2393,8 @@ function PendingConfigurationForm({
         </Badge>
         <strong>{product.name}</strong>
         <p>
-          A variacao <strong>{componentDisplayName(pendingOption)}</strong> esta cadastrada, mas ficou pendente porque falta uma decisao operacional:
-          oferecer com preco final definido ou deixar claro que essa variacao nao sera vendida.
+          A variação <strong>{componentDisplayName(pendingOption)}</strong> está cadastrada, mas ficou pendente porque falta uma decisão operacional:
+          oferecer com preço final definido ou deixar claro que essa variação não será vendida.
         </p>
         <small>Preco base atual: {basePrice}</small>
       </div>
@@ -2287,7 +2407,7 @@ function PendingConfigurationForm({
             onChange={() => setForm((current) => ({ ...current, resolution: 'not_offered' }))}
             type="radio"
           />
-          <span>Nao oferecer essa variacao por enquanto</span>
+          <span>Não oferecer essa variação por enquanto</span>
         </label>
         <label>
           <input
@@ -2296,7 +2416,7 @@ function PendingConfigurationForm({
             onChange={() => setForm((current) => ({ ...current, resolution: 'offered' }))}
             type="radio"
           />
-          <span>Oferecer com preco final definido</span>
+          <span>Oferecer com preço final definido</span>
         </label>
       </fieldset>
       {form.resolution === 'offered' ? (
@@ -2312,7 +2432,7 @@ function PendingConfigurationForm({
         </label>
       ) : null}
       <p className="muted-text">
-        Essa acao altera apenas a regra estruturada desta variacao. Se a equipe ainda nao souber o preco correto, escolha nao oferecer
+        Essa ação altera apenas a regra estruturada desta variação. Se a equipe ainda não souber o preço correto, escolha não oferecer
         para remover o alerta sem inventar valor.
       </p>
     </>
@@ -2320,12 +2440,20 @@ function PendingConfigurationForm({
 }
 
 function ComponentForm({
+  component,
   form,
   isMutating,
+  onOpenAvailability,
+  onOpenDateAdjustment,
+  onOpenDays,
   setForm,
 }: {
+  component: AdminMenuComponent | null
   form: ComponentFormState
   isMutating: boolean
+  onOpenAvailability: (component: AdminMenuComponent, status: EffectiveAvailabilityStatus | 'clear') => void
+  onOpenDateAdjustment: (component: AdminMenuComponent, action: DailyMenuAdjustmentAction) => void
+  onOpenDays: (component: AdminMenuComponent) => void
   setForm: (updater: (current: ComponentFormState | null) => ComponentFormState | null) => void
 }) {
   return (
@@ -2357,6 +2485,82 @@ function ComponentForm({
         label="Componente ativo"
         onChange={(checked) => updateComponentForm(setForm, 'is_active', checked)}
       />
+      {component ? (
+        <>
+          <fieldset className="menu-admin-fieldset">
+            <legend>Programação</legend>
+            <p className="muted-text">
+              {component.weekly_menu_items.length > 0
+                ? `Dias recorrentes: ${formatWeeklyComponentDays(component)}.`
+                : 'Sem dia fixo. Este ingrediente pode ser usado apenas em uma data específica.'}
+            </p>
+            <div className="menu-admin-item-actions">
+              <Button disabled={isMutating} onClick={() => onOpenDays(component)} size="sm" variant="secondary">Definir dias da semana</Button>
+              <Button disabled={isMutating} onClick={() => onOpenDateAdjustment(component, 'include')} size="sm" variant="secondary">Adicionar somente nesta data</Button>
+              <Button disabled={isMutating} onClick={() => onOpenDateAdjustment(component, 'exclude')} size="sm" variant="ghost">Ocultar somente nesta data</Button>
+            </div>
+          </fieldset>
+          <fieldset className="menu-admin-fieldset">
+            <legend>Disponibilidade na data consultada</legend>
+            <div className="menu-admin-inline-badges"><AvailabilityBadge availability={component.availability} /></div>
+            <div className="menu-admin-item-actions">
+              <Button disabled={isMutating} onClick={() => onOpenAvailability(component, 'available')} size="sm" variant="secondary">Disponivel</Button>
+              <Button disabled={isMutating} onClick={() => onOpenAvailability(component, 'sold_out')} size="sm" variant="secondary">Esgotado</Button>
+              <Button disabled={isMutating} onClick={() => onOpenAvailability(component, 'unavailable')} size="sm" variant="secondary">Indisponível</Button>
+              {component.availability.source !== 'component_default' ? (
+                <Button disabled={isMutating} onClick={() => onOpenAvailability(component, 'clear')} size="sm" variant="ghost">Restaurar</Button>
+              ) : null}
+            </div>
+          </fieldset>
+          <fieldset className="menu-admin-fieldset">
+            <legend>Vinculos e regras</legend>
+            <p className="muted-text">Produtos ou grupos relacionados: {component.product_group_links_count}.</p>
+            <p className="muted-text">
+              {component.component_type === 'meat'
+                ? 'Conta como carne na montagem da marmita. Precos adicionais sao definidos nas regras do produto.'
+                : 'Sem adicional proprio neste ingrediente.'}
+            </p>
+          </fieldset>
+        </>
+      ) : null}
+    </>
+  )
+}
+
+function CategoryForm({
+  form,
+  isMutating,
+  setForm,
+}: {
+  form: CategoryFormState
+  isMutating: boolean
+  setForm: (updater: (current: CategoryFormState | null) => CategoryFormState | null) => void
+}) {
+  return (
+    <>
+      <label>
+        <span>Nome</span>
+        <input disabled={isMutating} value={form.name} onChange={(event) => updateCategoryForm(setForm, 'name', event.target.value)} />
+      </label>
+      <label>
+        <span>Descrição</span>
+        <textarea disabled={isMutating} value={form.description} onChange={(event) => updateCategoryForm(setForm, 'description', event.target.value)} />
+      </label>
+      <label>
+        <span>Ordem de exibição</span>
+        <input
+          disabled={isMutating}
+          inputMode="numeric"
+          value={form.display_order}
+          onChange={(event) => updateCategoryForm(setForm, 'display_order', event.target.value)}
+        />
+      </label>
+      <CheckField
+        checked={form.is_active}
+        disabled={isMutating}
+        label="Categoria ativa"
+        onChange={(checked) => updateCategoryForm(setForm, 'is_active', checked)}
+      />
     </>
   )
 }
@@ -2378,7 +2582,7 @@ function ComponentDaysForm({
         <strong>{componentDisplayName(component)}</strong>
         {componentSupportingName(component) ? <small>{componentSupportingName(component)}</small> : null}
         <p>
-          Escolha os dias fixos em que este item entra no cardapio semanal. Sem nenhum dia marcado, ele continua disponivel para
+          Escolha os dias fixos em que este item entra no cardápio semanal. Sem nenhum dia marcado, ele continua disponível para
           ser usado apenas em alteracoes de uma data especifica.
         </p>
       </div>
@@ -2403,7 +2607,7 @@ function ComponentDaysForm({
           ))}
         </div>
       </fieldset>
-      <p className="muted-text">Domingo nao possui cardapio semanal recorrente nesta estrutura.</p>
+      <p className="muted-text">Domingo não possui cardápio semanal recorrente nesta estrutura.</p>
     </>
   )
 }
@@ -2426,7 +2630,7 @@ function AvailabilityForm({
   if (isClear) {
     return (
       <p>
-        Restaurar a disponibilidade de <strong>{componentDisplayName(item.component)}</strong> para o padrao do componente nesta data?
+        Restaurar a disponibilidade de <strong>{componentDisplayName(item.component)}</strong> para o padrão do componente nesta data?
       </p>
     )
   }
@@ -2434,7 +2638,7 @@ function AvailabilityForm({
   return (
     <>
       <p>
-        Alteracao global para <strong>{componentDisplayName(item.component)}</strong> na data selecionada.
+        Alteração global para <strong>{componentDisplayName(item.component)}</strong> na data selecionada.
       </p>
       <SelectField
         disabled={isMutating}
@@ -2558,7 +2762,7 @@ function DailyAdjustmentForm({
         />
       </label>
       <label>
-        <span>Observacao</span>
+        <span>Observação</span>
         <textarea
           disabled={isMutating}
           placeholder="Opcional"
@@ -2630,7 +2834,7 @@ function WeeklyItemForm({
         onChange={(checked) => setForm((current) => ({ ...current, is_active: checked }))}
       />
       <label>
-        <span>Observacao</span>
+        <span>Observação</span>
         <textarea
           disabled={isMutating}
           placeholder="Opcional"
@@ -2677,6 +2881,14 @@ function AvailabilityBadge({ availability }: { availability: EffectiveAvailabili
 }
 
 function ProductAdministrativeBadge({ product }: { product: StructuredMenuProduct }) {
+  if (product.administrative_status === 'archived') {
+    return (
+      <Badge size="sm" tone="neutral">
+        Arquivado
+      </Badge>
+    )
+  }
+
   if (product.administrative_status === 'legacy') {
     return (
       <Badge size="sm" tone="neutral">
@@ -2698,6 +2910,8 @@ function productMatchesAdminFilter(product: StructuredMenuProduct, filter: Produ
       return product.administrative_status === 'active'
     case 'inactive':
       return product.administrative_status === 'inactive'
+    case 'archived':
+      return product.administrative_status === 'archived'
     case 'legacy':
       return product.administrative_status === 'legacy'
     case 'all':
@@ -2707,12 +2921,6 @@ function productMatchesAdminFilter(product: StructuredMenuProduct, filter: Produ
 
 function productPriceCents(product: StructuredMenuProduct): number {
   return product.base_price_cents ?? 0
-}
-
-function counterCategorySlug(slug: string | undefined): CounterProductCategorySlug {
-  return counterProductCategoryOptions.some((option) => option.value === slug)
-    ? slug as CounterProductCategorySlug
-    : 'outros'
 }
 
 function componentDisplayName(component: StructuredMenuComponentSummary): string {
@@ -2844,6 +3052,10 @@ function beefRulesFormFromProduct(product: StructuredMenuProduct): BeefRulesForm
   const extraBeef = product.additions.find((addition) => addition.code === 'extra_beef')
 
   return {
+    standard_meat_enabled: product.meat_configuration.traditional.additional_meat_price_cents !== null,
+    standard_meat_price: product.meat_configuration.traditional.additional_meat_price_cents !== null
+      ? centsToInput(product.meat_configuration.traditional.additional_meat_price_cents)
+      : '',
     beef_only_enabled: product.meat_configuration.beef_only.enabled,
     beef_only_final_price: product.meat_configuration.beef_only.final_price_cents !== null
       ? centsToInput(product.meat_configuration.beef_only.final_price_cents)
@@ -2880,7 +3092,7 @@ function productInsights(product: StructuredMenuProduct): string[] {
   })
 
   if (product.combo_items.length > 0) {
-    insights.push('Itens internos do combo nao somam novamente ao total.')
+    insights.push('Itens internos do combo não somam novamente ao total.')
   }
 
   if (product.configuration_pending) {
@@ -2888,8 +3100,8 @@ function productInsights(product: StructuredMenuProduct): string[] {
 
     insights.push(
       pendingOption
-        ? `Configuracao pendente: decidir se ${componentDisplayName(pendingOption)} sera oferecido e qual sera o preco final.`
-        : 'Ha uma configuracao pendente de confirmacao operacional.',
+        ? `Configuração pendente: decidir se ${componentDisplayName(pendingOption)} será oferecido e qual será o preço final.`
+        : 'Há uma configuração pendente de confirmação operacional.',
     )
   }
 
@@ -2905,6 +3117,11 @@ function beefRuleInsights(product: StructuredMenuProduct): string[] {
   const beefOnly = product.meat_configuration.beef_only
   const extraBeef = product.additions.find((addition) => addition.code === 'extra_beef')
   const insights = [`Preco padrao: ${formatCurrency(centsToCurrency(basePrice))}.`]
+  const standardMeatPrice = product.meat_configuration.traditional.additional_meat_price_cents
+
+  if (standardMeatPrice !== null) {
+    insights.push(`Carne padrão adicional: ${formatCurrency(centsToCurrency(standardMeatPrice))}.`)
+  }
 
   if (beefOnly.enabled && beefOnly.final_price_cents !== null) {
     insights.push(`Somente bife: ${formatCurrency(centsToCurrency(beefOnly.final_price_cents))}; substitui as carnes tradicionais.`)
@@ -2969,18 +3186,18 @@ function bifeVariationSummary(group: StructuredProductOptionGroup): string | nul
   }
 
   if (!bife.link_active && bife.requires_confirmation) {
-    return 'Variacao com bife ainda inativa; preco pendente.'
+    return 'Variação com bife ainda inativa; preço pendente.'
   }
 
   if (bife.final_price_cents !== null) {
-    return `Variacao com bife: preco final ${formatCurrency(centsToCurrency(bife.final_price_cents))}.`
+    return `Variação com bife: preço final ${formatCurrency(centsToCurrency(bife.final_price_cents))}.`
   }
 
   if (bife.price_delta_cents > 0) {
-    return `Variacao com bife: adicional de ${formatCurrency(centsToCurrency(bife.price_delta_cents))}.`
+    return `Variação com bife: adicional de ${formatCurrency(centsToCurrency(bife.price_delta_cents))}.`
   }
 
-  return 'Variacao com bife configurada.'
+  return 'Variação com bife configurada.'
 }
 
 function optionNameWithState(option: StructuredComponentOption): string {
@@ -3010,7 +3227,9 @@ function listNames(names: string[]): string {
 function modalTitle(modal: Exclude<ModalState, null>): string {
   switch (modal.type) {
     case 'product':
-      return modal.product ? 'Editar produto' : 'Novo produto de balcão'
+      return modal.product ? 'Editar produto' : modal.isCounterShortcut ? 'Novo produto de balcão' : 'Novo produto'
+    case 'category':
+      return modal.category ? 'Editar categoria' : 'Nova categoria'
     case 'component':
       return modal.component ? 'Editar componente' : 'Novo componente'
     case 'availability':
@@ -3024,7 +3243,7 @@ function modalTitle(modal: Exclude<ModalState, null>): string {
     case 'weekly-delete':
       return 'Remover item semanal'
     case 'pending-configuration':
-      return 'Resolver configuracao pendente'
+      return 'Resolver configuração pendente'
     case 'component-days':
       return 'Definir dias da semana'
   }
@@ -3043,7 +3262,7 @@ function modalPrimaryLabel(modal: Exclude<ModalState, null>, isMutating: boolean
     case 'availability':
       return modal.action === 'clear' ? 'Restaurar' : 'Salvar disponibilidade'
     case 'pending-configuration':
-      return 'Resolver configuracao'
+      return 'Resolver configuração'
     case 'component-days':
       return 'Salvar dias'
     default:
@@ -3055,6 +3274,14 @@ function updateProductForm<Key extends keyof ProductFormState>(
   setForm: (updater: (current: ProductFormState | null) => ProductFormState | null) => void,
   key: Key,
   value: ProductFormState[Key],
+) {
+  setForm((current) => (current ? { ...current, [key]: value } : current))
+}
+
+function updateCategoryForm<Key extends keyof CategoryFormState>(
+  setForm: (updater: (current: CategoryFormState | null) => CategoryFormState | null) => void,
+  key: Key,
+  value: CategoryFormState[Key],
 ) {
   setForm((current) => (current ? { ...current, [key]: value } : current))
 }
@@ -3105,38 +3332,6 @@ function toggleServiceDay(
       service_days: serviceDays,
     }
   })
-}
-
-function adminComponentFor(item: AdminWeeklyMenuItem, components: AdminMenuComponent[]): AdminMenuComponent {
-  return (
-    components.find((component) => component.id === item.component.id) ?? {
-      ...item.component,
-      description: null,
-      default_price_delta_cents: 0,
-      is_active: true,
-      display_order: item.display_order,
-      product_group_links_count: 0,
-      weekly_menu_items_count: 0,
-      weekly_menu_items: [
-        {
-          id: item.id,
-          service_day: item.service_day,
-          section: item.section,
-          display_order: item.display_order,
-          is_active: item.is_active,
-          notes: item.notes,
-        },
-      ],
-      availability: {
-        status: 'available',
-        available: true,
-        source: 'component_default',
-        reason: null,
-        availability_date: todayDateString(),
-        replacement: null,
-      },
-    }
-  )
 }
 
 function emptyAvailabilityForm(): AvailabilityFormState {
@@ -3250,61 +3445,17 @@ function componentTypeForSection(section: DailyMenuSectionKey): MenuComponentTyp
   }
 }
 
-function parseDateString(value: string): Date | null {
-  const [year, month, day] = value.split('-').map(Number)
-
-  if (!year || !month || !day) {
-    return null
-  }
-
-  const date = new Date(year, month - 1, day)
-
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    return null
-  }
-
-  return date
-}
-
-function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
-
-function shiftMonth(date: Date, offset: number): Date {
-  return new Date(date.getFullYear(), date.getMonth() + offset, 1)
-}
-
-function monthCalendarDays(monthDate: Date): Date[] {
-  const firstDay = startOfMonth(monthDate)
-  const mondayBasedOffset = (firstDay.getDay() + 6) % 7
-  const firstCalendarDay = new Date(firstDay)
-  firstCalendarDay.setDate(firstDay.getDate() - mondayBasedOffset)
-
-  return Array.from({ length: 42 }, (_, index) => {
-    const day = new Date(firstCalendarDay)
-    day.setDate(firstCalendarDay.getDate() + index)
-
-    return day
-  })
-}
-
-function dateToString(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-
-  return `${date.getFullYear()}-${month}-${day}`
-}
-
 function serviceDayNameForDate(value: string): string {
-  const date = parseDateString(value)
+  const [year, month, dayOfMonth] = value.split('-').map(Number)
+  const date = year && month && dayOfMonth ? new Date(year, month - 1, dayOfMonth) : null
 
   if (!date) {
     return 'Data invalida'
   }
 
-  const day = serviceDayOrder[date.getDay() === 0 ? 6 : date.getDay() - 1]
+  const serviceDay = serviceDayOrder[date.getDay() === 0 ? 6 : date.getDay() - 1]
 
-  return serviceDayLabels[day]
+  return serviceDayLabels[serviceDay]
 }
 
 function friendlyTimezoneLabel(timezone?: string | null): string | null {
@@ -3317,10 +3468,6 @@ function friendlyTimezoneLabel(timezone?: string | null): string | null {
   }
 
   return timezone.replaceAll('_', ' ')
-}
-
-function capitalize(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
 function initialTab(): MenuAdminTab {
@@ -3361,15 +3508,15 @@ function formatDateTimeLabel(value: string): string {
 function friendlyError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     if (error.status === 403) {
-      return 'Voce nao tem permissao para esta acao.'
+      return 'Você não tem permissão para esta ação.'
     }
 
     if (error.status === 404) {
-      return 'O item solicitado nao foi encontrado.'
+      return 'O item solicitado não foi encontrado.'
     }
 
     if (error.status === 422) {
-      return 'Revise os campos informados e tente novamente.'
+      return error.message || 'Revise os campos informados e tente novamente.'
     }
   }
 

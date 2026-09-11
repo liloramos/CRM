@@ -19,6 +19,7 @@ use App\Models\Payment;
 use App\Models\PaymentProof;
 use App\Models\Role;
 use App\Models\User;
+use App\Models\WhatsAppAccount;
 use App\Models\WhatsAppMediaFile;
 use App\Models\WhatsAppMessageDelivery;
 use App\Models\WhatsAppWebhookEvent;
@@ -1671,6 +1672,10 @@ class WhatsAppProviderTest extends TestCase
         $this->assertSame('account', data_get($alert->metadata, 'scope'));
         $this->assertSame(WhatsAppErrorClassifier::TOKEN_INVALID, data_get($alert->metadata, 'error_code'));
         $this->assertSame(ConversationAlert::SEVERITY_CRITICAL, $alert->severity);
+        $this->assertSame(
+            'whatsapp-systemic:'.data_get($alert->metadata, 'whatsapp_account_id').':'.WhatsAppErrorClassifier::TOKEN_INVALID,
+            $alert->deduplication_key,
+        );
 
         $this->actingAs($user)
             ->getJson('/api/app/conversations')
@@ -1678,6 +1683,50 @@ class WhatsAppProviderTest extends TestCase
             ->assertJsonCount(1, 'data.alerts')
             ->assertJsonPath('data.alerts.0.conversationId', null)
             ->assertJsonPath('data.alerts.0.isActionable', true);
+
+        $otherAccount = WhatsAppAccount::query()->create([
+            'company_id' => $company->id,
+            'provider' => WhatsAppAccount::PROVIDER_META_CLOUD,
+            'name' => 'Segunda conta Meta',
+            'status' => WhatsAppAccount::STATUS_CONNECTED,
+            'is_default' => false,
+        ]);
+        $otherDelivery = WhatsAppMessageDelivery::query()->create([
+            'company_id' => $company->id,
+            'whatsapp_account_id' => $otherAccount->id,
+            'provider' => WhatsAppAccount::PROVIDER_META_CLOUD,
+            'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
+            'status' => WhatsAppMessageDelivery::STATUS_FAILED,
+            'safe_payload' => ['error_code' => WhatsAppErrorClassifier::TOKEN_INVALID],
+            'error_message' => 'Falha sistêmica sanitizada da segunda conta.',
+        ]);
+        $otherAlert = app(ConversationAlertService::class)
+            ->openMessageSendFailure($company, null, $otherDelivery);
+
+        $this->assertNotSame($alert->deduplication_key, $otherAlert->deduplication_key);
+        $this->assertSame(2, ConversationAlert::query()->where('company_id', $company->id)->count());
+
+        $otherCompany = Company::query()->create([
+            'slug' => 'outra-empresa-systemic-meta',
+            'name' => 'Outra Empresa Systemic Meta',
+        ]);
+        $foreignDelivery = WhatsAppMessageDelivery::query()->create([
+            'company_id' => $otherCompany->id,
+            'provider' => WhatsAppAccount::PROVIDER_META_CLOUD,
+            'direction' => WhatsAppMessageDelivery::DIRECTION_OUTBOUND,
+            'status' => WhatsAppMessageDelivery::STATUS_FAILED,
+            'safe_payload' => ['error_code' => WhatsAppErrorClassifier::TOKEN_INVALID],
+            'error_message' => 'Falha sistêmica sanitizada de outra empresa.',
+        ]);
+        app(ConversationAlertService::class)
+            ->openMessageSendFailure($otherCompany, null, $foreignDelivery);
+
+        $this->assertSame(2, ConversationAlert::query()->where('company_id', $company->id)->count());
+        $this->assertSame(1, ConversationAlert::query()->where('company_id', $otherCompany->id)->count());
+        $this->actingAs($user)
+            ->getJson('/api/app/conversations')
+            ->assertOk()
+            ->assertJsonCount(2, 'data.alerts');
     }
 
     public function test_async_delivery_failures_use_the_same_consolidated_alert_lifecycle(): void

@@ -45,6 +45,12 @@ class ConversationAlert extends Model
         self::TYPE_MESSAGE_SEND_FAILED,
     ];
 
+    /** @var list<string> */
+    public const HUMAN_HANDOFF_TYPES = [
+        self::TYPE_HUMAN_REQUESTED,
+        self::TYPE_LOW_CONFIDENCE_AI,
+    ];
+
     protected $fillable = [
         'company_id',
         'conversation_id',

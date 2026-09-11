@@ -15,6 +15,8 @@ class OrderItem extends Model
         'product_type',
         'menu_rule_code',
         'quantity',
+        'weight_grams',
+        'price_per_kg_cents',
         'unit_price_cents',
         'options_total_cents',
         'total_price_cents',
@@ -34,6 +36,8 @@ class OrderItem extends Model
     {
         return [
             'quantity' => 'integer',
+            'weight_grams' => 'integer',
+            'price_per_kg_cents' => 'integer',
             'unit_price_cents' => 'integer',
             'options_total_cents' => 'integer',
             'total_price_cents' => 'integer',

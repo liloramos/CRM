@@ -688,6 +688,7 @@ class OrderWorkflowTest extends TestCase
         ]);
         $porco = $this->menuComponentId($company, 'porco');
         $frango = $this->menuComponentId($company, 'frango-ao-molho');
+        $bife = $this->menuComponentId($company, 'bife');
 
         $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
@@ -732,18 +733,18 @@ class OrderWorkflowTest extends TestCase
                 'structured_options' => [],
             ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Escolha de 1 ate 2 carnes tradicionais.');
+            ->assertJsonPath('message', 'Escolha ao menos 1 carne tradicional.');
 
         $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
                 'product_id' => $product->id,
                 'quantity' => 1,
                 'meat_mode' => 'traditional',
-                'traditional_meat_component_ids' => [$porco, $frango, $porco],
+                'traditional_meat_component_ids' => [$porco, $frango, $bife],
                 'structured_options' => [],
             ])
             ->assertStatus(422)
-            ->assertJsonPath('message', 'Escolha de 1 ate 2 carnes tradicionais.');
+            ->assertJsonPath('message', 'Escolha apenas carnes tradicionais validas do cardapio.');
 
         $withoutMeat = $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
@@ -840,7 +841,7 @@ class OrderWorkflowTest extends TestCase
             ->assertOk()
             ->json('data.items.0');
 
-        $this->assertSame(18, $traditional['unitPrice']);
+        $this->assertSame(19, $traditional['unitPrice']);
 
         $beefOnly = $this->actingAs($user)
             ->postJson("/api/app/orders/{$order->id}/items", [
@@ -852,7 +853,7 @@ class OrderWorkflowTest extends TestCase
             ->assertOk()
             ->json('data.items.1');
 
-        $this->assertSame(22, $beefOnly['unitPrice']);
+        $this->assertSame(23, $beefOnly['unitPrice']);
         $this->assertContains('Somente bife', $beefOnly['composition']);
 
         $withExtraBeef = $this->actingAs($user)
@@ -869,8 +870,8 @@ class OrderWorkflowTest extends TestCase
             ->assertOk()
             ->json('data.items.2');
 
-        $this->assertSame(25, $withExtraBeef['unitPrice']);
-        $this->assertSame(50, $withExtraBeef['totalPrice']);
+        $this->assertSame(26, $withExtraBeef['unitPrice']);
+        $this->assertSame(52, $withExtraBeef['totalPrice']);
         $this->assertContains('Bife adicional - R$ 7,00', $withExtraBeef['additions']);
     }
 
@@ -909,10 +910,11 @@ class OrderWorkflowTest extends TestCase
 
     public function test_order_status_cancel_and_payment_endpoints_persist_real_state(): void
     {
-        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ATENDENTE);
         $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
         $orders = app(OrderWorkflowService::class);
         $order = $orders->createDraft($company);
@@ -978,10 +980,11 @@ class OrderWorkflowTest extends TestCase
 
     public function test_order_status_endpoint_rejects_invalid_transition_and_payment_confirmation_is_idempotent(): void
     {
-        $this->seed([CompanySeeder::class, MenuSeeder::class]);
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
 
         $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
         $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ATENDENTE);
         $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
         $orders = app(OrderWorkflowService::class);
         $order = $orders->createDraft($company);
@@ -1064,6 +1067,51 @@ class OrderWorkflowTest extends TestCase
         $this->assertSame($user->id, $payment->confirmed_by_user_id);
         $this->assertSame($payment->id, $proof->refresh()->payment_id);
         $this->assertSame(PaymentProof::STATUS_RECEIVED, $proof->status);
+    }
+
+    public function test_manual_payment_confirmation_preserves_ready_to_print_operational_status(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $user->assignRole(Role::ADMIN_GERENTE);
+        $product = Product::query()->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, ['customer_name_snapshot' => 'Pagamento apos impressao']);
+        $orders->addItem($order, $product);
+        $orders->transitionTo($order->refresh(), Order::STATUS_READY_TO_PRINT, $user, 'ticket_ready');
+
+        foreach ([1, 2] as $attempt) {
+            $this->actingAs($user)
+                ->postJson("/api/app/orders/{$order->id}/payments/confirm", [
+                    'method' => Payment::METHOD_PIX,
+                    'amount_cents' => 800,
+                ])
+                ->assertOk()
+                ->assertJsonPath('data.backendStatus', Order::STATUS_READY_TO_PRINT)
+                ->assertJsonPath('data.paymentStatus', 'pago');
+        }
+
+        $order->refresh();
+        $payment = $order->payments()->sole();
+        $this->assertSame(Order::STATUS_READY_TO_PRINT, $order->status);
+        $this->assertSame(Payment::ORDER_STATUS_PAID, $order->payment_status);
+        $this->assertSame(800, $order->amount_paid_cents);
+        $this->assertSame(0, $order->amount_due_cents);
+        $this->assertSame(Payment::STATUS_CONFIRMED, $payment->status);
+        $this->assertSame($user->id, $payment->confirmed_by_user_id);
+        $this->assertSame(1, $order->statusHistories()->where('to_status', Order::STATUS_READY_TO_PRINT)->count());
+        $this->assertSame(0, $order->statusHistories()->where('to_status', Order::STATUS_PAYMENT_CONFIRMED)->count());
+
+        $financeEntry = collect($this->actingAs($user)
+            ->getJson('/api/app/operational-snapshot')
+            ->assertOk()
+            ->json('data.financeEntries'))
+            ->firstWhere('orderId', (string) $order->id);
+        $this->assertSame('pago', $financeEntry['status']);
+        $this->assertEquals(8, $financeEntry['receivedAmount']);
+        $this->assertEquals(0, $financeEntry['pendingAmount']);
     }
 
     public function test_operational_status_changes_do_not_mutate_confirmed_payments(): void
@@ -1405,6 +1453,32 @@ class OrderWorkflowTest extends TestCase
         $this->assertDatabaseHas('customers', ['id' => $customer->id]);
     }
 
+    public function test_permanent_delete_allows_cancelled_financially_zero_order_with_residual_fulfillment_state(): void
+    {
+        $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $administrator = User::factory()->create(['company_id' => $company->id]);
+        $administrator->assignRole(Role::ADMIN_GERENTE);
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company);
+        $order->forceFill([
+            'status' => Order::STATUS_CANCELLED,
+            'payment_status' => Payment::ORDER_STATUS_UNPAID,
+            'amount_paid_cents' => 0,
+            'fulfillment_status' => Order::FULFILLMENT_STATUS_DELIVERY_OUT,
+            'delivery_status' => Order::DELIVERY_STATUS_OUT_FOR_DELIVERY,
+            'cancelled_at' => now(),
+        ])->save();
+
+        $this->actingAs($administrator)
+            ->deleteJson("/api/app/orders/{$order->id}/permanent", ['confirmation' => 'EXCLUIR'])
+            ->assertOk()
+            ->assertJsonPath('data.deleted', 1);
+
+        $this->assertDatabaseMissing('orders', ['id' => $order->id]);
+    }
+
     public function test_permanent_delete_blocks_cancelled_order_with_payment_review_pending(): void
     {
         $this->seed([CompanySeeder::class, RoleAndPermissionSeeder::class, MenuSeeder::class]);
@@ -1574,6 +1648,7 @@ class OrderWorkflowTest extends TestCase
         $order = app(OrderWorkflowService::class)->createDraft($company, ['customer_name_snapshot' => 'Impresso bloqueado']);
         app(OrderWorkflowService::class)->addItem($order, $product);
         $printJob = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $manager);
+        app(PrintWorkflowService::class)->markPrinting($printJob, $manager);
         app(PrintWorkflowService::class)->markPrinted($printJob, $manager);
 
         $response = $this->actingAs($manager)
@@ -1600,8 +1675,8 @@ class OrderWorkflowTest extends TestCase
         $order = $orders->createDraft($company, ['customer_name_snapshot' => 'Preparo bloqueado']);
         $orders->addItem($order, $product);
         $printJob = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $manager);
+        app(PrintWorkflowService::class)->markPrinting($printJob, $manager);
         app(PrintWorkflowService::class)->markPrinted($printJob, $manager);
-        $orders->transitionTo($order->refresh(), Order::STATUS_IN_PREPARATION, $manager, 'preparo_iniciado');
 
         $response = $this->actingAs($manager)
             ->deleteJson("/api/app/orders/{$order->id}/permanent", [

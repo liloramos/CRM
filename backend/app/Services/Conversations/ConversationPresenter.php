@@ -21,6 +21,7 @@ class ConversationPresenter
         private readonly ConversationOperationalStatusResolver $operationalStatus,
         private readonly CustomerActiveOrderResolver $activeOrders,
         private readonly CopilotAutomationSettings $copilotAutomation,
+        private readonly ConversationCopilotAnalysisAvailability $copilotAnalysisAvailability,
     ) {}
 
     /**
@@ -64,6 +65,9 @@ class ConversationPresenter
 
         $activeOrder = $this->activeOrders->forConversation($conversation);
         $operationalStatus = $this->operationalStatus->resolve($conversation, $activeOrder);
+        $actionableAlertCount = $conversation->alerts
+            ->filter(fn (ConversationAlert $alert): bool => $alert->isCurrentActionable())
+            ->count();
 
         return [
             'id' => (string) $conversation->id,
@@ -74,9 +78,11 @@ class ConversationPresenter
             'automationStatus' => $conversation->automation_status,
             'automationVersion' => (int) ($conversation->automation_version ?? 0),
             'automationRollout' => $this->copilotAutomation->rolloutFor($conversation->company),
+            'hasCopilotAnalysis' => $this->copilotAnalysisAvailability->available($conversation),
             'unread' => (int) ($conversation->unread_count ?? 0),
             'statusLabel' => $operationalStatus['label'],
             'operationalStatus' => $operationalStatus,
+            'actionableAlertCount' => $actionableAlertCount,
             'lastMessage' => (string) ($messages->last()['body'] ?? 'Sem mensagens recentes.'),
             'messages' => $messages,
             'linkedOrderId' => $activeOrder?->id ? (string) $activeOrder->id : null,

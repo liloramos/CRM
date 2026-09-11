@@ -24,7 +24,7 @@ class TraditionalMarmitaBeefRuleService
         }
 
         $mode = $selection['meat_mode'] ?? 'traditional';
-        $traditionalMeatIds = $this->integerList($selection['traditional_meat_component_ids'] ?? []);
+        $traditionalMeatIds = array_values(array_unique($this->integerList($selection['traditional_meat_component_ids'] ?? [])));
         $extraBeefQuantity = (int) ($selection['extra_beef_quantity'] ?? 0);
 
         return match ($mode) {
@@ -97,16 +97,18 @@ class TraditionalMarmitaBeefRuleService
         }
 
         $extraBeefTotal = $extraBeefQuantity * (int) ($extraBeef?->price_delta_cents ?? 0);
+        $standardMeatAdditionalTotal = $this->standardMeatAdditionalCharge($product, $traditionalMeatIds);
         $basePriceCents = (int) ($product->base_price_cents ?? 0);
 
         return [
             'meat_mode' => 'traditional',
             'base_price_cents' => $basePriceCents,
-            'total_cents' => $basePriceCents + $extraBeefTotal,
+            'total_cents' => $basePriceCents + $extraBeefTotal + $standardMeatAdditionalTotal,
             'traditional_meat_component_ids' => $traditionalMeatIds,
             'extra_beef_quantity' => $extraBeefQuantity,
             'extra_beef_unit_price_cents' => (int) ($extraBeef?->price_delta_cents ?? 0),
             'extra_beef_total_cents' => $extraBeefTotal,
+            'standard_meat_additional_total_cents' => $standardMeatAdditionalTotal,
         ];
     }
 
@@ -150,9 +152,9 @@ class TraditionalMarmitaBeefRuleService
         $minTypes = (int) data_get($rules, 'min_types', 1);
         $maxTypes = (int) data_get($rules, 'max_types', 2);
 
-        if (count($traditionalMeatIds) < $minTypes || count($traditionalMeatIds) > $maxTypes) {
+        if (count($traditionalMeatIds) < $minTypes) {
             throw ValidationException::withMessages([
-                'traditional_meat_component_ids' => ["Escolha de {$minTypes} ate {$maxTypes} carnes tradicionais."],
+                'traditional_meat_component_ids' => ["Escolha ao menos {$minTypes} carne tradicional."],
             ]);
         }
 
@@ -178,6 +180,29 @@ class TraditionalMarmitaBeefRuleService
             ->firstWhere('code', $groupCode)
             ?->componentOptions
             ->first(fn (ProductGroupComponent $link): bool => $link->component?->slug === 'bife');
+    }
+
+    /** @param array<int, int> $traditionalMeatIds */
+    private function standardMeatAdditionalCharge(Product $product, array $traditionalMeatIds): int
+    {
+        $includedCount = (int) data_get($product->composition_rules, 'traditional_meat_selection.max_types', 2);
+        $hasChurrasco = MenuComponent::query()
+            ->where('company_id', $product->company_id)
+            ->whereIn('id', $traditionalMeatIds)
+            ->where('slug', 'churrasco')
+            ->exists();
+
+        if ($hasChurrasco) {
+            $includedCount = min(1, $includedCount);
+        }
+
+        $additionalCount = max(0, count($traditionalMeatIds) - $includedCount);
+
+        if ($additionalCount === 0) {
+            return 0;
+        }
+
+        return $additionalCount * (int) data_get($product->composition_rules, 'standard_meat_additional_price_cents', 0);
     }
 
     private function linkIsConfigured(?ProductGroupComponent $link): bool

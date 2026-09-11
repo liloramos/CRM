@@ -23,21 +23,21 @@ export function modalTitle(modal: AppModal): string {
     case 'edit-item':
       return 'Editar item do pedido'
     case 'mark-unavailable':
-      return 'Marcar item indisponivel'
+      return 'Marcar item indisponível'
     case 'add-product':
       return 'Adicionar produto'
     case 'add-user':
-      return 'Adicionar usuario'
+      return 'Adicionar usuário'
     case 'toggle-ai':
       return 'Alternar IA/manual da conversa'
     case 'print-preview':
-      return 'Previa de comanda'
+      return 'Prévia de comanda'
     case 'print-error':
-      return 'Erro de impressao'
+      return 'Erro de impressão'
     case 'whatsapp-error':
       return 'Erro de WhatsApp/API'
     default:
-      return 'Confirmacao'
+      return 'Confirmação'
   }
 }
 
@@ -46,26 +46,26 @@ export function modalDescription(modal: AppModal): string {
     case 'new-order':
       return 'Selecione um cliente cadastrado, digite um cliente avulso ou cadastre um novo.'
     case 'confirm-payment':
-      return 'Comprovantes e credito precisam de conferencia humana antes de liberar o pedido.'
+      return 'Comprovantes e crédito precisam de conferência humana antes de liberar o pedido.'
     case 'void-payment':
       return 'Esta ação corrige apenas o estado interno do CRM. Ela não realiza reembolso.'
     case 'cancel-order':
-      return 'Esta acao altera o fluxo operacional e deve registrar motivo.'
+      return 'Esta ação altera o fluxo operacional e deve registrar motivo.'
     case 'delete-draft':
-      return 'Somente rascunho vazio, sem pagamento, itens ou impressao, pode ser apagado.'
+      return 'Somente rascunho vazio, sem pagamento, itens ou impressão, pode ser apagado.'
     case 'delete-order-permanent':
     case 'delete-orders-bulk':
-      return 'Exclusao administrativa definitiva, disponivel somente para pedidos cancelados e financeiramente zerados.'
+      return 'Exclusão administrativa definitiva, disponível somente para pedidos cancelados e financeiramente zerados.'
     case 'cleanup-test-orders':
-      return 'Limpeza ampla de desenvolvimento, protegida por permissao, ambiente, flag e confirmacao.'
+      return 'Limpeza ampla de desenvolvimento, protegida por permissão, ambiente, flag e confirmação.'
     case 'toggle-ai':
-      return 'Escolha como esta conversa deve seguir. A confirmacao humana continua obrigatoria em decisoes sensiveis.'
+      return 'Escolha como esta conversa deve seguir. A confirmação humana continua obrigatória em decisões sensíveis.'
     case 'print-preview':
-      return 'Previa HTML gerada pelo backend. Impressao fisica real ainda depende de configuracao local.'
+      return 'Prévia HTML gerada pelo backend. Impressão física real ainda depende de configuração local.'
     case 'print-error':
-      return 'A comanda nao deve liberar preparo sem impressao ou autorizacao manual.'
+      return 'A comanda não deve liberar preparo sem impressão ou autorização manual.'
     case 'whatsapp-error':
-      return 'Configuracao tecnica; nao e tela operacional de conversa.'
+      return 'Configuração técnica; não é tela operacional de conversa.'
     default:
       return 'Revise o impacto antes de confirmar.'
   }

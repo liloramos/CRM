@@ -136,7 +136,7 @@ function paymentStatusBadge(status: PaymentStatus): BadgeView {
     case 'parcial':
       return { label: 'Parcial', tone: 'warning' }
     case 'credito':
-      return { label: 'Credito', tone: 'manual' }
+      return { label: 'Crédito', tone: 'manual' }
     case 'revisao_humana':
       return { label: 'Revisao', tone: 'info' }
     case 'pendente':
