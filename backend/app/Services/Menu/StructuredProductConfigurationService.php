@@ -375,19 +375,18 @@ class StructuredProductConfigurationService
     private function additionSummaries(array $groups): array
     {
         return collect($groups)
-            ->filter(fn (array $group): bool => $group['code'] === 'bife_adicional')
+            ->filter(fn (array $group): bool => $group['selection_mode'] === 'addon')
             ->flatMap(function (array $group): array {
                 return collect($group['component_options'])
-                    ->filter(fn (array $option): bool => $option['slug'] === 'bife')
                     ->map(fn (array $option): array => [
-                        'code' => 'extra_beef',
+                        'code' => $this->additionCode($group, $option),
                         'group_code' => $group['code'],
-                        'name' => 'Bife adicional',
+                        'name' => $this->additionName($option),
                         'enabled' => $this->componentOptionIsConfigured($option),
                         'price_cents' => $option['price_delta_cents'],
                         'price_delta_cents' => $option['price_delta_cents'],
-                        'max_quantity' => $group['max_quantity'] ?? 1,
-                        'requires_traditional_meats' => true,
+                        'max_quantity' => $group['max_quantity'],
+                        'requires_traditional_meats' => $group['code'] === 'bife_adicional',
                         'option_id' => $option['id'],
                         'component' => $this->componentOptionSummary($option),
                     ])
@@ -395,6 +394,24 @@ class StructuredProductConfigurationService
             })
             ->values()
             ->all();
+    }
+
+    /** @param array<string,mixed> $group @param array<string,mixed> $option */
+    private function additionCode(array $group, array $option): string
+    {
+        return $group['code'] === 'bife_adicional' && $option['slug'] === 'bife'
+            ? 'extra_beef'
+            : ($group['code'] === 'adicionais' && $option['slug'] === 'ovo-frito'
+                ? 'extra_egg'
+                : $group['code'].'_'.$option['slug']);
+    }
+
+    /** @param array<string,mixed> $option */
+    private function additionName(array $option): string
+    {
+        return $option['slug'] === 'ovo-frito'
+            ? 'Ovo frito adicional'
+            : $option['name'].' adicional';
     }
 
     /**

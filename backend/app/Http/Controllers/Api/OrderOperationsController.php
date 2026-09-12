@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+use App\Models\CustomerAddress;
 use App\Models\DailyMenuOptionOverride;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -12,6 +13,7 @@ use App\Models\Payment;
 use App\Models\PrintJob;
 use App\Models\Product;
 use App\Models\ProductOption;
+use App\Services\Customers\CustomerAddressBookService;
 use App\Services\Delivery\DeliveryWorkflowService;
 use App\Services\Operational\OperationalCrmPresenter;
 use App\Services\Orders\OrderCleanupService;
@@ -61,6 +63,8 @@ class OrderOperationsController extends Controller
     public function storeDraft(
         Request $request,
         OrderWorkflowService $orders,
+        DeliveryWorkflowService $delivery,
+        CustomerAddressBookService $addressBook,
         OperationalCrmPresenter $presenter,
     ): JsonResponse {
         $company = $this->resolveCompany($request);
@@ -75,6 +79,23 @@ class OrderOperationsController extends Controller
             'kitchen_notes' => ['nullable', 'string', 'max:1000'],
             'pickup_person_name' => ['nullable', 'string', 'max:120'],
             'seller_user_id' => ['nullable', 'integer'],
+            'delivery_address_id' => ['nullable', 'integer'],
+            'delivery_address' => ['nullable', 'array'],
+            'delivery_address.label' => ['nullable', 'string', 'max:80'],
+            'delivery_address.recipient_name' => ['nullable', 'string', 'max:120'],
+            'delivery_address.recipient_phone' => ['nullable', 'string', 'max:40'],
+            'delivery_address.postal_code' => ['nullable', 'string', 'max:16'],
+            'delivery_address.street' => ['required_with:delivery_address', 'string', 'max:255'],
+            'delivery_address.number' => ['nullable', 'string', 'max:40'],
+            'delivery_address.complement' => ['nullable', 'string', 'max:120'],
+            'delivery_address.neighborhood' => ['nullable', 'string', 'max:120'],
+            'delivery_address.city' => ['nullable', 'string', 'max:120'],
+            'delivery_address.state' => ['nullable', 'string', 'size:2'],
+            'delivery_address.country_code' => ['nullable', 'string', 'size:2'],
+            'delivery_address.reference' => ['nullable', 'string', 'max:255'],
+            'delivery_address.latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'delivery_address.longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'save_delivery_address' => ['sometimes', 'boolean'],
         ]);
 
         $customer = null;
@@ -112,6 +133,21 @@ class OrderOperationsController extends Controller
         $validated['customer_name_snapshot'] = $validated['customer_name_snapshot'] !== '' ? $validated['customer_name_snapshot'] : null;
         $validated['customer_phone_snapshot'] = $validated['customer_phone_snapshot'] !== '' ? $validated['customer_phone_snapshot'] : null;
 
+        $selectedDeliveryAddress = null;
+        if (! empty($validated['delivery_address_id'])) {
+            $selectedDeliveryAddress = CustomerAddress::query()
+                ->where('company_id', $company->id)
+                ->where('customer_id', $customer?->id)
+                ->whereKey($validated['delivery_address_id'])
+                ->first();
+
+            if (! $selectedDeliveryAddress) {
+                throw ValidationException::withMessages([
+                    'delivery_address_id' => ['Endereço não pertence ao cliente e restaurante atuais.'],
+                ]);
+            }
+        }
+
         try {
             $order = $orders->createDraft($company, [
                 ...$validated,
@@ -124,6 +160,23 @@ class OrderOperationsController extends Controller
                 'customer_confirmation_required' => true,
                 'status_notes' => 'Rascunho criado pela interface operacional.',
             ]);
+
+            if (($validated['fulfillment_type'] ?? null) === Order::FULFILLMENT_DELIVERY) {
+                if (! $selectedDeliveryAddress
+                    && ! empty($validated['delivery_address'])
+                    && ($validated['save_delivery_address'] ?? false)
+                    && $customer !== null) {
+                    $selectedDeliveryAddress = $addressBook->create($customer, $validated['delivery_address']);
+                }
+
+                if ($selectedDeliveryAddress || ! empty($validated['delivery_address'])) {
+                    $order = $delivery->configureDeliveryAddress(
+                        $order,
+                        $selectedDeliveryAddress,
+                        $validated['delivery_address'] ?? null,
+                    );
+                }
+            }
         } catch (DomainException $exception) {
             return response()->json(['message' => $exception->getMessage()], 422);
         }
@@ -170,6 +223,7 @@ class OrderOperationsController extends Controller
                         'removed_group_codes' => $validated['removed_group_codes'] ?? [],
                         'daily_component_ids' => $validated['daily_component_ids'] ?? [],
                     ],
+                    $validated['additions'] ?? [],
                 );
 
                 $validated['options'] = $selection['options'];
@@ -300,7 +354,7 @@ class OrderOperationsController extends Controller
             'removed_group_codes' => $validated['removed_group_codes'] ?? [],
             'daily_component_ids' => $validated['daily_component_ids'] ?? [],
             'historical_daily_component_ids' => $historicalDailyComponentIds,
-        ]);
+        ], $validated['additions'] ?? []);
         $validated['options'] = $selection['options'];
         foreach (['unit_price_cents', 'selected_components', 'removed_ingredients'] as $key) {
             if (array_key_exists($key, $selection)) {

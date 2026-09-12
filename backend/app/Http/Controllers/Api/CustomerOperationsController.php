@@ -6,7 +6,9 @@ use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\CustomerAddress;
+use App\Services\Customers\CustomerAddressBookService;
 use App\Services\Customers\CustomerDeletionService;
+use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -73,7 +75,7 @@ class CustomerOperationsController extends Controller
         ]);
     }
 
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, CustomerAddressBookService $addresses): JsonResponse
     {
         $company = $this->resolveCompany($request);
 
@@ -81,7 +83,7 @@ class CustomerOperationsController extends Controller
 
         $this->assertUniquePhone($company->id, (string) ($validated['phone'] ?? ''));
 
-        $customer = DB::transaction(function () use ($company, $validated): Customer {
+        $customer = DB::transaction(function () use ($company, $validated, $addresses): Customer {
             $customer = Customer::query()->create([
                 'company_id' => $company->id,
                 'name' => Str::squish($validated['name']),
@@ -91,7 +93,7 @@ class CustomerOperationsController extends Controller
                 'source_channel' => 'manual',
             ]);
 
-            $this->upsertDefaultAddress($customer, $validated['address'] ?? []);
+            $this->storeInitialAddresses($customer, $validated, $addresses);
 
             return $customer->refresh()->load('addresses');
         });
@@ -101,7 +103,7 @@ class CustomerOperationsController extends Controller
         ], 201);
     }
 
-    public function update(Request $request, Customer $customer): JsonResponse
+    public function update(Request $request, Customer $customer, CustomerAddressBookService $addresses): JsonResponse
     {
         $company = $this->resolveCompany($request);
         abort_unless((int) $customer->company_id === (int) $company->id, 404);
@@ -110,7 +112,7 @@ class CustomerOperationsController extends Controller
 
         $this->assertUniquePhone($company->id, (string) ($validated['phone'] ?? ''), $customer->id);
 
-        $customer = DB::transaction(function () use ($customer, $validated): Customer {
+        $customer = DB::transaction(function () use ($customer, $validated, $addresses): Customer {
             $customer->forceFill([
                 'name' => Str::squish($validated['name']),
                 'phone' => $this->normalizedPhoneOrNull($validated['phone'] ?? null),
@@ -118,7 +120,11 @@ class CustomerOperationsController extends Controller
                 'notes' => $validated['notes'] ?? null,
             ])->save();
 
-            $this->upsertDefaultAddress($customer, $validated['address'] ?? []);
+            if (array_key_exists('addresses', $validated)) {
+                $this->syncAddresses($customer, $validated['addresses'] ?? [], $addresses);
+            } elseif (array_key_exists('address', $validated)) {
+                $this->upsertLegacyDefaultAddress($customer, $validated['address'] ?? [], $addresses);
+            }
 
             return $customer->refresh()->load('addresses');
         });
@@ -126,6 +132,57 @@ class CustomerOperationsController extends Controller
         return response()->json([
             'data' => $this->summary($customer),
         ]);
+    }
+
+    public function storeAddress(
+        Request $request,
+        Customer $customer,
+        CustomerAddressBookService $addresses,
+    ): JsonResponse {
+        $this->assertCustomerBelongsToCompany($request, $customer);
+        $address = $addresses->create($customer, $this->validatedAddressPayload($request));
+
+        return response()->json(['data' => $this->addressSummary($address)], 201);
+    }
+
+    public function updateAddress(
+        Request $request,
+        Customer $customer,
+        CustomerAddress $address,
+        CustomerAddressBookService $addresses,
+    ): JsonResponse {
+        $this->assertCustomerBelongsToCompany($request, $customer);
+        $address = $addresses->update($customer, $address, $this->validatedAddressPayload($request));
+
+        return response()->json(['data' => $this->addressSummary($address)]);
+    }
+
+    public function setDefaultAddress(
+        Request $request,
+        Customer $customer,
+        CustomerAddress $address,
+        CustomerAddressBookService $addresses,
+    ): JsonResponse {
+        $this->assertCustomerBelongsToCompany($request, $customer);
+
+        return response()->json(['data' => $this->addressSummary($addresses->makeDefault($customer, $address))]);
+    }
+
+    public function destroyAddress(
+        Request $request,
+        Customer $customer,
+        CustomerAddress $address,
+        CustomerAddressBookService $addresses,
+    ): JsonResponse {
+        $this->assertCustomerBelongsToCompany($request, $customer);
+
+        try {
+            $addresses->delete($customer, $address);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        return response()->json(['data' => ['deleted' => true, 'address_id' => (string) $address->id]]);
     }
 
     public function destroy(
@@ -166,6 +223,47 @@ class CustomerOperationsController extends Controller
             'address.neighborhood' => ['nullable', 'string', 'max:120'],
             'address.city' => ['nullable', 'string', 'max:120'],
             'address.reference' => ['nullable', 'string', 'max:180'],
+            'address.postal_code' => ['nullable', 'string', 'max:16'],
+            'address.state' => ['nullable', 'string', 'size:2'],
+            'addresses' => ['sometimes', 'array', 'max:20'],
+            'addresses.*.id' => ['nullable', 'integer'],
+            'addresses.*.label' => ['required', 'string', 'max:80'],
+            'addresses.*.recipient_name' => ['nullable', 'string', 'max:120'],
+            'addresses.*.recipient_phone' => ['nullable', 'string', 'max:40'],
+            'addresses.*.postal_code' => ['nullable', 'string', 'max:16'],
+            'addresses.*.street' => ['required', 'string', 'max:180'],
+            'addresses.*.number' => ['required', 'string', 'max:40'],
+            'addresses.*.complement' => ['nullable', 'string', 'max:120'],
+            'addresses.*.neighborhood' => ['required', 'string', 'max:120'],
+            'addresses.*.city' => ['required', 'string', 'max:120'],
+            'addresses.*.state' => ['nullable', 'string', 'size:2'],
+            'addresses.*.country_code' => ['nullable', 'string', 'size:2'],
+            'addresses.*.reference' => ['nullable', 'string', 'max:180'],
+            'addresses.*.latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'addresses.*.longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'addresses.*.is_default' => ['sometimes', 'boolean'],
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function validatedAddressPayload(Request $request): array
+    {
+        return $request->validate([
+            'label' => ['required', 'string', 'max:80'],
+            'recipient_name' => ['nullable', 'string', 'max:120'],
+            'recipient_phone' => ['nullable', 'string', 'max:40'],
+            'postal_code' => ['nullable', 'string', 'max:16'],
+            'street' => ['required', 'string', 'max:180'],
+            'number' => ['required', 'string', 'max:40'],
+            'complement' => ['nullable', 'string', 'max:120'],
+            'neighborhood' => ['required', 'string', 'max:120'],
+            'city' => ['required', 'string', 'max:120'],
+            'state' => ['nullable', 'string', 'size:2'],
+            'country_code' => ['nullable', 'string', 'size:2'],
+            'reference' => ['nullable', 'string', 'max:180'],
+            'latitude' => ['nullable', 'numeric', 'between:-90,90'],
+            'longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            'is_default' => ['sometimes', 'boolean'],
         ]);
     }
 
@@ -194,8 +292,11 @@ class CustomerOperationsController extends Controller
     /**
      * @param  array<string, mixed>  $address
      */
-    private function upsertDefaultAddress(Customer $customer, array $address): void
-    {
+    private function upsertLegacyDefaultAddress(
+        Customer $customer,
+        array $address,
+        CustomerAddressBookService $addresses,
+    ): void {
         $hasAddress = collect($address)
             ->filter(fn ($value): bool => is_string($value) && trim($value) !== '')
             ->isNotEmpty();
@@ -204,25 +305,57 @@ class CustomerOperationsController extends Controller
             return;
         }
 
-        CustomerAddress::query()->updateOrCreate(
-            [
-                'company_id' => $customer->company_id,
-                'customer_id' => $customer->id,
-                'is_default' => true,
-            ],
-            [
-                'label' => 'Principal',
-                'recipient_name' => $customer->name,
-                'recipient_phone' => $customer->phone,
-                'street' => $address['street'] ?? null,
-                'number' => $address['number'] ?? null,
-                'complement' => $address['complement'] ?? null,
-                'neighborhood' => $address['neighborhood'] ?? null,
-                'city' => $address['city'] ?? null,
-                'reference' => $address['reference'] ?? null,
-                'country_code' => 'BR',
-            ],
-        );
+        $default = $customer->addresses()->where('is_default', true)->first();
+        $attributes = [
+            'label' => 'Principal',
+            'recipient_name' => $customer->name,
+            'recipient_phone' => $customer->phone,
+            'postal_code' => $address['postal_code'] ?? null,
+            'street' => $address['street'] ?? null,
+            'number' => $address['number'] ?? null,
+            'complement' => $address['complement'] ?? null,
+            'neighborhood' => $address['neighborhood'] ?? null,
+            'city' => $address['city'] ?? null,
+            'state' => $address['state'] ?? null,
+            'reference' => $address['reference'] ?? null,
+            'country_code' => 'BR',
+            'is_default' => true,
+        ];
+
+        $default
+            ? $addresses->update($customer, $default, $attributes)
+            : $addresses->create($customer, $attributes);
+    }
+
+    /** @param array<string, mixed> $validated */
+    private function storeInitialAddresses(Customer $customer, array $validated, CustomerAddressBookService $addresses): void
+    {
+        if (! empty($validated['addresses'])) {
+            foreach ($validated['addresses'] as $address) {
+                $addresses->create($customer, $address);
+            }
+
+            return;
+        }
+
+        $this->upsertLegacyDefaultAddress($customer, $validated['address'] ?? [], $addresses);
+    }
+
+    /** @param list<array<string, mixed>> $payload */
+    private function syncAddresses(Customer $customer, array $payload, CustomerAddressBookService $addresses): void
+    {
+        $kept = [];
+        foreach ($payload as $row) {
+            if (! empty($row['id'])) {
+                $address = $customer->addresses()->whereKey($row['id'])->firstOrFail();
+                $kept[] = $addresses->update($customer, $address, $row)->id;
+            } else {
+                $kept[] = $addresses->create($customer, $row)->id;
+            }
+        }
+
+        $customer->addresses()->whereNotIn('id', $kept)->get()
+            ->each(fn (CustomerAddress $address) => $addresses->delete($customer, $address));
     }
 
     /**
@@ -250,14 +383,52 @@ class CustomerOperationsController extends Controller
             'notes' => $customer->notes ? [$customer->notes] : [],
             'preferences' => [],
             'address' => $defaultAddress ? [
+                'id' => (string) $defaultAddress->id,
+                'label' => $defaultAddress->label,
+                'postal_code' => $defaultAddress->postal_code,
                 'street' => $defaultAddress->street,
                 'number' => $defaultAddress->number,
                 'complement' => $defaultAddress->complement,
                 'neighborhood' => $defaultAddress->neighborhood,
                 'city' => $defaultAddress->city,
+                'state' => $defaultAddress->state,
                 'reference' => $defaultAddress->reference,
             ] : null,
+            'addresses' => $customer->addresses
+                ->sortBy([['is_default', 'desc'], ['id', 'asc']])
+                ->map(fn (CustomerAddress $address): array => $this->addressSummary($address))
+                ->values()
+                ->all(),
         ];
+    }
+
+    /** @return array<string, mixed> */
+    private function addressSummary(CustomerAddress $address): array
+    {
+        return [
+            'id' => (string) $address->id,
+            'label' => $address->label,
+            'recipient_name' => $address->recipient_name,
+            'recipient_phone' => $address->recipient_phone,
+            'postal_code' => $address->postal_code,
+            'street' => $address->street,
+            'number' => $address->number,
+            'complement' => $address->complement,
+            'neighborhood' => $address->neighborhood,
+            'city' => $address->city,
+            'state' => $address->state,
+            'country_code' => $address->country_code,
+            'reference' => $address->reference,
+            'latitude' => $address->latitude !== null ? (float) $address->latitude : null,
+            'longitude' => $address->longitude !== null ? (float) $address->longitude : null,
+            'is_default' => (bool) $address->is_default,
+        ];
+    }
+
+    private function assertCustomerBelongsToCompany(Request $request, Customer $customer): void
+    {
+        $company = $this->resolveCompany($request);
+        abort_unless((int) $customer->company_id === (int) $company->id, 404);
     }
 
     private function phoneDigits(string $phone): string

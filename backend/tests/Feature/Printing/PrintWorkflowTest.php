@@ -248,6 +248,123 @@ class PrintWorkflowTest extends TestCase
         $this->assertStringContainsString('Sem Salada', $html);
     }
 
+    public function test_n8_livre_print_suppresses_only_zero_value_rows_that_duplicate_included_components(): void
+    {
+        $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $orders = app(OrderWorkflowService::class);
+        $order = $orders->createDraft($company, [
+            'customer_name_snapshot' => 'Cliente da Comanda',
+            'order_date' => CarbonImmutable::create(2026, 7, 6),
+        ]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n8-tradicional')->firstOrFail();
+        $componentSlugs = ['arroz-branco', 'feijao-tradicional', 'salada-de-macarrao'];
+        $dailyComponentIds = collect($componentSlugs)
+            ->map(fn (string $slug): int => $this->menuComponentId($company, $slug))
+            ->all();
+        $meatId = $this->menuComponentId($company, 'file-de-frango-na-chapa');
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'daily_component_ids' => $dailyComponentIds,
+            'meat_mode' => 'traditional',
+            'traditional_meat_component_ids' => [$meatId],
+            'structured_options' => [],
+            'item_notes' => 'Com ovo',
+        ])->assertOk();
+
+        $this->assertSame(1, $order->refresh()->items()->count());
+        foreach (['Arroz branco', 'Feijão tradicional', 'Salada de macarrão', 'Filé de frango na chapa'] as $index => $name) {
+            $legacyProduct = Product::query()->create([
+                'company_id' => $company->id,
+                'category_id' => $product->category_id,
+                'name' => $name,
+                'slug' => 'legacy-component-'.$index,
+                'product_type' => Product::TYPE_ADDON,
+                'menu_rule_code' => 'legacy_component_'.$index,
+                'base_price_cents' => 0,
+                'currency' => 'BRL',
+                'is_active' => true,
+                'is_available_by_default' => true,
+                'allows_item_notes' => false,
+                'display_order' => 900 + $index,
+            ]);
+            $order->items()->create([
+                'product_id' => $legacyProduct->id,
+                'product_name' => $legacyProduct->name,
+                'product_type' => $legacyProduct->product_type,
+                'menu_rule_code' => $legacyProduct->menu_rule_code,
+                'quantity' => 1,
+                'unit_price_cents' => 0,
+                'options_total_cents' => 0,
+                'total_price_cents' => 0,
+                'currency' => 'BRL',
+                'sort_order' => 100 + $index,
+            ]);
+        }
+        $courtesy = Product::query()->create([
+            'company_id' => $company->id,
+            'category_id' => $product->category_id,
+            'name' => 'Cortesia da casa',
+            'slug' => 'cortesia-da-casa',
+            'product_type' => Product::TYPE_PRODUCT,
+            'menu_rule_code' => 'cortesia_da_casa',
+            'base_price_cents' => 0,
+            'currency' => 'BRL',
+            'is_active' => true,
+            'is_available_by_default' => true,
+            'allows_item_notes' => false,
+            'display_order' => 999,
+        ]);
+        $orders->addItem($order, $courtesy);
+
+        $job = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $user);
+        $html = $job->html_content;
+
+        $this->assertSame(6, $order->refresh()->items()->count(), 'A impressão não deve alterar a persistência histórica.');
+        $this->assertCount(2, data_get($job->rendered_payload, 'print.items'));
+        $this->assertCount(2, data_get($job->rendered_payload, 'items'));
+        foreach (['Arroz branco', 'Feijão tradicional', 'Salada de macarrão', 'Filé de frango na chapa'] as $name) {
+            $this->assertSame(1, substr_count($html, $name), "{$name} deve aparecer somente dentro da N8 Livre.");
+        }
+        $this->assertStringNotContainsString('1&nbsp; Feijão tradicional', $html);
+        $this->assertStringContainsString('1&nbsp; Cortesia da casa', $html);
+    }
+
+    public function test_n5_egg_addition_prints_quantity_and_price_without_standalone_item(): void
+    {
+        $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'structured_options' => $this->componentChoiceRows($product, [
+                'salada_casa' => ['beterraba'],
+                'carne' => ['porco'],
+            ]),
+            'additions' => [['code' => 'extra_egg', 'quantity' => 2]],
+        ])->assertOk();
+
+        $job = app(PrintWorkflowService::class)->generateTicket($order->refresh(), $user);
+
+        $this->assertSame(1200, $order->refresh()->total_cents);
+        $this->assertSame(1, $order->items()->count());
+        $this->assertCount(1, data_get($job->rendered_payload, 'print.items'));
+        $this->assertSame(2, data_get($job->rendered_payload, 'print.items.0.additions.0.quantity'));
+        $this->assertSame(400, data_get($job->rendered_payload, 'print.items.0.additions.0.amount_cents'));
+        $this->assertSame(1, substr_count($job->html_content, 'Ovo frito adicional'));
+        $this->assertStringContainsString('2&nbsp; Ovo frito adicional', $job->html_content);
+        $this->assertStringContainsString('R$ 4,00', $job->html_content);
+    }
+
     public function test_self_service_ticket_keeps_optional_components_without_delivery_data(): void
     {
         $this->seed([PrintingSeeder::class, SolRestaurantStructuredMenuSeeder::class]);

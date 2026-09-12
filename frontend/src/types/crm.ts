@@ -101,14 +101,27 @@ export type CustomerSummary = {
   creditBalance: number
   notes: string[]
   preferences: string[]
-  address?: {
-    street?: string | null
-    number?: string | null
-    complement?: string | null
-    neighborhood?: string | null
-    city?: string | null
-    reference?: string | null
-  } | null
+  address?: CustomerAddress | null
+  addresses?: CustomerAddress[]
+}
+
+export type CustomerAddress = {
+  id?: string
+  label: string
+  recipient_name?: string | null
+  recipient_phone?: string | null
+  postal_code?: string | null
+  street: string
+  number: string
+  complement?: string | null
+  neighborhood: string
+  city: string
+  state?: string | null
+  country_code?: string | null
+  reference?: string | null
+  latitude?: number | null
+  longitude?: number | null
+  is_default: boolean
 }
 
 export type OrderItem = {
@@ -879,6 +892,10 @@ export type DeliveryCoordinates = {
 }
 
 export type DeliveryAddress = {
+  label?: string | null
+  recipient_name?: string | null
+  recipient_phone?: string | null
+  formatted_address?: string | null
   postal_code?: string | null
   street?: string | null
   number?: string | null
@@ -897,6 +914,8 @@ export type DeliveryMapTask = {
   status: string
   order_status: BackendOrderStatus
   recipient: string | null
+  customer_id: string | null
+  saved_addresses?: CustomerAddress[]
   address: DeliveryAddress | null
   origin: DeliveryCoordinates | null
   destination: DeliveryCoordinates | null

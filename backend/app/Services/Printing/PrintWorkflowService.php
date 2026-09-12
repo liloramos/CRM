@@ -10,7 +10,9 @@ use App\Models\ReceiptTemplate;
 use App\Models\User;
 use App\Services\Orders\OrderWorkflowService;
 use DomainException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class PrintWorkflowService
 {
@@ -502,9 +504,7 @@ class PrintWorkflowService
                 'pickup_notes' => $order->pickup_notes,
                 'address_snapshot' => $order->delivery_address_snapshot,
             ],
-            'items' => $order->items
-                ->sortBy('sort_order')
-                ->values()
+            'items' => $this->printableOrderItems($order)
                 ->map(fn ($item): array => [
                     'quantity' => $item->quantity,
                     'product_name' => $item->product_name,
@@ -565,18 +565,25 @@ class PrintWorkflowService
         bool $isNonFiscalReceipt,
         bool $isOperationalCounterDraft,
     ): array {
-        $items = $order->items->sortBy('sort_order')->values()->map(function ($item) use ($currency): array {
+        $items = $this->printableOrderItems($order)->map(function ($item) use ($currency): array {
             $ingredients = $this->humanList($item->selected_components);
             $additions = [];
 
             foreach ($item->options as $option) {
                 $amount = (int) $option->total_price_cents;
-                $isAddition = $amount > 0 || str_contains(mb_strtolower((string) $option->name), 'adicional');
+                $isAddition = $this->isTicketAddition($option);
                 if ($isAddition && $amount === 0 && $item->product !== null) {
-                    $amount = max(0, (int) $item->total_price_cents - (int) $item->product->base_price_cents);
+                    $amount = data_get($option->metadata, 'addition_code') !== null
+                        ? (int) data_get($option->metadata, 'unit_price_cents', $option->price_delta_cents)
+                            * (int) data_get($option->metadata, 'per_unit_quantity', $option->quantity)
+                            * (int) data_get($option->metadata, 'line_quantity', $item->quantity)
+                        : max(0, (int) $item->total_price_cents - ((int) $item->product->base_price_cents * (int) $item->quantity));
                 }
                 $line = [
-                    'quantity' => (int) $option->quantity,
+                    'quantity' => $isAddition
+                        ? (int) data_get($option->metadata, 'per_unit_quantity', $option->quantity)
+                            * (int) data_get($option->metadata, 'line_quantity', 1)
+                        : (int) $option->quantity,
                     'name' => $option->name,
                     'amount_cents' => $amount,
                     'amount' => $this->money($amount, $currency),
@@ -658,6 +665,74 @@ class PrintWorkflowService
             'order_time' => $order->created_at?->format('H:i'),
             'operational_draft' => $this->operationalDraftData($order, $currency),
         ];
+    }
+
+    /**
+     * Suppresses only malformed legacy child rows that duplicate a structured,
+     * included component of another order item. Other zero-priced items remain.
+     *
+     * @return Collection<int, mixed>
+     */
+    private function printableOrderItems(Order $order): Collection
+    {
+        $items = $order->items->sortBy('sort_order')->values();
+        $includedByItem = $items->mapWithKeys(fn ($item): array => [
+            (int) $item->id => collect([
+                ...$this->humanList($item->selected_components),
+                ...$item->options
+                    ->filter(fn ($option): bool => $this->isIncludedStructuredComponent($option))
+                    ->pluck('name')
+                    ->all(),
+            ])->map(fn (string $name): string => $this->componentKey($name))->filter()->unique()->all(),
+        ]);
+
+        return $items->reject(function ($candidate) use ($includedByItem): bool {
+            if ((int) $candidate->unit_price_cents !== 0
+                || (int) $candidate->options_total_cents !== 0
+                || (int) $candidate->total_price_cents !== 0
+                || $candidate->options->isNotEmpty()) {
+                return false;
+            }
+
+            $candidateKey = $this->componentKey((string) $candidate->product_name);
+            if ($candidateKey === '') {
+                return false;
+            }
+
+            return $includedByItem
+                ->except([(int) $candidate->id])
+                ->contains(fn (array $keys): bool => in_array($candidateKey, $keys, true));
+        })->values();
+    }
+
+    private function isIncludedStructuredComponent($option): bool
+    {
+        if (data_get($option->metadata, 'addition_code') !== null) {
+            return false;
+        }
+
+        return data_get($option->metadata, 'included_in_unit_price') === true
+            && in_array(data_get($option->metadata, 'source'), ['daily_menu_component', 'product_group_component'], true);
+    }
+
+    private function isTicketAddition($option): bool
+    {
+        if (data_get($option->metadata, 'addition_code') !== null) {
+            return true;
+        }
+
+        if ($this->isIncludedStructuredComponent($option)) {
+            return false;
+        }
+
+        return (int) $option->total_price_cents > 0
+            || ((int) $option->price_delta_cents > 0 && (string) $option->option_type === 'addon')
+            || str_contains(mb_strtolower((string) $option->name), 'adicional');
+    }
+
+    private function componentKey(string $value): string
+    {
+        return Str::of($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', '')->toString();
     }
 
     /** @return array<string, mixed>|null */

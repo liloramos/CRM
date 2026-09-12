@@ -164,6 +164,14 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
         Route::get('customers', [CustomerOperationsController::class, 'index'])->name('customers.index');
         Route::post('customers', [CustomerOperationsController::class, 'store'])->name('customers.store');
         Route::patch('customers/{customer}', [CustomerOperationsController::class, 'update'])->name('customers.update');
+        Route::post('customers/{customer}/addresses', [CustomerOperationsController::class, 'storeAddress'])
+            ->name('customers.addresses.store');
+        Route::patch('customers/{customer}/addresses/{address}', [CustomerOperationsController::class, 'updateAddress'])
+            ->name('customers.addresses.update');
+        Route::post('customers/{customer}/addresses/{address}/default', [CustomerOperationsController::class, 'setDefaultAddress'])
+            ->name('customers.addresses.default');
+        Route::delete('customers/{customer}/addresses/{address}', [CustomerOperationsController::class, 'destroyAddress'])
+            ->name('customers.addresses.destroy');
         Route::delete('customers/{customer}', [CustomerOperationsController::class, 'destroy'])
             ->middleware(['permission:customers.manage', 'role:super_admin,admin_gerente'])
             ->name('customers.destroy');
@@ -249,6 +257,8 @@ Route::prefix('api/app')->name('api.app.')->group(function () {
             ->middleware('permission:orders.manage')->name('orders.delivery.geocode');
         Route::patch('orders/{order}/delivery/address', [DeliveryOperationsController::class, 'updateAddress'])
             ->middleware('permission:orders.manage')->name('orders.delivery.address');
+        Route::post('orders/{order}/delivery/address/{address}/select', [DeliveryOperationsController::class, 'selectAddress'])
+            ->middleware('permission:orders.manage')->name('orders.delivery.address.select');
         Route::post('orders/{order}/delivery/recalculate', [DeliveryOperationsController::class, 'recalculate'])
             ->middleware('permission:orders.manage')->name('orders.delivery.recalculate');
         Route::post('orders/{order}/delivery/fee-override', [DeliveryOperationsController::class, 'overrideFee'])

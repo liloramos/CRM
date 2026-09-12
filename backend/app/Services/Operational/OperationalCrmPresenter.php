@@ -356,13 +356,37 @@ class OperationalCrmPresenter
             'notes' => $customer?->notes ? [$customer->notes] : [],
             'preferences' => [],
             'address' => $defaultAddress ? [
+                'id' => (string) $defaultAddress->id,
+                'label' => $defaultAddress->label,
+                'postal_code' => $defaultAddress->postal_code,
                 'street' => $defaultAddress->street,
                 'number' => $defaultAddress->number,
                 'complement' => $defaultAddress->complement,
                 'neighborhood' => $defaultAddress->neighborhood,
                 'city' => $defaultAddress->city,
+                'state' => $defaultAddress->state,
                 'reference' => $defaultAddress->reference,
             ] : null,
+            'addresses' => $customer?->addresses
+                ->sortBy([['is_default', 'desc'], ['id', 'asc']])
+                ->map(fn ($address): array => [
+                    'id' => (string) $address->id,
+                    'label' => $address->label,
+                    'recipient_name' => $address->recipient_name,
+                    'recipient_phone' => $address->recipient_phone,
+                    'postal_code' => $address->postal_code,
+                    'street' => $address->street,
+                    'number' => $address->number,
+                    'complement' => $address->complement,
+                    'neighborhood' => $address->neighborhood,
+                    'city' => $address->city,
+                    'state' => $address->state,
+                    'country_code' => $address->country_code,
+                    'reference' => $address->reference,
+                    'latitude' => $address->latitude !== null ? (float) $address->latitude : null,
+                    'longitude' => $address->longitude !== null ? (float) $address->longitude : null,
+                    'is_default' => (bool) $address->is_default,
+                ])->values()->all() ?? [],
         ];
     }
 
@@ -823,11 +847,16 @@ class OperationalCrmPresenter
 
     private function optionLabel($option): string
     {
-        if ((int) $option->price_delta_cents <= 0 || $option->group_code !== 'bife_adicional') {
+        if ((int) $option->price_delta_cents <= 0
+            || (! in_array((string) $option->group_code, ['bife_adicional'], true)
+                && data_get($option->metadata, 'addition_code') === null)) {
             return $option->name;
         }
 
-        return $option->name.' - '.$this->money((int) $option->price_delta_cents, 'BRL');
+        $quantity = max(1, (int) $option->quantity);
+        $prefix = $quantity > 1 ? $quantity.'x ' : '';
+
+        return $prefix.$option->name.' - '.$this->money((int) $option->price_delta_cents * $quantity, 'BRL');
     }
 
     private function isPaidAddition($option): bool

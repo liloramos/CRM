@@ -110,6 +110,49 @@ class DeliveryWorkflowService
         });
     }
 
+    /** @param array<string, mixed>|null $snapshot */
+    public function configureDeliveryAddress(
+        Order $order,
+        ?CustomerAddress $address = null,
+        ?array $snapshot = null,
+    ): Order {
+        return DB::transaction(function () use ($order, $address, $snapshot): Order {
+            $order = Order::query()->whereKey($order->id)->lockForUpdate()->firstOrFail();
+            $this->orders->assertEditable($order);
+
+            if ($address !== null) {
+                if ((int) $address->company_id !== (int) $order->company_id
+                    || ($order->payer_customer_id !== null && (int) $address->customer_id !== (int) $order->payer_customer_id)) {
+                    throw new DomainException('O endereço selecionado não pertence ao cliente deste pedido.');
+                }
+            }
+
+            $resolvedSnapshot = $this->addressSnapshot($address, $snapshot);
+            if ($resolvedSnapshot === null || trim((string) ($resolvedSnapshot['street'] ?? $resolvedSnapshot['formatted_address'] ?? '')) === '') {
+                throw new DomainException('Informe um endereço de entrega válido.');
+            }
+
+            $order->forceFill([
+                'fulfillment_type' => Order::FULFILLMENT_DELIVERY,
+                'fulfillment_status' => Order::FULFILLMENT_STATUS_PENDING,
+                'delivery_status' => Order::DELIVERY_STATUS_ADDRESS_PENDING,
+                'pickup_status' => null,
+                'delivery_address_id' => $address?->id,
+                'delivery_distance_km' => null,
+                'delivery_fee_base_cents' => 0,
+                'delivery_fee_surcharge_cents' => 0,
+                'delivery_fee_cents' => 0,
+                'delivery_recipient_name' => $resolvedSnapshot['recipient_name'] ?? $order->customer_name_snapshot,
+                'delivery_recipient_phone' => $resolvedSnapshot['recipient_phone'] ?? $order->customer_phone_snapshot,
+                'delivery_reference' => $resolvedSnapshot['reference'] ?? null,
+                'delivery_address_snapshot' => $resolvedSnapshot,
+                'delivery_calculated_at' => null,
+            ])->save();
+
+            return $this->orders->recalculateTotals($order);
+        });
+    }
+
     /**
      * @param  array<string, mixed>  $attributes
      */
@@ -416,7 +459,8 @@ class DeliveryWorkflowService
         if (($attributes['customer_address'] ?? null) instanceof CustomerAddress) {
             $address = $attributes['customer_address'];
 
-            if ((int) $address->company_id !== (int) $order->company_id) {
+            if ((int) $address->company_id !== (int) $order->company_id
+                || ($order->payer_customer_id !== null && (int) $address->customer_id !== (int) $order->payer_customer_id)) {
                 throw new DomainException('Delivery address must belong to the same company as the order.');
             }
 
@@ -431,7 +475,8 @@ class DeliveryWorkflowService
 
         $address = CustomerAddress::query()->findOrFail($addressId);
 
-        if ((int) $address->company_id !== (int) $order->company_id) {
+        if ((int) $address->company_id !== (int) $order->company_id
+            || ($order->payer_customer_id !== null && (int) $address->customer_id !== (int) $order->payer_customer_id)) {
             throw new DomainException('Delivery address must belong to the same company as the order.');
         }
 
@@ -451,6 +496,7 @@ class DeliveryWorkflowService
         return [
             'label' => $address->label,
             'recipient_name' => $address->recipient_name,
+            'recipient_phone' => $address->recipient_phone,
             'postal_code' => $address->postal_code,
             'street' => $address->street,
             'number' => $address->number,
@@ -462,6 +508,7 @@ class DeliveryWorkflowService
             'reference' => $address->reference,
             'latitude' => $address->latitude !== null ? (float) $address->latitude : null,
             'longitude' => $address->longitude !== null ? (float) $address->longitude : null,
+            ...($fallback ?? []),
         ];
     }
 

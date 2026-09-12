@@ -26,7 +26,7 @@ import { AiAutomationPage } from './features/configuracoes/AiAutomationPage'
 import { DashboardPage } from './features/dashboard/DashboardPage'
 import { DeliveryPage } from './features/entregas/DeliveryPage'
 import { FinancePage } from './features/financeiro/FinancePage'
-import { OperationalModalContent, type AutomationModeSelection } from './features/pedidos/OperationalModalContent'
+import { OperationalModalContent, type AutomationModeSelection, type TemporaryDeliveryAddressState } from './features/pedidos/OperationalModalContent'
 import { OrdersPage } from './features/pedidos/OrdersPage'
 import { ReportsPage } from './features/relatorios/ReportsPage'
 import {
@@ -178,6 +178,7 @@ function App() {
   const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([])
   const [itemMeatMode, setItemMeatMode] = useState<MeatModeSelection>('traditional')
   const [itemExtraBeef, setItemExtraBeef] = useState(false)
+  const [itemEggQuantity, setItemEggQuantity] = useState(0)
   const [resolvedProductConfigurations, setResolvedProductConfigurations] = useState<Record<string, ResolvedProductConfiguration>>({})
   const hydratedCopilotResolvedConfigurationsRef = useRef(new Set<string>())
   const [pendingCopilotDraft, setPendingCopilotDraft] = useState<PendingCopilotDraft | null>(null)
@@ -195,6 +196,8 @@ function App() {
   const [newOrderWalkInPhone, setNewOrderWalkInPhone] = useState('')
   const [newOrderNotes, setNewOrderNotes] = useState('')
   const [newOrderFulfillmentType, setNewOrderFulfillmentType] = useState<FulfillmentApiType>('pickup')
+  const [newOrderAddressId, setNewOrderAddressId] = useState('')
+  const [newOrderTemporaryAddress, setNewOrderTemporaryAddress] = useState<TemporaryDeliveryAddressState>(() => emptyTemporaryDeliveryAddress())
   const [newOrderSellerId, setNewOrderSellerId] = useState('')
   const [statusTarget, setStatusTarget] = useState<BackendOrderStatus | ''>('')
   const [statusReason, setStatusReason] = useState('')
@@ -626,6 +629,13 @@ function App() {
         return
       }
 
+      const usesTemporaryAddress = newOrderFulfillmentType === 'delivery'
+        && (newOrderAddressId === 'temporary' || !customer?.addresses?.some((address) => address.id === newOrderAddressId))
+      if (usesTemporaryAddress && [newOrderTemporaryAddress.street, newOrderTemporaryAddress.number, newOrderTemporaryAddress.neighborhood, newOrderTemporaryAddress.city, newOrderTemporaryAddress.state].some((value) => !value.trim())) {
+        setActionError('Preencha rua, número, bairro, cidade e UF do endereço de entrega.')
+        return
+      }
+
       const response = await createDraftOrder({
         payer_customer_id: customer && isPersistedBackendId(customer.id) ? customer.id : null,
         customer_name_snapshot: customerName,
@@ -634,6 +644,20 @@ function App() {
         general_notes: newOrderNotes.trim() || 'Pedido manual criado na operação local.',
         pickup_person_name: customerName,
         seller_user_id: newOrderSellerId || null,
+        delivery_address_id: newOrderFulfillmentType === 'delivery' && !usesTemporaryAddress ? newOrderAddressId : null,
+        delivery_address: usesTemporaryAddress ? {
+          label: newOrderTemporaryAddress.label.trim() || 'Entrega',
+          postal_code: newOrderTemporaryAddress.postalCode.trim() || undefined,
+          street: newOrderTemporaryAddress.street.trim(),
+          number: newOrderTemporaryAddress.number.trim(),
+          complement: newOrderTemporaryAddress.complement.trim() || undefined,
+          neighborhood: newOrderTemporaryAddress.neighborhood.trim(),
+          city: newOrderTemporaryAddress.city.trim(),
+          state: newOrderTemporaryAddress.state.trim().toUpperCase(),
+          country_code: 'BR',
+          reference: newOrderTemporaryAddress.reference.trim() || undefined,
+        } : null,
+        save_delivery_address: usesTemporaryAddress && Boolean(customer) && newOrderTemporaryAddress.saveToCustomer,
       })
 
       setSelectedOrderId(response.data.id)
@@ -738,7 +762,7 @@ function App() {
     setActionError(null)
 
     try {
-      const optionPayload = buildOrderItemOptions(addItemContext.product, selectedOptionIds, itemMeatMode, itemExtraBeef)
+      const optionPayload = buildOrderItemOptions(addItemContext.product, selectedOptionIds, itemMeatMode, itemExtraBeef, itemEggQuantity)
 
       const response = await addOrderItem(addItemContext.orderId, {
         product_id: addItemContext.product.id,
@@ -782,6 +806,7 @@ function App() {
         setSelectedOptionIds([])
         setItemMeatMode('traditional')
         setItemExtraBeef(false)
+        setItemEggQuantity(0)
       }
       await loadSnapshot()
       refreshConversationState()
@@ -806,7 +831,7 @@ function App() {
         quantity: itemQuantity,
         item_notes: itemNotes,
         beneficiary_name: itemHasDifferentBeneficiary ? beneficiaryName.trim() || null : null,
-        ...buildOrderItemOptions(addItemContext.product, selectedOptionIds, itemMeatMode, itemExtraBeef),
+        ...buildOrderItemOptions(addItemContext.product, selectedOptionIds, itemMeatMode, itemExtraBeef, itemEggQuantity),
       })
       applyUpdatedOrder(response.data)
       setActiveModal(null)
@@ -841,6 +866,7 @@ function App() {
     setSelectedOptionIds([])
     setItemMeatMode('traditional')
     setItemExtraBeef(false)
+    setItemEggQuantity(0)
 
     if (activeModal !== 'add-product') {
       return
@@ -1352,6 +1378,7 @@ function App() {
     setSelectedOptionIds(copilotProposalOptionTokens(product, item))
     setItemMeatMode(item.selections.meat_mode === 'beef_only' || item.selections.meat_mode === 'none' ? item.selections.meat_mode : 'traditional')
     setItemExtraBeef(Number(item.selections.extra_beef ?? 0) > 0)
+    setItemEggQuantity(Math.max(0, Number(item.selections.extra_egg ?? 0)))
     if (targetChoice === 'ACTIVE_ORDER' && activeTarget) {
       const order = snapshot?.orders.find((candidate) => candidate.id === activeTarget.id)
       if (!order || !isPersistedBackendId(order.id)) return false
@@ -1381,6 +1408,7 @@ function App() {
     setSelectedOptionIds(copilotProposalOptionTokens(product, item))
     setItemMeatMode(item.selections.meat_mode === 'beef_only' || item.selections.meat_mode === 'none' ? item.selections.meat_mode : 'traditional')
     setItemExtraBeef(Number(item.selections.extra_beef ?? 0) > 0)
+    setItemEggQuantity(Math.max(0, Number(item.selections.extra_egg ?? 0)))
     setAddItemContext({
       orderId: order.id,
       orderCode: order.code,
@@ -1659,6 +1687,7 @@ function App() {
     setSelectedOptionIds([])
     setItemMeatMode('traditional')
     setItemExtraBeef(false)
+    setItemEggQuantity(0)
 
     const product = selectedProductForAddItem(snapshot?.products ?? [], selectedProductId)
 
@@ -1701,6 +1730,7 @@ function App() {
     setSelectedOptionIds(draft.selectedOptionIds)
     setItemMeatMode(draft.meatMode)
     setItemExtraBeef(draft.extraBeef)
+    setItemEggQuantity(draft.eggQuantity)
     setItemQuantity(item.quantity)
     setItemNotes(item.edit?.itemNotes ?? '')
     setBeneficiaryName(item.edit?.beneficiaryName ?? '')
@@ -1740,6 +1770,7 @@ function App() {
     setSelectedOptionIds([])
     setItemMeatMode('traditional')
     setItemExtraBeef(false)
+    setItemEggQuantity(0)
   }
 
   function applyUpdatedOrder(order: OperationalSnapshot['orders'][number], shouldSelect = true) {
@@ -1789,6 +1820,8 @@ function App() {
     setNewOrderWalkInPhone('')
     setNewOrderNotes('')
     setNewOrderFulfillmentType('pickup')
+    setNewOrderAddressId('')
+    setNewOrderTemporaryAddress(emptyTemporaryDeliveryAddress())
     setNewOrderSellerId('')
   }
 
@@ -2086,6 +2119,7 @@ function App() {
           isActionBusy={isActionBusy}
           isSearchingCustomers={isSearchingCustomers}
           itemExtraBeef={itemExtraBeef}
+          itemEggQuantity={itemEggQuantity}
           itemNotes={itemNotes}
           itemMeatMode={itemMeatMode}
           itemQuantity={itemQuantity}
@@ -2096,6 +2130,8 @@ function App() {
           newOrderWalkInPhone={newOrderWalkInPhone}
           newOrderCustomerQuery={newOrderCustomerQuery}
           newOrderCustomerResults={newOrderCustomerResults}
+          newOrderAddressId={newOrderAddressId}
+          newOrderTemporaryAddress={newOrderTemporaryAddress}
           newOrderFulfillmentType={newOrderFulfillmentType}
           newOrderNotes={newOrderNotes}
           newOrderSellerId={newOrderSellerId}
@@ -2115,12 +2151,21 @@ function App() {
           }}
           onItemHasDifferentBeneficiaryChange={setItemHasDifferentBeneficiary}
           onItemExtraBeefChange={setItemExtraBeef}
+          onItemEggQuantityChange={setItemEggQuantity}
           onItemMeatModeChange={handleMeatModeChange}
           onNewCustomerModeChange={setNewCustomerMode}
           onNewCustomerNameChange={setNewCustomerName}
           onNewCustomerPhoneChange={setNewCustomerPhone}
           onNewOrderCustomerQueryChange={setNewOrderCustomerQuery}
-          onNewOrderFulfillmentTypeChange={setNewOrderFulfillmentType}
+          onNewOrderAddressIdChange={setNewOrderAddressId}
+          onNewOrderTemporaryAddressChange={setNewOrderTemporaryAddress}
+          onNewOrderFulfillmentTypeChange={(value) => {
+            setNewOrderFulfillmentType(value)
+            if (value === 'delivery') {
+              const preferred = selectedNewOrderCustomer?.addresses?.find((address) => address.is_default) ?? selectedNewOrderCustomer?.addresses?.[0]
+              setNewOrderAddressId(preferred?.id ?? 'temporary')
+            }
+          }}
           onNewOrderNotesChange={setNewOrderNotes}
           onNewOrderSellerIdChange={setNewOrderSellerId}
           onNewOrderWalkInPhoneChange={setNewOrderWalkInPhone}
@@ -2129,7 +2174,11 @@ function App() {
           onPaymentNotesChange={setPaymentNotes}
           onPaymentVoidReasonChange={setPaymentVoidReason}
           onProductChange={handleProductChange}
-          onSelectNewOrderCustomer={setSelectedNewOrderCustomer}
+          onSelectNewOrderCustomer={(customer) => {
+            setSelectedNewOrderCustomer(customer)
+            const preferred = customer?.addresses?.find((address) => address.is_default) ?? customer?.addresses?.[0]
+            setNewOrderAddressId(newOrderFulfillmentType === 'delivery' ? preferred?.id ?? 'temporary' : '')
+          }}
           onSelectedOptionsChange={setSelectedOptionIds}
           onStatusNotesChange={setStatusNotes}
           onStatusReasonChange={setStatusReason}
@@ -2265,6 +2314,7 @@ function buildOrderItemOptions(
   selectedOptionIds: string[],
   meatMode: MeatModeSelection,
   extraBeefSelected: boolean,
+  eggQuantity: number,
 ): OrderItemOptionPayload {
   const groups = product.structuredGroups ?? []
 
@@ -2305,10 +2355,13 @@ function buildOrderItemOptions(
     quantity?: number
   }> = []
   const hasBeefRules = product.meatConfiguration !== null && product.meatConfiguration !== undefined
+  const additions = [
+    ...(eggQuantity > 0 ? [{ code: 'extra_egg', quantity: Math.max(1, Math.floor(eggQuantity)) }] : []),
+  ]
   const genericNoMeatGroups = groups.filter((group) => selectedTokens.has(`no-meat:${group.code}`)).map((group) => group.code)
 
   for (const group of groups) {
-    if (hasBeefRules && ['variacao_bife', 'bife_adicional'].includes(group.code)) {
+    if (group.selection_mode === 'addon' || (hasBeefRules && ['variacao_bife', 'bife_adicional'].includes(group.code))) {
       continue
     }
 
@@ -2368,7 +2421,7 @@ function buildOrderItemOptions(
       daily_component_ids: dailyComponentIds,
       meat_mode: 'none',
       traditional_meat_component_ids: [],
-      additions: [],
+      additions,
     }
   }
 
@@ -2379,6 +2432,7 @@ function buildOrderItemOptions(
       removed_component_ids: removedComponentIds,
       removed_group_codes: removedGroupCodes,
       daily_component_ids: dailyComponentIds,
+      additions,
     }
   }
 
@@ -2395,7 +2449,7 @@ function buildOrderItemOptions(
       daily_component_ids: dailyComponentIds,
       meat_mode: 'beef_only',
       traditional_meat_component_ids: [],
-      additions: [],
+      additions,
     }
   }
 
@@ -2412,7 +2466,7 @@ function buildOrderItemOptions(
       daily_component_ids: dailyComponentIds,
       meat_mode: 'none',
       traditional_meat_component_ids: [],
-      additions: [],
+      additions,
     }
   }
 
@@ -2435,18 +2489,22 @@ function buildOrderItemOptions(
     daily_component_ids: dailyComponentIds,
     meat_mode: 'traditional',
     traditional_meat_component_ids: dailyMeatIds,
-    additions: extraBeefSelected ? [{ code: 'extra_beef', quantity: 1 }] : [],
+    additions: [
+      ...(extraBeefSelected ? [{ code: 'extra_beef', quantity: 1 }] : []),
+      ...additions,
+    ],
   }
 }
 
 function hydrateEditableOrderItem(
   product: Product,
   item: OrderItem,
-): { selectedOptionIds: string[]; meatMode: MeatModeSelection; extraBeef: boolean } {
+): { selectedOptionIds: string[]; meatMode: MeatModeSelection; extraBeef: boolean; eggQuantity: number } {
   const composition = item.edit?.composition ?? {}
   const tokens = new Set<string>()
   let meatMode: MeatModeSelection = composition.meat_mode ?? 'traditional'
   let extraBeef = (composition.additions ?? []).some((addition) => addition.code === 'extra_beef' && addition.quantity > 0)
+  let eggQuantity = composition.additions?.find((addition) => addition.code === 'extra_egg')?.quantity ?? 0
 
   for (const option of composition.structured_options ?? []) {
     if (option.component_link_id) tokens.add(componentOptionToken(option.component_link_id))
@@ -2471,6 +2529,7 @@ function hydrateEditableOrderItem(
     } else if (source === 'product_group_component' && typeof metadata.product_group_component_id === 'number') {
       if (option.groupCode === 'variacao_bife') meatMode = 'beef_only'
       else if (option.groupCode === 'bife_adicional') extraBeef = true
+      else if (metadata.addition_code === 'extra_egg') eggQuantity = Number(metadata.per_unit_quantity ?? option.quantity ?? 0)
       else tokens.add(componentOptionToken(metadata.product_group_component_id))
     } else if (source === 'product_group_product' && typeof metadata.product_group_product_id === 'number') {
       tokens.add(productOptionToken(metadata.product_group_product_id))
@@ -2484,7 +2543,7 @@ function hydrateEditableOrderItem(
     if (component) tokens.add(removedComponentToken(component.component_id))
   }
 
-  return { selectedOptionIds: [...tokens], meatMode, extraBeef }
+  return { selectedOptionIds: [...tokens], meatMode, extraBeef, eggQuantity }
 }
 
 function assertStructuredComponentOptionAvailable(option: StructuredComponentOption) {
@@ -2632,6 +2691,21 @@ function primaryLabelForModal(modal: AppModal): string {
       return 'Confirmar alteração'
     default:
       return 'Confirmar'
+  }
+}
+
+function emptyTemporaryDeliveryAddress(): TemporaryDeliveryAddressState {
+  return {
+    label: 'Casa',
+    postalCode: '',
+    street: '',
+    number: '',
+    complement: '',
+    neighborhood: '',
+    city: '',
+    state: '',
+    reference: '',
+    saveToCustomer: false,
   }
 }
 

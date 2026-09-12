@@ -40,6 +40,7 @@ class OrderItemSelectionValidator
         array $meatSelection = [],
         int $itemQuantity = 1,
         array $compositionSelection = [],
+        array $additions = [],
     ): array {
         $product->loadMissing([
             'optionGroups.componentOptions.component',
@@ -63,6 +64,18 @@ class OrderItemSelectionValidator
         $componentRows = collect($rows)
             ->filter(fn (array $row): bool => ! empty($row['component_link_id']))
             ->keyBy(fn (array $row): int => (int) $row['component_link_id']);
+
+        foreach ($this->additionRows($product, $additions) as $additionRow) {
+            $linkId = (int) $additionRow['component_link_id'];
+            if ($componentRows->has($linkId)
+                && (int) data_get($componentRows->get($linkId), 'quantity', 1) !== (int) $additionRow['quantity']) {
+                throw ValidationException::withMessages([
+                    'additions' => ['A mesma adição foi informada com quantidades diferentes.'],
+                ]);
+            }
+
+            $componentRows->put($linkId, $additionRow);
+        }
 
         $productRows = collect($rows)
             ->filter(fn (array $row): bool => ! empty($row['product_link_id']))
@@ -101,6 +114,7 @@ class OrderItemSelectionValidator
                     $selectedComponents,
                     $removedIngredients,
                     $meatSelection,
+                    $itemQuantity,
                 ),
             ];
         }
@@ -181,6 +195,7 @@ class OrderItemSelectionValidator
                     $compositionSelection,
                     $selectedComponents,
                     $removedIngredients,
+                    itemQuantity: $itemQuantity,
                 ),
             ];
         }
@@ -619,6 +634,7 @@ class OrderItemSelectionValidator
         array &$selectedComponents,
         array &$removedIngredients,
         array $meatSelection = [],
+        int $itemQuantity = 1,
     ): array {
         $removedGroupCodes = $this->stringList($compositionSelection['removed_group_codes'] ?? []);
         if (in_array($group->code, $removedGroupCodes, true)) {
@@ -710,7 +726,7 @@ class OrderItemSelectionValidator
 
         foreach ($selectedComponentLinks as $link) {
             $sourceRow = $componentRows->get((int) $link->id);
-            $row = $this->componentSelectionRow($company, $product, $date, $group, $link, $sourceRow, 'selected_choice');
+            $row = $this->componentSelectionRow($company, $product, $date, $group, $link, $sourceRow, 'selected_choice', $itemQuantity);
             $quantityTotal += (int) $row['quantity'];
             $validatedRows[] = $row;
         }
@@ -790,6 +806,7 @@ class OrderItemSelectionValidator
         ProductGroupComponent $link,
         ?array $sourceRow,
         ?string $compositionRole = null,
+        int $itemQuantity = 1,
     ): array {
         if (! $link->is_active || $link->requires_confirmation) {
             throw new DomainException("{$link->component->name} nao esta disponivel para este produto.");
@@ -803,13 +820,21 @@ class OrderItemSelectionValidator
             throw new DomainException("{$link->component->name} esta indisponivel hoje.");
         }
 
+        $quantity = $this->selectionQuantity($group, $link->included_quantity, $sourceRow);
+        $isPaidAddition = $group->selection_mode === ProductSelectionMode::Addon
+            && ! (bool) $group->included_in_base_price;
+        $additionCode = $isPaidAddition ? $this->additionCode($group, $link) : null;
+
         return [
             'product_option_id' => null,
-            'name' => $link->component->name,
+            'name' => $isPaidAddition ? $this->additionName($link) : $link->component->name,
             'option_type' => $group->selection_mode->value,
             'group_code' => $group->code,
-            'quantity' => $this->selectionQuantity($group, $link->included_quantity, $sourceRow),
+            'quantity' => $quantity,
             'price_delta_cents' => (int) $link->price_delta_cents,
+            'total_price_cents' => $isPaidAddition
+                ? (int) $link->price_delta_cents * $quantity * max(1, $itemQuantity)
+                : 0,
             'metadata' => [
                 'source' => 'product_group_component',
                 'product_option_group_id' => $group->id,
@@ -820,8 +845,67 @@ class OrderItemSelectionValidator
                 'final_price_cents' => $link->final_price_cents,
                 'composition_role' => $compositionRole,
                 'included_in_unit_price' => (bool) $group->included_in_base_price,
+                ...($additionCode === null ? [] : [
+                    'addition_code' => $additionCode,
+                    'per_unit_quantity' => $quantity,
+                    'line_quantity' => max(1, $itemQuantity),
+                    'unit_price_cents' => (int) $link->price_delta_cents,
+                ]),
             ],
         ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $additions
+     * @return list<array{component_link_id:int,quantity:int}>
+     */
+    private function additionRows(Product $product, array $additions): array
+    {
+        $available = $product->optionGroups
+            ->filter(fn (ProductOptionGroup $group): bool => $group->selection_mode === ProductSelectionMode::Addon)
+            ->flatMap(fn (ProductOptionGroup $group) => $group->componentOptions->map(fn (ProductGroupComponent $link): array => [
+                'code' => $this->additionCode($group, $link),
+                'link' => $link,
+            ]))
+            ->keyBy('code');
+        $rows = [];
+
+        foreach ($additions as $addition) {
+            $code = (string) ($addition['code'] ?? '');
+            if ($code === 'extra_beef') {
+                continue;
+            }
+
+            $configured = $available->get($code);
+            if (! is_array($configured) || ! ($configured['link'] ?? null) instanceof ProductGroupComponent) {
+                throw ValidationException::withMessages([
+                    'additions' => ['Uma das adições não está configurada para este produto.'],
+                ]);
+            }
+
+            $rows[] = [
+                'component_link_id' => (int) $configured['link']->id,
+                'quantity' => max(1, (int) ($addition['quantity'] ?? 1)),
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function additionCode(ProductOptionGroup $group, ProductGroupComponent $link): string
+    {
+        return $group->code === 'bife_adicional' && $link->component?->slug === 'bife'
+            ? 'extra_beef'
+            : ($group->code === 'adicionais' && $link->component?->slug === 'ovo-frito'
+                ? 'extra_egg'
+                : $group->code.'_'.$link->component?->slug);
+    }
+
+    private function additionName(ProductGroupComponent $link): string
+    {
+        return $link->component?->slug === 'ovo-frito'
+            ? 'Ovo frito adicional'
+            : $this->componentName($link).' adicional';
     }
 
     /**

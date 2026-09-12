@@ -310,7 +310,7 @@ final class CopilotAutomationService
                 try {
                     $this->deliveryRouting->setCoordinates($order, (float) $location['latitude'], (float) $location['longitude']);
                 } catch (\DomainException) {
-                    if ($order->fresh()->delivery_address_id === null) {
+                    if (empty($order->fresh()->delivery_address_snapshot)) {
                         throw new \DomainException('copilot_delivery_location_not_persisted');
                     }
                 }

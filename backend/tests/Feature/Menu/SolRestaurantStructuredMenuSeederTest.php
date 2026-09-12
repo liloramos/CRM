@@ -38,8 +38,8 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         $this->assertSame(7, ProductCategory::query()->where('company_id', $company->id)->count());
         $this->assertSame(33, Product::query()->where('company_id', $company->id)->count());
         $this->assertSame(70, DB::table('menu_components')->where('company_id', $company->id)->count());
-        $this->assertSame(12, DB::table('product_option_groups')->where('company_id', $company->id)->count());
-        $this->assertSame(33, DB::table('product_group_components')->count());
+        $this->assertSame(13, DB::table('product_option_groups')->where('company_id', $company->id)->count());
+        $this->assertSame(34, DB::table('product_group_components')->count());
         $this->assertSame(5, DB::table('product_group_products')->count());
         $this->assertSame(1, WeeklyMenu::query()->where('company_id', $company->id)->count());
         $this->assertSame(207, WeeklyMenuComponentItem::query()->where('company_id', $company->id)->count());
@@ -52,7 +52,7 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
 
-        $this->assertSame(['bases_fixas', 'salada_casa', 'carne'], $this->groupCodes('n5-casa'));
+        $this->assertSame(['bases_fixas', 'salada_casa', 'carne', 'adicionais'], $this->groupCodes('n5-casa'));
 
         $this->assertGroup('n5-casa', 'bases_fixas', [
             'selection_mode' => ProductSelectionMode::Fixed,
@@ -94,6 +94,23 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
             'included_in_base_price' => true,
         ]);
         $this->assertSame(['almondega', 'porco', 'frango-ao-molho'], $this->componentSlugs('n5-casa', 'carne'));
+
+        $this->assertGroup('n5-casa', 'adicionais', [
+            'selection_mode' => ProductSelectionMode::Addon,
+            'selection_actor' => ProductSelectionActor::Customer,
+            'is_required' => false,
+            'min_choices' => 0,
+            'max_choices' => 1,
+            'min_quantity' => 0,
+            'max_quantity' => null,
+            'same_component_only' => true,
+            'included_in_base_price' => false,
+        ]);
+        $this->assertSame(['ovo-frito'], $this->componentSlugs('n5-casa', 'adicionais'));
+        $egg = $this->componentLinks('n5-casa', 'adicionais')->firstOrFail();
+        $this->assertSame(200, $egg->price_delta_cents);
+        $this->assertFalse($egg->requires_confirmation);
+        $this->assertTrue($egg->is_active);
     }
 
     public function test_n8_casa_has_exact_official_groups_and_components(): void
@@ -266,15 +283,18 @@ class SolRestaurantStructuredMenuSeederTest extends TestCase
         }
     }
 
-    public function test_no_paid_ovo_group_or_legacy_ovo_product_link_is_created(): void
+    public function test_paid_egg_is_structured_only_for_n5_without_legacy_standalone_product(): void
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);
 
         $this->assertFalse(ProductOptionGroup::query()->where('code', 'like', '%ovo%')->exists());
+        $this->assertTrue(ProductGroupComponent::query()
+            ->whereHas('component', fn ($query) => $query->where('slug', 'ovo-frito'))
+            ->whereHas('group.product', fn ($query) => $query->where('slug', 'n5-casa'))
+            ->exists());
         $this->assertFalse(ProductGroupComponent::query()
             ->whereHas('component', fn ($query) => $query->where('slug', 'ovo-frito'))
             ->whereHas('group.product', fn ($query) => $query->whereIn('slug', [
-                'n5-casa',
                 'n8-casa',
                 'n8-tradicional',
                 'n9-tradicional',

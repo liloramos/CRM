@@ -131,7 +131,7 @@ class StructuredMenuReadApiTest extends TestCase
         $service = app(StructuredProductConfigurationService::class);
 
         $n5 = $service->configuration($this->product('n5-casa'), $company, $date);
-        $this->assertSame(['bases_fixas', 'salada_casa', 'carne'], array_column($n5['groups'], 'code'));
+        $this->assertSame(['bases_fixas', 'salada_casa', 'carne', 'adicionais'], array_column($n5['groups'], 'code'));
         $this->assertSame('fixed', $this->group($n5, 'bases_fixas')['selection_mode']);
         $this->assertSame('system', $this->group($n5, 'bases_fixas')['selection_actor']);
         $this->assertSame(['arroz', 'feijao', 'macarrao', 'mandioca'], $this->componentOptionSlugs($n5, 'bases_fixas'));
@@ -140,6 +140,10 @@ class StructuredMenuReadApiTest extends TestCase
         $this->assertSame(['almondega', 'porco', 'frango-ao-molho'], $this->componentOptionSlugs($n5, 'carne'));
         $this->assertSame(1, $this->group($n5, 'carne')['min_quantity']);
         $this->assertSame(1, $this->group($n5, 'carne')['max_quantity']);
+        $this->assertSame(['ovo-frito'], $this->componentOptionSlugs($n5, 'adicionais'));
+        $this->assertSame('extra_egg', $n5['additions'][0]['code']);
+        $this->assertSame(200, $n5['additions'][0]['price_cents']);
+        $this->assertNull($n5['additions'][0]['max_quantity']);
 
         $n8 = $service->configuration($this->product('n8-casa'), $company, $date);
         $this->assertSame(['bases_fixas', 'salada', 'carne'], array_column($n8['groups'], 'code'));

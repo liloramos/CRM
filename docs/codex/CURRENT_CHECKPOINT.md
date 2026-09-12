@@ -825,3 +825,92 @@ O gate automatizado de Conversational Intelligence está verde. A implementaçã
 - Pint nos PHP tocados, `composer run lint:check` e `git diff --check` — PASS; frontend não foi tocado nesta rodada e permanece com a validação anterior; nenhuma migration foi criada ou alterada;
 - status atual: **V1.0.0 FREEZE CANDIDATE — READY**. Permanecem externos ao gate automatizado: smoke de staging/Meta/Epson e rotação obrigatória da credencial OpenAI antes de produção;
 - nenhum stage, commit, push, merge, tag, deploy, stash, reset, clean ou troca de branch foi realizado.
+
+---
+
+## Múltiplos endereços, snapshots de entrega e Maps — 2026-09-12
+
+### Arquitetura final
+
+- `Customer` continua usando a relação canônica `hasMany(CustomerAddress)`; não foi criada tabela paralela nem foram adicionados campos legados ao cliente;
+- `CustomerAddressBookService` centraliza criação, edição, remoção e troca de padrão sob transação e lock do cliente; o primeiro endereço vira padrão e o banco impede dois padrões para o mesmo cliente;
+- os payloads operacionais mantêm `address` como compatibilidade (endereço padrão) e passam a expor `addresses[]` completo;
+- o modal Clientes permite listar, adicionar, editar, remover e definir o padrão, com CEP, label e os campos operacionais já existentes;
+- a criação de pedido permite escolher explicitamente um endereço salvo ou usar endereço temporário; o temporário só é salvo no cadastro quando a equipe marca essa opção;
+- a tela Entregas permite trocar o destino por outro endereço salvo e também salvar uma correção manual no cadastro quando isso é explícito;
+- `Order.delivery_address_snapshot` é a fonte canônica para geocoding, rota, distância, taxa, mapa, impressão e histórico; `delivery_address_id` é apenas referência de proveniência;
+- editar ou remover `CustomerAddress` não altera pedidos anteriores. A remoção só é bloqueada para vínculos legados sem snapshot; referências com snapshot podem ser anuladas pelas FKs existentes sem perda histórica;
+- localização/endereço recebido pelo WhatsApp passa a ser snapshot temporário do pedido e não cria endereço reutilizável silenciosamente. Endereços salvos aparecem no contexto como candidatos, com política de confirmação explícita;
+- Maps preserva a separação existente: chave server apenas no backend, browser key em `VITE_DELIVERY_GOOGLE_BROWSER_API_KEY` e providers fake em dev/test. O fallback sem configuração continua operacional.
+
+### Migration
+
+- criada `2026_09_12_000013_harden_customer_address_defaults.php`;
+- backfill aditivo: corrige `company_id` a partir do cliente, preenche label ausente com `Principal`, preserva o primeiro default válido (ou escolhe deterministicamente o primeiro endereço) e remove defaults duplicados;
+- índice parcial único `customer_addresses_one_default_per_customer` garante no máximo um endereço padrão por cliente em PostgreSQL e SQLite;
+- não foi executado `migrate:fresh`, `refresh`, `wipe` ou qualquer operação destrutiva. A migration deve seguir o runbook normal, com backup e `php artisan migrate --force` somente no deploy aprovado.
+
+### Arquivos principais alterados
+
+- backend: controllers de Customer/Order/Delivery, `CustomerAddressBookService`, `DeliveryWorkflowService`, `DeliveryRoutingService`, presenter operacional, contexto/automação do Copilot, rotas e testes focados;
+- frontend: tipos e `crm.service.ts`, `CustomerEditor`, fluxo de novo pedido em `App`/`OperationalModalContent`, tela/CSS de Entregas e estilos globais;
+- documentação: este checkpoint e `docs/operations/PRODUCTION_DEPLOYMENT.md` com o procedimento externo de Maps.
+
+### Validação
+
+- grupos diretamente afetados (Customer/Order/Delivery/Copilot/turn loop): 71 testes / 898 assertions — PASS;
+- grupo final Customer/Delivery/Operational: 34 testes / 253 assertions — PASS;
+- suíte backend integral com limite temporário de 512 MB: **774 testes / 7.182 assertions — PASS**;
+- `composer run lint:check`: PASS;
+- `npm run build`: PASS, apenas warning preexistente de chunk grande;
+- `npm run lint`: PASS após correção do novo código, mantendo apenas o warning preexistente em `UserAvatar.tsx`;
+- `git diff --check`: PASS;
+- nenhuma chamada real a Google, OpenAI ou Meta; nenhum `.env`, servidor, Cloudflare ou infraestrutura foi alterado.
+
+### Riscos e próximos gates
+
+- executar a migration primeiro em staging aprovado e repetir smoke de Clientes → Pedido recorrente → Entrega → rota/taxa;
+- validar manualmente as restrições das duas chaves Google, origem do restaurante e renderização Maps/Places/Routes no domínio de staging;
+- confirmar no smoke WhatsApp que endereço padrão é apenas sugerido e que clientes com múltiplos endereços recebem a pergunta de escolha;
+- o freeze automatizado está verde, mas esta atualização posterior ao hash `5e0cb664c0f63a0fc203b7b82c6415c3545859c8` exige novo smoke/staging antes de qualquer promoção;
+- nenhum commit, push, merge, tag ou deploy foi realizado.
+
+---
+
+## Comanda sem componente duplicado e ovo estruturado na N5 — 2026-09-12
+
+### Causa e prevenção da duplicação
+
+- o fluxo estruturado atual já persiste arroz, feijão, salada e carne como composição/opções do `OrderItem` da marmita; ele não cria um segundo item para esses componentes;
+- a duplicação observada exige uma linha legada ou malformada persistida separadamente como `OrderItem` de valor zero, com nome igual ao componente já incluído no item pai. A impressão enumerava todos os itens persistidos e, por isso, também exibia essa linha autônoma;
+- `OrderWorkflowService::assertNotDuplicatedIncludedComponent` agora protege tanto inclusão quanto edição: somente um candidato de preço unitário zero, sem opção paga, é comparado aos componentes incluídos nos demais itens do mesmo pedido. A identidade é normalizada para ASCII, minúsculas e caracteres alfanuméricos;
+- a comparação usa `selected_components` e apenas opções marcadas como incluídas no preço (`included_in_unit_price=true`) e originadas de `daily_menu_component` ou `product_group_component`, excluindo opções com `addition_code`;
+- em coincidência exata, a operação falha antes de persistir. Produto gratuito/cortesia com outro nome, item independente não relacionado, produto de preço positivo e item com adicional pago continuam permitidos;
+- a regressão cobre N8 Livre com Feijão tradicional e Arroz branco: ambos permanecem somente na composição e tentativas de linhas separadas de R$ 0,00 não são persistidas. Também comprova a permanência de cortesia real, componente gratuito não relacionado, item independente pago e item de base zero com opção paga.
+
+### Compatibilidade de comandas históricas
+
+- `PrintWorkflowService::printableOrderItems` filtra somente a forma histórica malformada: linha com preço unitário, opções e total todos zerados, sem opções próprias, cujo nome normalizado coincide com componente estruturado incluído em outro item do mesmo pedido;
+- a proteção vale no payload de impressão e no ticket humano, sem alterar ou apagar a persistência histórica;
+- a regressão injeta linhas históricas para Arroz branco, Feijão tradicional, Salada de macarrão e Filé de frango na chapa e comprova uma única ocorrência de cada nome dentro da N8 Livre; uma Cortesia da casa de valor zero continua impressa.
+
+### N5 Casa + ovo
+
+- ovo foi modelado no catálogo como adicional estruturado opcional da N5 Casa, grupo `adicionais`, componente `ovo-frito`, código de domínio `extra_egg` e preço de R$ 2,00 por unidade; não foi criado produto avulso genérico nem alterado o preço base da N5;
+- a quantidade do adicional fica na metadata da opção (`addition_code`, `per_unit_quantity`, `line_quantity` e `unit_price_cents`), e o total é `R$ 2,00 × ovos por unidade × quantidade da linha`;
+- pedido manual, edição, snapshot, presenter e impressão preservam quantidade e valor. N5 sem ovo mantém o preço base; um ovo soma R$ 2,00 e dois ovos somam R$ 4,00;
+- N8 e N9 rejeitam `extra_egg`; o Copilot mantém `extra_egg: 0` como shape neutro e só converte menções explicitamente ancoradas na mensagem (`N5 com ovo`, `N5 mais um ovo`, `N5 com 2 ovos`) em adicional pago, sem transformar inferência ou observação livre silenciosamente;
+- criada a migration aditiva `2026_09_12_000014_configure_n5_egg_addition.php` para aplicar a configuração em instalações existentes; nenhum banco externo ou ambiente foi alterado.
+
+### Validação final posterior à proteção no workflow
+
+- Orders + Printing: **70 testes / 551 assertions — PASS**;
+- catálogo/seeders: **35 testes / 479 assertions — PASS**;
+- Copilot focado no ovo estruturado: **2 testes / 18 assertions — PASS**; regressões relacionadas de provider/evaluation/online evaluation também passaram;
+- endereços, Maps e lifecycle operacional, sem alteração na implementação concluída: **27 testes / 223 assertions — PASS** com limite temporário de 512 MB;
+- suíte backend integral da versão final: `php -d memory_limit=512M vendor/bin/phpunit` — **781 testes / 7.276 assertions — PASS**;
+- `composer run lint:check`: PASS;
+- `npm run lint`: PASS sem erros, mantendo apenas o warning preexistente em `UserAvatar.tsx`;
+- `npm run build`: PASS, mantendo apenas o aviso não bloqueante de chunk grande;
+- `git diff --check`: PASS após esta atualização documental;
+- nenhum `.env`, staging, produção ou servidor foi alterado; nenhum stage, commit, push, merge, tag ou deploy foi realizado.

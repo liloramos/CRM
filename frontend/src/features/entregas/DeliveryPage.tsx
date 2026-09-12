@@ -12,6 +12,7 @@ import {
   overrideDeliveryFee,
   recalculateDeliveryRoute,
   setDeliveryCoordinates,
+  selectOrderDeliveryAddress,
   updateDeliveryAddress,
   updateDeliverySettings,
   type UpdateDeliveryAddressPayload,
@@ -151,7 +152,7 @@ export function DeliveryPage({
       </aside>
       <section className="delivery-detail-panel" aria-live="polite">
         <SectionTitle eyebrow="Entrega selecionada" title={selected?.order_code ?? 'Selecione uma entrega'} />
-        {selected ? <><dl className="delivery-details"><div><dt>Cliente</dt><dd>{selected.recipient ?? 'Não informado'}</dd></div><div><dt>Endereço</dt><dd>{addressLabel(selected.address)}</dd></div><div><dt>Rota</dt><dd>{distanceLabel(selected.distance_meters)}{selected.duration_seconds ? ` · ${durationLabel(selected.duration_seconds)}` : ''}</dd></div><div><dt>Taxa calculada</dt><dd>{selected.calculated_fee_cents === null ? 'Aguardando cálculo' : money(selected.calculated_fee_cents)}</dd></div><div><dt>Taxa final</dt><dd>{money(selected.final_fee_cents)}</dd></div></dl><div className="delivery-actions"><Button disabled={saving || !selected.destination} icon="refresh" onClick={() => void recalculateSelected()}>Recalcular rota</Button><Button disabled={saving || selected.quote_id === null} icon="edit" variant="secondary" onClick={() => void adjustSelectedFee()}>Ajustar taxa</Button><ExternalRouteLinks task={selected} /></div><DeliveryAddressEditor canManage={canManageDelivery} key={selected.id} onSaved={async (feedback) => { await refresh(); setMessage(feedback) }} task={selected} /></> : <div className="delivery-detail-panel__empty"><strong>Escolha uma entrega na fila</strong><span>Os dados da rota, da taxa e do cliente aparecerão aqui para conferência.</span></div>}
+        {selected ? <><dl className="delivery-details"><div><dt>Cliente</dt><dd>{selected.recipient ?? 'Não informado'}</dd></div><div><dt>Endereço</dt><dd>{addressLabel(selected.address)}</dd></div><div><dt>Rota</dt><dd>{distanceLabel(selected.distance_meters)}{selected.duration_seconds ? ` · ${durationLabel(selected.duration_seconds)}` : ''}</dd></div><div><dt>Taxa calculada</dt><dd>{selected.calculated_fee_cents === null ? 'Aguardando cálculo' : money(selected.calculated_fee_cents)}</dd></div><div><dt>Taxa final</dt><dd>{money(selected.final_fee_cents)}</dd></div></dl><div className="delivery-actions"><Button disabled={saving || !selected.address} icon="refresh" onClick={() => void recalculateSelected()}>Recalcular rota</Button><Button disabled={saving || selected.quote_id === null} icon="edit" variant="secondary" onClick={() => void adjustSelectedFee()}>Ajustar taxa</Button><ExternalRouteLinks task={selected} /></div><DeliveryAddressEditor canManage={canManageDelivery} key={selected.id} onSaved={async (feedback) => { await refresh(); setMessage(feedback) }} task={selected} /></> : <div className="delivery-detail-panel__empty"><strong>Escolha uma entrega na fila</strong><span>Os dados da rota, da taxa e do cliente aparecerão aqui para conferência.</span></div>}
       </section>
       {selected?.status === 'quoted' ? <div className="delivery-actions"><Button disabled icon="check" title="Confirme a montagem do pedido na tela Pedidos antes da saída.">Aguardando montagem</Button></div> : null}
       {selected?.status === 'ready' ? <div className="delivery-actions"><Button disabled={saving || !canManageDelivery} icon="check" onClick={() => openFulfillmentAction('start-delivery')}>Saiu para entrega</Button></div> : null}
@@ -178,8 +179,9 @@ function DeliveryAddressEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<UpdateDeliveryAddressPayload>(() => addressForm(task))
+  const [savedAddressId, setSavedAddressId] = useState('')
 
-  function update(field: keyof UpdateDeliveryAddressPayload, value: string) {
+  function update(field: keyof UpdateDeliveryAddressPayload, value: string | boolean) {
     setForm((current) => ({ ...current, [field]: value }))
   }
 
@@ -198,6 +200,21 @@ function DeliveryAddressEditor({
     }
   }
 
+  async function applySavedAddress() {
+    if (!savedAddressId) return
+    setSaving(true)
+    setError(null)
+    try {
+      await selectOrderDeliveryAddress(task.id, savedAddressId)
+      setEditing(false)
+      await onSaved('Endereço salvo selecionado. Recalcule a rota antes do despacho.')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Não foi possível selecionar este endereço.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (!canManage) {
     return <p className="delivery-address-readonly">Endereço disponível somente para leitura neste perfil.</p>
   }
@@ -209,6 +226,7 @@ function DeliveryAddressEditor({
   return (
     <form className="delivery-address-editor" onSubmit={(event) => void submit(event)}>
       <div className="delivery-address-editor__heading"><div><strong>Endereço de entrega</strong><span>A correção fica salva antes da tentativa de geocodificação.</span></div><Button disabled={saving} onClick={() => setEditing(false)} size="sm" variant="ghost">Cancelar</Button></div>
+      {(task.saved_addresses?.length ?? 0) > 0 ? <div className="delivery-address-editor__saved"><label>Usar endereço salvo<select onChange={(event) => setSavedAddressId(event.target.value)} value={savedAddressId}><option value="">Selecione...</option>{(task.saved_addresses ?? []).map((address) => <option key={address.id} value={address.id}>{address.label}{address.is_default ? ' (padrão)' : ''} — {address.street}, {address.number}</option>)}</select></label><Button disabled={!savedAddressId || saving} onClick={() => void applySavedAddress()} size="sm" variant="secondary">Usar neste pedido</Button></div> : null}
       <div className="delivery-address-editor__fields">
         <label>CEP<input autoComplete="postal-code" onChange={(event) => update('postal_code', event.target.value)} value={form.postal_code ?? ''} /></label>
         <label className="delivery-address-editor__street">Rua<input required onChange={(event) => update('street', event.target.value)} value={form.street ?? ''} /></label>
@@ -218,6 +236,8 @@ function DeliveryAddressEditor({
         <label>Cidade<input required onChange={(event) => update('city', event.target.value)} value={form.city ?? ''} /></label>
         <label>Estado<input maxLength={2} required onChange={(event) => update('state', event.target.value.toUpperCase())} value={form.state ?? ''} /></label>
         <label className="delivery-address-editor__reference">Referência<input onChange={(event) => update('reference', event.target.value)} value={form.reference ?? ''} /></label>
+        {task.customer_id ? <label className="delivery-address-editor__save"><input checked={form.save_to_customer ?? false} onChange={(event) => update('save_to_customer', event.target.checked)} type="checkbox" /> Salvar este endereço no cadastro do cliente</label> : null}
+        {task.customer_id && form.save_to_customer ? <label>Nome do endereço<input onChange={(event) => update('label', event.target.value)} placeholder="Casa, Trabalho..." value={form.label ?? ''} /></label> : null}
       </div>
       {error ? <p className="delivery-form-error" role="alert">{error}</p> : null}
       <div className="delivery-address-editor__footer"><Button disabled={saving} icon="check" type="submit">{saving ? 'Salvando e recalculando...' : 'Salvar endereço e recalcular'}</Button></div>
@@ -235,6 +255,8 @@ function addressForm(task: DeliveryMapTask): UpdateDeliveryAddressPayload {
     city: task.address?.city ?? '',
     state: task.address?.state ?? '',
     reference: task.address?.reference ?? '',
+    label: task.address?.label ?? 'Casa',
+    save_to_customer: false,
   }
 }
 

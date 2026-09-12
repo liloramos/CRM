@@ -110,7 +110,7 @@ final class CopilotEvaluationScorer
             if ($key === 'meat_selection_pending') {
                 continue;
             }
-            if ($value === null || $value === '' || $value === [] || ($key === 'extra_beef' && (int) $value === 0)) {
+            if ($value === null || $value === '' || $value === [] || (in_array($key, ['extra_beef', 'extra_egg'], true) && (int) $value === 0)) {
                 continue;
             }
 

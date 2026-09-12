@@ -34,6 +34,7 @@ import type {
   OperationalNotification,
   ConversationQuickReply,
   ConversationQuickReplyCategory,
+  CustomerAddress,
   CustomerSummary,
   DailyMenuAdjustmentMutationResponse,
   DailyMenuAdjustmentAction,
@@ -103,6 +104,9 @@ type DraftOrderPayload = {
   kitchen_notes?: string
   pickup_person_name?: string
   seller_user_id?: string | null
+  delivery_address_id?: string | null
+  delivery_address?: Omit<CustomerAddressPayload, 'id' | 'is_default'> | null
+  save_delivery_address?: boolean
 }
 
 export type AddItemPayload = {
@@ -136,15 +140,26 @@ type CreateCustomerPayload = {
   email?: string
   notes?: string
   address?: CustomerAddressPayload
+  addresses?: CustomerAddressPayload[]
 }
 
 export type CustomerAddressPayload = {
+  id?: string
+  label?: string
+  recipient_name?: string
+  recipient_phone?: string
+  postal_code?: string
   street?: string
   number?: string
   complement?: string
   neighborhood?: string
   city?: string
+  state?: string
+  country_code?: string
   reference?: string
+  latitude?: number | null
+  longitude?: number | null
+  is_default?: boolean
 }
 
 export type UpdateCustomerPayload = {
@@ -153,6 +168,7 @@ export type UpdateCustomerPayload = {
   email?: string
   notes?: string
   address?: CustomerAddressPayload
+  addresses?: CustomerAddressPayload[]
 }
 
 type CancelOrderPayload = {
@@ -968,7 +984,32 @@ export async function geocodeDeliveryAddress(orderId: string, address: string) {
   })
 }
 
-export type UpdateDeliveryAddressPayload = Pick<DeliveryAddress, 'postal_code' | 'street' | 'number' | 'complement' | 'neighborhood' | 'city' | 'state' | 'reference'>
+export type UpdateDeliveryAddressPayload = Pick<DeliveryAddress, 'postal_code' | 'street' | 'number' | 'complement' | 'neighborhood' | 'city' | 'state' | 'reference'> & {
+  label?: string
+  save_to_customer?: boolean
+  is_default?: boolean
+}
+
+export async function selectOrderDeliveryAddress(orderId: string, addressId: string): Promise<DeliveryMapTask> {
+  const response = await requestJson<ApiEnvelope<DeliveryMapTask>>(`/api/app/orders/${orderId}/delivery/address/${addressId}/select`, { method: 'POST' })
+  return response.data
+}
+
+export async function createCustomerAddress(customerId: string, payload: CustomerAddressPayload): Promise<CustomerAddress> {
+  return (await requestJson<ApiEnvelope<CustomerAddress>>(`/api/app/customers/${customerId}/addresses`, { method: 'POST', body: JSON.stringify(payload) })).data
+}
+
+export async function updateCustomerAddress(customerId: string, addressId: string, payload: CustomerAddressPayload): Promise<CustomerAddress> {
+  return (await requestJson<ApiEnvelope<CustomerAddress>>(`/api/app/customers/${customerId}/addresses/${addressId}`, { method: 'PATCH', body: JSON.stringify(payload) })).data
+}
+
+export async function setDefaultCustomerAddress(customerId: string, addressId: string): Promise<CustomerAddress> {
+  return (await requestJson<ApiEnvelope<CustomerAddress>>(`/api/app/customers/${customerId}/addresses/${addressId}/default`, { method: 'POST' })).data
+}
+
+export async function deleteCustomerAddress(customerId: string, addressId: string): Promise<void> {
+  await requestJson<ApiEnvelope<{ deleted: boolean }>>(`/api/app/customers/${customerId}/addresses/${addressId}`, { method: 'DELETE' })
+}
 
 export async function updateDeliveryAddress(orderId: string, payload: UpdateDeliveryAddressPayload): Promise<{ task: DeliveryMapTask; warning: string | null }> {
   const response = await requestJson<ApiEnvelope<DeliveryMapTask> & { warning?: string | null }>(`/api/app/orders/${orderId}/delivery/address`, {

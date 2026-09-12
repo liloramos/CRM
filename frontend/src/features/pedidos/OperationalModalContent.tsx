@@ -30,6 +30,19 @@ import type { CopilotOrderProposal } from '../../services/crm.service'
 
 export type AutomationModeSelection = 'assisted' | 'manual'
 
+export type TemporaryDeliveryAddressState = {
+  label: string
+  postalCode: string
+  street: string
+  number: string
+  complement: string
+  neighborhood: string
+  city: string
+  state: string
+  reference: string
+  saveToCustomer: boolean
+}
+
 type PaymentMethodSelection = 'pix' | 'cash' | 'debit_card' | 'credit_card' | 'customer_credit' | 'other'
 
 type MeatModeSelection = 'traditional' | 'beef_only' | 'none'
@@ -54,6 +67,7 @@ type OperationalModalContentProps = {
   deleteConfirmation: string
   itemHasDifferentBeneficiary: boolean
   itemExtraBeef: boolean
+  itemEggQuantity: number
   isActionBusy: boolean
   isSearchingCustomers: boolean
   itemMeatMode: MeatModeSelection
@@ -65,6 +79,8 @@ type OperationalModalContentProps = {
   newCustomerPhone: string
   newOrderCustomerQuery: string
   newOrderCustomerResults: CustomerSummary[]
+  newOrderAddressId: string
+  newOrderTemporaryAddress: TemporaryDeliveryAddressState
   newOrderFulfillmentType: FulfillmentApiType
   newOrderNotes: string
   newOrderSellerId: string
@@ -77,6 +93,7 @@ type OperationalModalContentProps = {
   onDeleteConfirmationChange: (value: string) => void
   onItemHasDifferentBeneficiaryChange: (value: boolean) => void
   onItemExtraBeefChange: (value: boolean) => void
+  onItemEggQuantityChange: (value: number) => void
   onItemMeatModeChange: (value: MeatModeSelection) => void
   onItemNotesChange: (value: string) => void
   onItemQuantityChange: (value: number) => void
@@ -85,6 +102,8 @@ type OperationalModalContentProps = {
   onNewCustomerNameChange: (value: string) => void
   onNewCustomerPhoneChange: (value: string) => void
   onNewOrderCustomerQueryChange: (value: string) => void
+  onNewOrderAddressIdChange: (value: string) => void
+  onNewOrderTemporaryAddressChange: (value: TemporaryDeliveryAddressState) => void
   onNewOrderFulfillmentTypeChange: (value: FulfillmentApiType) => void
   onNewOrderNotesChange: (value: string) => void
   onNewOrderSellerIdChange: (value: string) => void
@@ -131,6 +150,7 @@ export function OperationalModalContent({
   deleteConfirmation,
   itemHasDifferentBeneficiary,
   itemExtraBeef,
+  itemEggQuantity,
   isActionBusy,
   isSearchingCustomers,
   itemMeatMode,
@@ -142,6 +162,8 @@ export function OperationalModalContent({
   newCustomerPhone,
   newOrderCustomerQuery,
   newOrderCustomerResults,
+  newOrderAddressId,
+  newOrderTemporaryAddress,
   newOrderFulfillmentType,
   newOrderNotes,
   newOrderSellerId,
@@ -154,6 +176,7 @@ export function OperationalModalContent({
   onDeleteConfirmationChange,
   onItemHasDifferentBeneficiaryChange,
   onItemExtraBeefChange,
+  onItemEggQuantityChange,
   onItemMeatModeChange,
   onItemNotesChange,
   onItemQuantityChange,
@@ -162,6 +185,8 @@ export function OperationalModalContent({
   onNewCustomerNameChange,
   onNewCustomerPhoneChange,
   onNewOrderCustomerQueryChange,
+  onNewOrderAddressIdChange,
+  onNewOrderTemporaryAddressChange,
   onNewOrderFulfillmentTypeChange,
   onNewOrderNotesChange,
   onNewOrderSellerIdChange,
@@ -275,6 +300,41 @@ export function OperationalModalContent({
           ]}
           value={newOrderFulfillmentType}
         />
+        {newOrderFulfillmentType === 'delivery' ? (
+          <fieldset className="new-order-delivery-address">
+            <legend>Endereço da entrega</legend>
+            {selectedNewOrderCustomer && (selectedNewOrderCustomer.addresses?.length ?? 0) > 0 ? (
+              <SelectField
+                label="Destino"
+                onChange={onNewOrderAddressIdChange}
+                options={[
+                  ...(selectedNewOrderCustomer.addresses ?? []).map((address) => ({
+                    value: address.id ?? '',
+                    label: `${address.label}${address.is_default ? ' (padrão)' : ''} — ${[address.street, address.number].filter(Boolean).join(', ')}`,
+                  })),
+                  { value: 'temporary', label: 'Usar outro endereço' },
+                ]}
+                value={newOrderAddressId || 'temporary'}
+              />
+            ) : <p className="muted-text">Informe um endereço temporário para este pedido.</p>}
+            {newOrderAddressId === 'temporary' || !selectedNewOrderCustomer?.addresses?.length ? (
+              <div className="form-grid form-grid--two">
+                <label>Rua<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, street: event.target.value })} value={newOrderTemporaryAddress.street} /></label>
+                <label>Número<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, number: event.target.value })} value={newOrderTemporaryAddress.number} /></label>
+                <label>Complemento<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, complement: event.target.value })} value={newOrderTemporaryAddress.complement} /></label>
+                <label>Bairro<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, neighborhood: event.target.value })} value={newOrderTemporaryAddress.neighborhood} /></label>
+                <label>Cidade<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, city: event.target.value })} value={newOrderTemporaryAddress.city} /></label>
+                <label>UF<input maxLength={2} onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, state: event.target.value })} value={newOrderTemporaryAddress.state} /></label>
+                <label>CEP<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, postalCode: event.target.value })} value={newOrderTemporaryAddress.postalCode} /></label>
+                <label>Referência<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, reference: event.target.value })} value={newOrderTemporaryAddress.reference} /></label>
+                {selectedNewOrderCustomer ? <label className="new-order-delivery-address__save"><input checked={newOrderTemporaryAddress.saveToCustomer} onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, saveToCustomer: event.target.checked })} type="checkbox" /> Salvar para próximos pedidos</label> : null}
+                {selectedNewOrderCustomer && newOrderTemporaryAddress.saveToCustomer ? <label>Nome do endereço<input onChange={(event) => onNewOrderTemporaryAddressChange({ ...newOrderTemporaryAddress, label: event.target.value })} placeholder="Casa, Trabalho..." value={newOrderTemporaryAddress.label} /></label> : null}
+              </div>
+            ) : (
+              <p className="new-order-delivery-address__selected">Este endereço será copiado para o pedido. Alterações futuras no cadastro não mudarão este pedido.</p>
+            )}
+          </fieldset>
+        ) : null}
         <SelectField
           label="Responsável / Atendente"
           onChange={onNewOrderSellerIdChange}
@@ -303,9 +363,11 @@ export function OperationalModalContent({
       ? { ...baseProduct, resolvedConfiguration: resolvedProductConfiguration ?? baseProduct.resolvedConfiguration }
       : undefined
     const structuredGroups = selectedProduct?.structuredGroups ?? []
-    const visibleStructuredGroups = selectedProduct?.meatConfiguration
-      ? structuredGroups.filter((group) => !['variacao_bife', 'bife_adicional'].includes(group.code))
-      : structuredGroups
+    const visibleStructuredGroups = structuredGroups.filter((group) => (
+      group.selection_mode !== 'addon'
+      && (!selectedProduct?.meatConfiguration || !['variacao_bife', 'bife_adicional'].includes(group.code))
+    ))
+    const eggAddition = selectedProduct?.additions?.find((addition) => addition.code === 'extra_egg') ?? null
     const legacyOptionGroups = groupOptions(selectedProduct?.options ?? [])
 
     return (
@@ -354,6 +416,18 @@ export function OperationalModalContent({
             onSelectedOptionsChange={onSelectedOptionsChange}
             selectedOptionIds={selectedOptionIds}
           />
+        ) : null}
+        {eggAddition?.enabled ? (
+          <label>
+            Ovos fritos adicionais (+ {formatCurrency(eggAddition.price_cents / 100)} cada)
+            <input
+              max={eggAddition.max_quantity ?? undefined}
+              min={0}
+              onChange={(event) => onItemEggQuantityChange(Math.max(0, Number(event.target.value)))}
+              type="number"
+              value={itemEggQuantity}
+            />
+          </label>
         ) : null}
         {selectedProduct?.resolvedConfiguration ? (
           <ResolvedDailyComponentPicker
@@ -420,6 +494,7 @@ export function OperationalModalContent({
         </label>
         {selectedProduct ? (
           <AddItemCompositionSummary
+            eggQuantity={itemEggQuantity}
             extraBeefSelected={itemExtraBeef}
             meatMode={itemMeatMode}
             product={selectedProduct}
@@ -1456,19 +1531,21 @@ function LegacyOptionPicker({
 }
 
 function AddItemCompositionSummary({
+  eggQuantity,
   extraBeefSelected,
   meatMode,
   product,
   quantity,
   selectedOptionIds,
 }: {
+  eggQuantity: number
   extraBeefSelected: boolean
   meatMode: MeatModeSelection
   product: Product
   quantity: number
   selectedOptionIds: string[]
 }) {
-  const summary = buildCompositionSummary(product, selectedOptionIds, meatMode, extraBeefSelected)
+  const summary = buildCompositionSummary(product, selectedOptionIds, meatMode, extraBeefSelected, eggQuantity)
   const unitPrice = summary.unitPrice
   const subtotal = unitPrice * Math.max(1, quantity)
 
@@ -1512,6 +1589,7 @@ function buildCompositionSummary(
   selectedOptionIds: string[],
   meatMode: MeatModeSelection,
   extraBeefSelected: boolean,
+  eggQuantity: number,
 ): { composition: string[]; removals: string[]; additions: string[]; unitPrice: number } {
   const selectedTokens = new Set(selectedOptionIds)
   const composition: string[] = []
@@ -1571,11 +1649,18 @@ function buildCompositionSummary(
     }
   }
 
+  const eggAddition = product.additions?.find((addition) => addition.code === 'extra_egg')
+  if (eggQuantity > 0 && eggAddition) {
+    additions.push(`${eggQuantity}x Ovo frito adicional - ${formatCurrency((eggAddition.price_cents * eggQuantity) / 100)}`)
+  }
+
   const beefOnlyPrice = product.meatConfiguration?.beef_only.final_price_cents
   const extraBeef = product.additions?.find((addition) => addition.code === 'extra_beef')
   const unitPrice = meatMode === 'beef_only' && beefOnlyPrice !== null && beefOnlyPrice !== undefined
     ? beefOnlyPrice / 100
-    : product.price + (extraBeefSelected && extraBeef ? extraBeef.price_cents / 100 : 0)
+    : product.price
+      + (extraBeefSelected && extraBeef ? extraBeef.price_cents / 100 : 0)
+      + (eggQuantity > 0 && eggAddition ? (eggAddition.price_cents * eggQuantity) / 100 : 0)
 
   return { composition, removals, additions, unitPrice }
 }

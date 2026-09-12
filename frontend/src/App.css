@@ -8733,6 +8733,117 @@ button.dashboard-chart__legend-row:active {
   padding: 12px;
 }
 
+.customer-address-book__heading,
+.customer-address-card__summary,
+.customer-address-card__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.customer-address-book__heading > div,
+.customer-address-card__summary > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.customer-address-book__heading small,
+.customer-address-card small,
+.customer-address-book__empty {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.customer-address-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.customer-address-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.customer-address-card__default {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--color-brand);
+  background: rgba(240, 159, 43, 0.12);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.customer-address-card__actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.customer-address-card__actions button {
+  border: 0;
+  color: var(--color-brand);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.customer-address-card__actions button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.customer-address-card__form {
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}
+
+.customer-address-card__wide {
+  grid-column: 1 / -1;
+}
+
+.new-order-delivery-address {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.new-order-delivery-address legend {
+  padding-inline: 5px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.new-order-delivery-address__selected {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.new-order-delivery-address .new-order-delivery-address__save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.new-order-delivery-address__save input {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--color-brand);
+}
+
 .form-grid {
   min-width: 0;
   display: grid;
@@ -8847,6 +8958,21 @@ button.dashboard-chart__legend-row:active {
 
   .form-grid--two {
     grid-template-columns: 1fr;
+  }
+
+  .customer-address-book__heading,
+  .customer-address-card__summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .customer-address-card__actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .customer-address-card__wide {
+    grid-column: auto;
   }
 }
 

@@ -58,6 +58,66 @@ class ConversationCopilotPipelineTest extends TestCase
         $this->assertContains('UNGROUNDED_REMOVAL', array_column($safe['warnings'], 'code'));
     }
 
+    public function test_explicit_n5_egg_language_becomes_a_grounded_paid_option_not_an_item_note(): void
+    {
+        $company = $this->seedRestaurant();
+
+        foreach ([
+            ['Uma N5 de porco com ovo', 1, 200],
+            ['Uma N5 de porco mais um ovo', 1, 200],
+            ['Uma N5 de porco com 2 ovos', 2, 400],
+        ] as [$message, $quantity, $total]) {
+            $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+                'intent' => 'ORDER_CREATE',
+                'draft_order' => ['items' => [[
+                    'product' => 'n5',
+                    'quantity' => 1,
+                    'selections' => ['meat' => 'porco', 'extra_egg' => 0],
+                    'removed_components' => [],
+                    'item_notes' => $message,
+                    'notes' => $message,
+                ]], 'fulfillment' => null],
+            ]));
+
+            $safe = app(ConversationCopilotPipeline::class)->analyze(
+                $company,
+                $this->context($company, $message),
+                $this->evaluationDate(),
+            )['safe'];
+            $item = data_get($safe, 'draft_order.items.0');
+            $egg = collect($item['validated_order_options'])->firstWhere('metadata.addition_code', 'extra_egg');
+
+            $this->assertSame($quantity, data_get($item, 'selections.extra_egg'));
+            $this->assertSame($quantity, $egg['quantity']);
+            $this->assertSame($total, $egg['total_price_cents']);
+            $this->assertStringNotContainsString('ovo', mb_strtolower($item['item_notes']));
+            $this->assertNotContains('UNGROUNDED_SELECTION', array_column($safe['warnings'], 'code'));
+        }
+    }
+
+    public function test_ungrounded_or_non_n5_egg_does_not_become_a_paid_option(): void
+    {
+        $company = $this->seedRestaurant();
+        $this->app->instance(ConversationCopilotProviderInterface::class, new FakeConversationCopilotProvider([
+            'intent' => 'ORDER_CREATE',
+            'draft_order' => ['items' => [[
+                'product' => 'n5', 'quantity' => 1,
+                'selections' => ['meat' => 'porco', 'extra_egg' => 1],
+                'removed_components' => [], 'notes' => '',
+            ]], 'fulfillment' => null],
+        ]));
+
+        $safe = app(ConversationCopilotPipeline::class)->analyze(
+            $company,
+            $this->context($company, 'Uma N5 de porco'),
+            $this->evaluationDate(),
+        )['safe'];
+
+        $this->assertSame(0, data_get($safe, 'draft_order.items.0.selections.extra_egg'));
+        $this->assertNotContains('extra_egg', collect(data_get($safe, 'draft_order.items.0.validated_order_options', []))->pluck('metadata.addition_code')->all());
+        $this->assertContains('UNGROUNDED_SELECTION', array_column($safe['warnings'], 'code'));
+    }
+
     public function test_new_order_does_not_inherit_a_removal_grounded_only_in_history(): void
     {
         $company = $this->seedRestaurant();

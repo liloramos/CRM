@@ -213,9 +213,15 @@ class DeliveryMapsPricingTest extends TestCase
         $this->assertSame(3400, $quote->maps_metadata['distance_meters']);
         $this->assertSame(720, $quote->maps_metadata['duration_seconds']);
         $this->assertSame(-23.54, $quote->maps_metadata['origin']['latitude']);
+
+        $address->forceFill(['street' => 'Rua alterada no cadastro', 'latitude' => -20.0, 'longitude' => -40.0])->save();
+        $recalculated = app(DeliveryRoutingService::class)->recalculate($order->refresh());
+        $this->assertSame(-23.55, $recalculated->maps_metadata['destination']['latitude']);
+        $this->assertSame(-46.63, $recalculated->maps_metadata['destination']['longitude']);
+        $this->assertSame('Rua de teste', $order->refresh()->delivery_address_snapshot['street']);
     }
 
-    public function test_whatsapp_location_is_saved_even_when_route_calculation_is_not_configured(): void
+    public function test_whatsapp_location_is_snapshotted_without_becoming_a_saved_customer_address(): void
     {
         $company = $this->company();
         $customer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Cliente de localização']);
@@ -243,10 +249,12 @@ class DeliveryMapsPricingTest extends TestCase
             rawPayload: ['location' => ['latitude' => -23.55, 'longitude' => -46.63]],
         ));
 
-        $this->assertSame('-23.5500000', CustomerAddress::query()->firstOrFail()->latitude);
-        $this->assertSame('-46.6300000', CustomerAddress::query()->firstOrFail()->longitude);
-        $this->assertSame('whatsapp_location', CustomerAddress::query()->firstOrFail()->metadata['location_source']);
-        $this->assertNotNull($order->refresh()->delivery_address_id);
+        $snapshot = $order->refresh()->delivery_address_snapshot;
+        $this->assertSame(-23.55, $snapshot['latitude']);
+        $this->assertSame(-46.63, $snapshot['longitude']);
+        $this->assertSame('whatsapp_location', $snapshot['location_source']);
+        $this->assertNull($order->delivery_address_id);
+        $this->assertSame(0, CustomerAddress::query()->count());
     }
 
     public function test_authorized_operator_can_save_structured_address_and_recalculate_route(): void
@@ -296,13 +304,9 @@ class DeliveryMapsPricingTest extends TestCase
             ->assertJsonPath('data.distance_meters', 2500)
             ->assertJsonPath('data.final_fee_cents', 750);
 
-        $this->assertDatabaseHas('customer_addresses', [
-            'company_id' => $company->id,
-            'street' => 'Rua Nova',
-            'number' => '45',
-            'postal_code' => '75000-000',
-            'latitude' => '-16.3200000',
-        ]);
+        $this->assertSame(0, CustomerAddress::query()->count());
+        $this->assertSame('Rua Nova', $order->refresh()->delivery_address_snapshot['street']);
+        $this->assertSame(-16.32, $order->delivery_address_snapshot['latitude']);
         $this->assertSame(Order::DELIVERY_STATUS_QUOTED, $order->refresh()->delivery_status);
     }
 
@@ -342,9 +346,81 @@ class DeliveryMapsPricingTest extends TestCase
             ->assertJsonPath('data.final_fee_cents', 0)
             ->assertJson(fn ($json) => $json->whereType('warning', 'string')->etc());
 
-        $this->assertDatabaseHas('customer_addresses', ['company_id' => $company->id, 'street' => 'Rua Nova', 'number' => '45']);
+        $this->assertSame(0, CustomerAddress::query()->count());
+        $this->assertSame('Rua Nova', $order->refresh()->delivery_address_snapshot['street']);
         $this->assertSame(Order::DELIVERY_STATUS_ADDRESS_PENDING, $order->refresh()->delivery_status);
         $this->assertNull($order->delivery_calculated_at);
+    }
+
+    public function test_manual_order_address_is_saved_to_customer_only_when_explicitly_requested(): void
+    {
+        [$company, $order, $user] = $this->manualAddressFixture();
+        $this->app->instance(DeliveryGeocodingProviderInterface::class, new class implements DeliveryGeocodingProviderInterface
+        {
+            public function name(): string
+            {
+                return 'fake';
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+
+            public function geocode(string $address): never
+            {
+                throw new DomainException('Sem geocoding no teste.');
+            }
+        });
+
+        $this->actingAs($user)->patchJson("/api/app/orders/{$order->id}/delivery/address", [
+            ...$this->manualAddressPayload(),
+            'label' => 'Trabalho',
+            'save_to_customer' => true,
+        ])->assertOk();
+
+        $this->assertDatabaseHas('customer_addresses', [
+            'company_id' => $company->id,
+            'customer_id' => $order->payer_customer_id,
+            'label' => 'Trabalho',
+            'street' => 'Rua Nova',
+            'is_default' => true,
+        ]);
+    }
+
+    public function test_operator_can_select_only_an_address_owned_by_the_order_customer(): void
+    {
+        [$company, $order, $user] = $this->manualAddressFixture();
+        $address = CustomerAddress::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $order->payer_customer_id,
+            'label' => 'Casa',
+            'street' => 'Rua Salva',
+            'number' => '10',
+            'neighborhood' => 'Centro',
+            'city' => 'Anápolis',
+            'state' => 'GO',
+            'is_default' => true,
+        ]);
+        $anotherCustomer = Customer::query()->create(['company_id' => $company->id, 'name' => 'Outro cliente']);
+        $foreignAddress = CustomerAddress::query()->create([
+            'company_id' => $company->id,
+            'customer_id' => $anotherCustomer->id,
+            'label' => 'Outro',
+            'street' => 'Rua Incorreta',
+        ]);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/delivery/address/{$address->id}/select")
+            ->assertOk()
+            ->assertJsonPath('data.address.street', 'Rua Salva')
+            ->assertJsonPath('data.destination', null);
+        $this->assertSame($address->id, $order->refresh()->delivery_address_id);
+        $this->assertSame('Rua Salva', $order->delivery_address_snapshot['street']);
+
+        $this->actingAs($user)
+            ->postJson("/api/app/orders/{$order->id}/delivery/address/{$foreignAddress->id}/select")
+            ->assertNotFound();
     }
 
     /** @return array{0: Company, 1: Order, 2: User} */

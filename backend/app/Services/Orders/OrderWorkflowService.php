@@ -15,6 +15,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 
 class OrderWorkflowService
 {
@@ -159,6 +160,7 @@ class OrderWorkflowService
         $this->assertEditable($order);
 
         return DB::transaction(function () use ($order, $product, $attributes): OrderItem {
+            $this->assertNotDuplicatedIncludedComponent($order, $product, $attributes);
             $quantity = max(1, (int) ($attributes['quantity'] ?? 1));
             $unitPriceCents = (int) ($attributes['unit_price_cents'] ?? ($product->base_price_cents ?? 0));
             $sortOrder = (int) ($attributes['sort_order'] ?? ($order->items()->max('sort_order') + 1));
@@ -225,6 +227,7 @@ class OrderWorkflowService
 
         return DB::transaction(function () use ($order, $item, $product, $attributes, $user): OrderItem {
             $lockedItem = OrderItem::query()->where('order_id', $order->id)->whereKey($item->id)->lockForUpdate()->firstOrFail();
+            $this->assertNotDuplicatedIncludedComponent($order, $product, $attributes, (int) $lockedItem->id);
             $before = $lockedItem->product_name.' - '.implode(', ', $lockedItem->options()->pluck('name')->all());
             $this->writeItem($lockedItem, $product, $attributes);
             $this->recalculateTotals($order);
@@ -530,6 +533,51 @@ class OrderWorkflowService
             $item->options()->create(['product_option_id' => $option?->id, 'name' => $optionRow['name'] ?? $option?->name ?? 'Opcao do item', 'option_type' => $optionRow['option_type'] ?? $option?->option_type ?? ProductOption::TYPE_ADDON, 'group_code' => $optionRow['group_code'] ?? $option?->group_code, 'quantity' => $quantityOption, 'price_delta_cents' => $delta, 'total_price_cents' => $total, 'metadata' => $optionRow['metadata'] ?? null]);
         }
         $item->forceFill(['options_total_cents' => $optionsTotal, 'total_price_cents' => ($unitPriceCents * $quantity) + $optionsTotal])->save();
+    }
+
+    /** @param array<string,mixed> $attributes */
+    private function assertNotDuplicatedIncludedComponent(Order $order, Product $product, array $attributes, ?int $exceptItemId = null): void
+    {
+        $unitPriceCents = (int) ($attributes['unit_price_cents'] ?? ($product->base_price_cents ?? 0));
+        $hasPaidOption = collect($attributes['options'] ?? [])->contains(function (array $option): bool {
+            return (int) ($option['total_price_cents'] ?? 0) > 0
+                || (int) ($option['price_delta_cents'] ?? 0) > 0
+                || data_get($option, 'metadata.addition_code') !== null;
+        });
+        if ($unitPriceCents !== 0 || $hasPaidOption) {
+            return;
+        }
+
+        $candidate = $this->componentIdentity((string) ($attributes['product_name'] ?? $product->name));
+        if ($candidate === '') {
+            return;
+        }
+
+        $items = OrderItem::query()
+            ->with('options')
+            ->where('order_id', $order->id)
+            ->when($exceptItemId !== null, fn ($query) => $query->where('id', '!=', $exceptItemId))
+            ->get();
+        $duplicatesIncludedComponent = $items->contains(function (OrderItem $item) use ($candidate): bool {
+            $included = collect(is_array($item->selected_components) ? $item->selected_components : [])
+                ->filter(fn (mixed $name): bool => is_string($name))
+                ->merge($item->options
+                    ->filter(fn ($option): bool => data_get($option->metadata, 'addition_code') === null
+                        && data_get($option->metadata, 'included_in_unit_price') === true
+                        && in_array(data_get($option->metadata, 'source'), ['daily_menu_component', 'product_group_component'], true))
+                    ->pluck('name'));
+
+            return $included->contains(fn (string $name): bool => $this->componentIdentity($name) === $candidate);
+        });
+
+        if ($duplicatesIncludedComponent) {
+            throw new DomainException('Componente ja incluido na marmita nao pode ser adicionado como item separado.');
+        }
+    }
+
+    private function componentIdentity(string $value): string
+    {
+        return Str::of($value)->ascii()->lower()->replaceMatches('/[^a-z0-9]+/', '')->toString();
     }
 
     public function assertCanAdvanceToPreparation(Order $order): void

@@ -6,11 +6,13 @@ use App\Http\Controllers\Api\Concerns\ResolvesOperationalCompany;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\DeliveryQuoteResource;
 use App\Http\Resources\DeliverySettingResource;
+use App\Models\CustomerAddress;
 use App\Models\DeliveryQuote;
 use App\Models\DeliverySetting;
 use App\Models\Order;
 use App\Services\Delivery\DeliveryPricingService;
 use App\Services\Delivery\DeliveryRoutingService;
+use App\Services\Delivery\DeliveryWorkflowService;
 use DomainException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -24,7 +26,7 @@ class DeliveryOperationsController extends Controller
     {
         $company = $this->resolveCompany($request);
         $orders = Order::query()
-            ->with(['deliveryAddress', 'deliveryQuotes' => fn ($query) => $query->latest('id')->limit(1)])
+            ->with(['deliveryAddress', 'payerCustomer.addresses', 'deliveryQuotes' => fn ($query) => $query->latest('id')->limit(1)])
             ->where('company_id', $company->id)
             ->where('fulfillment_type', Order::FULFILLMENT_DELIVERY)
             ->whereNotIn('status', [Order::STATUS_FINISHED, Order::STATUS_CANCELLED])
@@ -137,6 +139,9 @@ class DeliveryOperationsController extends Controller
             'city' => ['required', 'string', 'max:120'],
             'state' => ['required', 'string', 'size:2'],
             'reference' => ['nullable', 'string', 'max:255'],
+            'label' => ['nullable', 'string', 'max:80'],
+            'save_to_customer' => ['sometimes', 'boolean'],
+            'is_default' => ['sometimes', 'boolean'],
         ]);
 
         try {
@@ -151,6 +156,32 @@ class DeliveryOperationsController extends Controller
             'data' => $this->deliveryPayload($order),
             'warning' => $result['warning'],
         ]);
+    }
+
+    public function selectAddress(
+        Request $request,
+        Order $order,
+        CustomerAddress $address,
+        DeliveryWorkflowService $delivery,
+    ): JsonResponse {
+        $company = $this->resolveCompany($request);
+        $this->assertOrderBelongsToCompany($order, $company);
+        abort_unless(
+            (int) $address->company_id === (int) $company->id
+            && $order->payer_customer_id !== null
+            && (int) $address->customer_id === (int) $order->payer_customer_id,
+            404,
+        );
+
+        try {
+            $delivery->configureDeliveryAddress($order, $address);
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 422);
+        }
+
+        $order->refresh()->load(['deliveryAddress', 'deliveryQuotes' => fn ($query) => $query->latest('id')->limit(1)]);
+
+        return response()->json(['data' => $this->deliveryPayload($order)]);
     }
 
     public function recalculate(Request $request, Order $order, DeliveryRoutingService $routing): JsonResponse
@@ -193,6 +224,7 @@ class DeliveryOperationsController extends Controller
     /** @return array<string, mixed> */
     private function deliveryPayload(Order $order): array
     {
+        $order->loadMissing('payerCustomer.addresses');
         $quote = $order->delivery_calculated_at ? $order->deliveryQuotes->first() : null;
         $metadata = (array) ($quote?->maps_metadata ?? []);
 
@@ -202,6 +234,16 @@ class DeliveryOperationsController extends Controller
             'status' => $this->operationalDeliveryStatus($order),
             'order_status' => $order->status,
             'recipient' => $order->delivery_recipient_name ?? $order->customer_name_snapshot,
+            'customer_id' => $order->payer_customer_id !== null ? (string) $order->payer_customer_id : null,
+            'saved_addresses' => $order->payerCustomer?->addresses
+                ?->sortBy([['is_default', 'desc'], ['id', 'asc']])
+                ->map(fn (CustomerAddress $address): array => [
+                    ...$address->only(['label', 'recipient_name', 'recipient_phone', 'postal_code', 'street', 'number', 'complement', 'neighborhood', 'city', 'state', 'country_code', 'reference']),
+                    'id' => (string) $address->id,
+                    'latitude' => $address->latitude !== null ? (float) $address->latitude : null,
+                    'longitude' => $address->longitude !== null ? (float) $address->longitude : null,
+                    'is_default' => (bool) $address->is_default,
+                ])->values()->all() ?? [],
             'address' => $order->delivery_address_snapshot,
             'destination' => $metadata['destination'] ?? $this->addressCoordinates($order),
             'origin' => $metadata['origin'] ?? null,
@@ -227,10 +269,11 @@ class DeliveryOperationsController extends Controller
     /** @return array{latitude: float, longitude: float}|null */
     private function addressCoordinates(Order $order): ?array
     {
-        if ($order->deliveryAddress?->latitude === null || $order->deliveryAddress?->longitude === null) {
+        $snapshot = (array) $order->delivery_address_snapshot;
+        if (! is_numeric($snapshot['latitude'] ?? null) || ! is_numeric($snapshot['longitude'] ?? null)) {
             return null;
         }
 
-        return ['latitude' => (float) $order->deliveryAddress->latitude, 'longitude' => (float) $order->deliveryAddress->longitude];
+        return ['latitude' => (float) $snapshot['latitude'], 'longitude' => (float) $snapshot['longitude']];
     }
 }

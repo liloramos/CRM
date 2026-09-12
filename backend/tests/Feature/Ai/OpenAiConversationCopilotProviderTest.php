@@ -48,6 +48,8 @@ class OpenAiConversationCopilotProviderTest extends TestCase
         $selections = $schema['properties']['draft_order']['properties']['items']['items']['properties']['selections'];
         $this->assertFalse($selections['additionalProperties']);
         $this->assertArrayNotHasKey('admin_override', $selections['properties']);
+        $this->assertArrayHasKey('extra_egg', $selections['properties']);
+        $this->assertContains('extra_egg', $selections['required']);
         $interpretation = $schema['properties']['interpretation'];
         $this->assertFalse($interpretation['additionalProperties']);
         $this->assertContains('compare_products', $interpretation['properties']['intents']['items']['enum']);
@@ -95,6 +97,7 @@ class OpenAiConversationCopilotProviderTest extends TestCase
                 && str_contains($instruction, 'never mention AI, models, prompts, backend, tools, or automation')
                 && str_contains($instruction, 'ask a brief natural question instead of guessing')
                 && str_contains($instruction, 'persona never changes business rules or authority')
+                && str_contains($instruction, 'paid extra_egg quantity')
                 && str_contains($instruction, 'Never approve payment or perform mutations')
                 && str_contains($instruction, 'pending_order_state')
                 && str_contains($instruction, 'reply_messages')

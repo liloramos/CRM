@@ -32,6 +32,15 @@ O Copiloto online é opcional para o CRM subir. Quando escolhido, configure `AI_
 
 No build do frontend, mantenha `VITE_ENABLE_MOCK_FALLBACK` ausente ou `false`. Os mocks servem somente ao desenvolvimento.
 
+### Google Maps para entregas
+
+O mapa é opcional e a fila operacional continua funcionando sem ele. Para ativá-lo, use duas chaves distintas e restritas:
+
+- backend: `DELIVERY_MAPS_PROVIDER=google` e `DELIVERY_GOOGLE_SERVER_API_KEY` somente no ambiente seguro do servidor, limitada às APIs Geocoding e Routes e, quando possível, aos IPs do backend;
+- frontend/build: `VITE_DELIVERY_GOOGLE_BROWSER_API_KEY`, limitada por HTTP referrer aos domínios autorizados e às APIs Maps JavaScript e Places.
+
+Configure também a origem do restaurante na tela Entregas. Nunca copie a chave server para o build do frontend. Em desenvolvimento e testes, mantenha `DELIVERY_MAPS_PROVIDER=fake`; os providers fake não fazem chamadas externas.
+
 ## Instalação e publicação
 
 1. Faça backup do PostgreSQL e do diretório `backend/storage` antes da atualização.

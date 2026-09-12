@@ -133,6 +133,12 @@ class CopilotOrderItemSelectionAdapter
         $meatIds = array_map(fn (MenuComponent $component): int => (int) $component->id, $resolvedMeats);
         $extraBeef = $this->extraBeefQuantity($product, $selections, $warnings);
         $selections['extra_beef'] = $extraBeef;
+        $extraEgg = $this->extraEggQuantity($product, $selections, $customerMessages, $warnings);
+        if ($product->menu_rule_code === 'n5_casa') {
+            $selections['extra_egg'] = $extraEgg;
+        } else {
+            unset($selections['extra_egg']);
+        }
         $safeSelections = $this->safeMeatSelections($product, $selections, $meatMode, $resolvedMeats);
         if ($resolvedMeats === [] && collect($warnings)->contains(fn (array $warning): bool => in_array($warning['code'] ?? null, ['AMBIGUOUS_MEAT', 'UNRESOLVED_MEAT'], true))) {
             $safeSelections['meat_selection_pending'] = true;
@@ -166,6 +172,7 @@ class CopilotOrderItemSelectionAdapter
                     'removed_group_codes' => array_values(array_unique($removedGroupCodes)),
                     'daily_component_ids' => array_values(array_unique(array_map('intval', $item['daily_component_ids'] ?? []))),
                 ],
+                $extraEgg > 0 ? [['code' => 'extra_egg', 'quantity' => $extraEgg]] : [],
             );
         } catch (DomainException|ValidationException $exception) {
             $warnings[] = [
@@ -179,6 +186,7 @@ class CopilotOrderItemSelectionAdapter
         return [
             'item' => [
                 ...$item,
+                'item_notes' => $this->withoutStructuredEggNote((string) ($item['item_notes'] ?? ''), $extraEgg),
                 'selections' => $safeSelections,
                 'valid' => $warnings === [],
                 'removed_components' => $validated['removed_ingredients'] ?? [],
@@ -401,7 +409,7 @@ class CopilotOrderItemSelectionAdapter
         $values = [];
         foreach ($selections as $key => $selection) {
             $isTraditionalMarmita = in_array($product->menu_rule_code, ['n8_tradicional', 'n9_tradicional'], true);
-            if (in_array((string) $key, ['meat_mode', 'beef_variant', 'extra_beef'], true)
+            if (in_array((string) $key, ['meat_mode', 'beef_variant', 'extra_beef', 'extra_egg'], true)
                 || ($isTraditionalMarmita && in_array((string) $key, ['meat', 'meats', 'salada'], true))) {
                 continue;
             }
@@ -617,6 +625,54 @@ class CopilotOrderItemSelectionAdapter
         }
 
         return (int) $value;
+    }
+
+    /** @param list<array<string,mixed>> $customerMessages @param list<array<string,mixed>> $warnings */
+    private function extraEggQuantity(Product $product, array $selections, array $customerMessages, array &$warnings): int
+    {
+        $text = Str::of($this->customerText($customerMessages))->ascii()->lower()->squish()->toString();
+        $quantity = 0;
+        if (preg_match('/\b(?:com|mais)\s+(\d+)\s+ovos?\b/u', $text, $match) === 1) {
+            $quantity = (int) $match[1];
+        } elseif (preg_match('/\b(?:com\s+|mais\s+)?(?:um|uma)?\s*ovo\b/u', $text) === 1) {
+            $quantity = 1;
+        }
+
+        $providerQuantity = $selections['extra_egg'] ?? 0;
+        if ($quantity === 0 && is_numeric($providerQuantity) && (int) $providerQuantity > 0) {
+            $warnings[] = [
+                'code' => 'UNGROUNDED_SELECTION',
+                'message' => 'O ovo adicional sugerido nao possui evidencia no pedido do cliente.',
+            ];
+
+            return 0;
+        }
+
+        if ($quantity === 0) {
+            return 0;
+        }
+
+        if ($product->menu_rule_code !== 'n5_casa' || $quantity > 10) {
+            $warnings[] = [
+                'code' => 'INVALID_EXTRA_EGG',
+                'message' => 'Ovo adicional nao esta configurado para este produto ou quantidade.',
+            ];
+
+            return 0;
+        }
+
+        return $quantity;
+    }
+
+    private function withoutStructuredEggNote(string $note, int $extraEgg): string
+    {
+        if ($extraEgg <= 0 || trim($note) === '') {
+            return $note;
+        }
+
+        $clean = preg_replace('/\b(?:com|mais)\s+(?:(?:\d+|um|uma)\s+)?ovos?\b[,.]?/iu', '', $note) ?? $note;
+
+        return trim(preg_replace('/\s{2,}/', ' ', $clean) ?? $clean, " \t\n\r\0\x0B,.;");
     }
 
     private function meatMode(array $selections): string

@@ -77,6 +77,30 @@ class SolRestaurantProductRuleSeeder extends Seeder
         ]);
 
         $this->syncComponentLinks($meat, ['almondega', 'porco', 'frango-ao-molho']);
+
+        $additions = $this->group($company, $product, [
+            'code' => 'adicionais',
+            'label' => 'Adicionais',
+            'selection_mode' => ProductSelectionMode::Addon,
+            'selection_actor' => ProductSelectionActor::Customer,
+            'is_required' => false,
+            'min_choices' => 0,
+            'max_choices' => 1,
+            'min_quantity' => 0,
+            'max_quantity' => null,
+            'same_component_only' => true,
+            'included_in_base_price' => false,
+            'display_order' => 40,
+        ]);
+
+        $this->syncComponentLinks($additions, [
+            'ovo-frito' => [
+                'price_delta_cents' => 200,
+                'final_price_cents' => null,
+                'requires_confirmation' => false,
+                'is_active' => true,
+            ],
+        ]);
     }
 
     private function seedN8CasaRules(Company $company): void

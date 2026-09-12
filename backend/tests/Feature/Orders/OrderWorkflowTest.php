@@ -338,6 +338,193 @@ class OrderWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_n5_egg_addition_is_structured_priced_and_recalculated_on_edit(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $product = Product::query()->where('company_id', $company->id)->where('slug', 'n5-casa')->firstOrFail();
+        $orders = app(OrderWorkflowService::class);
+        $basePayload = [
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'structured_options' => $this->componentChoiceRows($product, [
+                'salada_casa' => ['beterraba'],
+                'carne' => ['porco'],
+            ]),
+        ];
+
+        $plainOrder = $orders->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+        $plain = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$plainOrder->id}/items", $basePayload)
+            ->assertOk()
+            ->json('data.items.0');
+        $this->assertSame(8, $plain['unitPrice']);
+        $this->assertSame(8, $plain['totalPrice']);
+        $this->assertSame([], $plain['additions']);
+
+        $oneEggOrder = $orders->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+        $oneEgg = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$oneEggOrder->id}/items", [
+                ...$basePayload,
+                'additions' => [['code' => 'extra_egg', 'quantity' => 1]],
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+        $this->assertSame(10, $oneEgg['totalPrice']);
+        $this->assertContains('Ovo frito adicional - R$ 2,00', $oneEgg['additions']);
+
+        $twoEggOrder = $orders->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+        $twoEgg = $this->actingAs($user)
+            ->postJson("/api/app/orders/{$twoEggOrder->id}/items", [
+                ...$basePayload,
+                'additions' => [['code' => 'extra_egg', 'quantity' => 2]],
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+        $this->assertSame(12, $twoEgg['totalPrice']);
+        $this->assertContains('2x Ovo frito adicional - R$ 4,00', $twoEgg['additions']);
+        $this->assertSame([['code' => 'extra_egg', 'quantity' => 2]], data_get(
+            $twoEggOrder->refresh()->items()->firstOrFail()->preferences,
+            'composition_snapshot.additions',
+        ));
+
+        $itemId = $twoEgg['id'];
+        $updated = $this->actingAs($user)
+            ->patchJson("/api/app/orders/{$twoEggOrder->id}/items/{$itemId}", [
+                ...$basePayload,
+                'quantity' => 2,
+                'additions' => [['code' => 'extra_egg', 'quantity' => 2]],
+            ])
+            ->assertOk()
+            ->json('data.items.0');
+        $this->assertSame(24, $updated['totalPrice']);
+        $this->assertSame(2400, $twoEggOrder->refresh()->total_cents);
+        $this->assertDatabaseHas('order_item_options', [
+            'order_item_id' => $itemId,
+            'name' => 'Ovo frito adicional',
+            'group_code' => 'adicionais',
+            'quantity' => 2,
+            'price_delta_cents' => 200,
+            'total_price_cents' => 800,
+        ]);
+    }
+
+    public function test_n8_and_n9_do_not_accept_n5_egg_addition(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $porco = $this->menuComponentId($company, 'porco');
+        $frango = $this->menuComponentId($company, 'frango-ao-molho');
+
+        foreach (['n8-tradicional', 'n9-tradicional'] as $slug) {
+            $product = Product::query()->where('company_id', $company->id)->where('slug', $slug)->firstOrFail();
+            $order = app(OrderWorkflowService::class)->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+
+            $this->actingAs($user)
+                ->postJson("/api/app/orders/{$order->id}/items", [
+                    'product_id' => $product->id,
+                    'quantity' => 1,
+                    'meat_mode' => 'traditional',
+                    'traditional_meat_component_ids' => [$porco, $frango],
+                    'structured_options' => [],
+                    'additions' => [['code' => 'extra_egg', 'quantity' => 1]],
+                ])
+                ->assertStatus(422)
+                ->assertJsonPath('message', 'Uma das adições não está configurada para este produto.');
+        }
+    }
+
+    public function test_workflow_rejects_only_zero_value_items_that_duplicate_an_included_n8_component(): void
+    {
+        $this->seed(SolRestaurantStructuredMenuSeeder::class);
+
+        $company = Company::query()->where('slug', 'restaurante-sol')->firstOrFail();
+        $user = User::factory()->create(['company_id' => $company->id]);
+        $n8 = Product::query()->where('company_id', $company->id)->where('slug', 'n8-tradicional')->firstOrFail();
+        $order = app(OrderWorkflowService::class)->createDraft($company, ['order_date' => CarbonImmutable::create(2026, 7, 6)]);
+        $feijao = $this->menuComponentId($company, 'feijao-tradicional');
+        $arroz = $this->menuComponentId($company, 'arroz-branco');
+        $porco = $this->menuComponentId($company, 'porco');
+
+        $this->actingAs($user)->postJson("/api/app/orders/{$order->id}/items", [
+            'product_id' => $n8->id,
+            'quantity' => 1,
+            'daily_component_ids' => [$feijao, $arroz],
+            'meat_mode' => 'traditional',
+            'traditional_meat_component_ids' => [$porco],
+            'structured_options' => [],
+        ])->assertOk();
+        $this->assertSame(1, $order->refresh()->items()->count());
+
+        $product = function (string $name, string $slug, int $price = 0) use ($company, $n8): Product {
+            return Product::query()->create([
+                'company_id' => $company->id,
+                'category_id' => $n8->category_id,
+                'name' => $name,
+                'slug' => $slug,
+                'product_type' => Product::TYPE_PRODUCT,
+                'menu_rule_code' => str_replace('-', '_', $slug),
+                'base_price_cents' => $price,
+                'currency' => 'BRL',
+                'is_active' => true,
+                'is_available_by_default' => true,
+                'allows_item_notes' => true,
+                'display_order' => 900,
+            ]);
+        };
+
+        foreach ([
+            ['Feijão tradicional', 'legacy-feijao'],
+            ['Arroz branco', 'legacy-arroz'],
+        ] as [$name, $slug]) {
+            $duplicate = $product($name, $slug);
+            $this->actingAs($user)
+                ->postJson("/api/app/orders/{$order->id}/items", [
+                    'product_id' => $duplicate->id,
+                    'quantity' => 1,
+                ])
+                ->assertStatus(422)
+                ->assertJsonPath('message', 'Componente ja incluido na marmita nao pode ser adicionado como item separado.');
+            $this->assertDatabaseMissing('order_items', [
+                'order_id' => $order->id,
+                'product_id' => $duplicate->id,
+            ]);
+        }
+
+        $courtesy = $product('Cortesia real', 'cortesia-real');
+        $unrelatedComponent = $product('Couve refogada', 'couve-refogada-gratis');
+        $paidIndependent = $product('Feijão tradicional', 'feijao-tradicional-pago', 200);
+        foreach ([$courtesy, $unrelatedComponent, $paidIndependent] as $allowed) {
+            $this->actingAs($user)
+                ->postJson("/api/app/orders/{$order->id}/items", [
+                    'product_id' => $allowed->id,
+                    'quantity' => 1,
+                ])
+                ->assertOk();
+        }
+        $paidAdditionCarrier = $product('Feijão tradicional', 'feijao-com-adicional-pago');
+        app(OrderWorkflowService::class)->addItem($order, $paidAdditionCarrier, [
+            'options' => [[
+                'name' => 'Adicional pago',
+                'option_type' => ProductOption::TYPE_ADDON,
+                'group_code' => 'adicionais',
+                'quantity' => 1,
+                'price_delta_cents' => 200,
+                'metadata' => ['addition_code' => 'paid_test'],
+            ]],
+        ]);
+
+        $this->assertSame(5, $order->refresh()->items()->count());
+        $this->assertDatabaseHas('order_items', ['order_id' => $order->id, 'product_id' => $courtesy->id, 'total_price_cents' => 0]);
+        $this->assertDatabaseHas('order_items', ['order_id' => $order->id, 'product_id' => $unrelatedComponent->id, 'total_price_cents' => 0]);
+        $this->assertDatabaseHas('order_items', ['order_id' => $order->id, 'product_id' => $paidIndependent->id, 'total_price_cents' => 200]);
+        $this->assertDatabaseHas('order_items', ['order_id' => $order->id, 'product_id' => $paidAdditionCarrier->id, 'options_total_cents' => 200]);
+    }
+
     public function test_structured_order_item_persists_removals_from_default_house_composition(): void
     {
         $this->seed(SolRestaurantStructuredMenuSeeder::class);

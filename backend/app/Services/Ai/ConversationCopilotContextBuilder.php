@@ -35,7 +35,7 @@ final class ConversationCopilotContextBuilder
     /** @return array<string,mixed> */
     public function forConversation(Conversation $conversation, ?Message $triggerInbound = null): array
     {
-        $conversation->loadMissing(['company.setting', 'company.deliverySetting', 'customer', 'activeOrder']);
+        $conversation->loadMissing(['company.setting', 'company.deliverySetting', 'customer.addresses', 'activeOrder']);
         $window = max(3, min(30, (int) config('chatbotcrm.ai.copilot.message_window', 12)));
         $activeOrder = $this->activeOrders->forConversation($conversation);
         $activeOrder?->loadMissing(['items.product', 'items.options']);
@@ -73,6 +73,15 @@ final class ConversationCopilotContextBuilder
             $conversation->customer === null ? null : [
                 'id' => (int) $conversation->customer->id,
                 'name' => (string) $conversation->customer->name,
+                'saved_addresses' => $conversation->customer->addresses
+                    ->sortBy([['is_default', 'desc'], ['id', 'asc']])
+                    ->map(fn ($address): array => [
+                        'id' => (int) $address->id,
+                        'label' => (string) ($address->label ?: 'Endereço'),
+                        'is_default' => (bool) $address->is_default,
+                        'address' => collect([$address->street, $address->number, $address->neighborhood, $address->city])->filter()->implode(', '),
+                    ])->values()->all(),
+                'address_selection_policy' => 'Sugira o padrão quando houver; nunca confirme sem escolha explícita. Com múltiplos endereços, pergunte qual usar.',
             ],
         );
         $trigger = $triggerInbound instanceof Message
